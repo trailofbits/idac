@@ -905,8 +905,8 @@ def test_batch_resolves_preview_wrapped_relative_paths(tmp_path: Path, capsys, m
     )
     captured = {}
 
-    def fake_preview_execute(parsed, *, root_parser):
-        captured["decl_file"] = parsed.decl_file
+    def fake_preview_run(invocation):
+        captured["decl_file"] = invocation.args.decl_file
         return CommandResult(
             render_op="proto_set",
             value={
@@ -918,7 +918,7 @@ def test_batch_resolves_preview_wrapped_relative_paths(tmp_path: Path, capsys, m
             },
         )
 
-    monkeypatch.setattr("idac.cli2.preview.execute_parsed", fake_preview_execute)
+    monkeypatch.setattr("idac.cli2.preview.run_invocation", fake_preview_run)
     monkeypatch.chdir(cwd)
 
     exit_code = main(["batch", str(batch_path)])
@@ -974,8 +974,8 @@ def test_batch_reports_renderer_failures_with_structured_fallback(tmp_path: Path
     batch_path.write_text("function metadata main -c db:/tmp/demo.i64\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        "idac.cli2.batch.execute_parsed",
-        lambda parsed, *, root_parser: CommandResult(
+        "idac.cli2.batch.run_invocation",
+        lambda invocation: CommandResult(
             render_op="function_show",
             value={"address": "0x1000", "name": "main"},
             exit_code=1,

@@ -16,14 +16,6 @@ class SegmentListRequest:
     ignore_case: bool
 
 
-@dataclass(frozen=True)
-class SegmentListEntry:
-    name: str
-    start: str
-    end: str
-    size: int
-
-
 def _parse_segment_list(params: dict[str, object]) -> SegmentListRequest:
     pattern, glob, regex, ignore_case = pattern_from_params(params)
     if regex and pattern:
@@ -37,8 +29,8 @@ def _parse_segment_list(params: dict[str, object]) -> SegmentListRequest:
 def _segment_list(
     context: OperationContext,
     request: SegmentListRequest,
-) -> tuple[SegmentListEntry, ...]:
-    rows: list[SegmentListEntry] = []
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
     for segment in context.runtime.iter_segments():
         if request.pattern and not text_matches(
             segment.name,
@@ -49,14 +41,14 @@ def _segment_list(
         ):
             continue
         rows.append(
-            SegmentListEntry(
-                name=segment.name,
-                start=hex(segment.start_ea),
-                end=hex(segment.end_ea),
-                size=segment.end_ea - segment.start_ea,
-            )
+            {
+                "name": segment.name,
+                "start": hex(segment.start_ea),
+                "end": hex(segment.end_ea),
+                "size": segment.end_ea - segment.start_ea,
+            }
         )
-    return tuple(rows)
+    return rows
 
 
 def segment_operations() -> tuple[OperationSpec[object, object], ...]:
@@ -70,7 +62,6 @@ def segment_operations() -> tuple[OperationSpec[object, object], ...]:
 
 
 __all__ = [
-    "SegmentListEntry",
     "SegmentListRequest",
     "segment_operations",
 ]

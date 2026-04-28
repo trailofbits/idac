@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import re
-from dataclasses import dataclass
 from typing import Any, Literal
 
 from ...ops.helpers.params import parse_aliases, parse_int_text
@@ -10,6 +9,7 @@ from ...transport import send_request
 from ...transport.schema import RequestEnvelope
 from ..argparse_utils import read_decl_or_type_text, read_decl_text_if_present
 from ..errors import CliUserError
+from ..invocation import Invocation
 from ..result import CommandResult
 
 _INFERRED_LOCAL_ID_RE = re.compile(
@@ -17,59 +17,6 @@ _INFERRED_LOCAL_ID_RE = re.compile(
     r"^(?:stack\([^)]*\)|reg\([^)]*\)|regpair\([^)]*\)|unknown)@(?:0x[0-9a-fA-F]+|\d+)$",
     re.IGNORECASE,
 )
-
-
-@dataclass(frozen=True)
-class LocalSelector:
-    param_name: Literal["old_name", "local_name", "local_id", "index"]
-    value: str | int
-
-    def apply(self, params: dict[str, Any]) -> None:
-        params[self.param_name] = self.value
-
-
-@dataclass(frozen=True)
-class LocalRenameRequest:
-    identifier: str
-    selector: LocalSelector
-    new_name: str
-
-    def to_params(self) -> dict[str, Any]:
-        params: dict[str, Any] = {"identifier": self.identifier, "new_name": self.new_name}
-        self.selector.apply(params)
-        return params
-
-
-@dataclass(frozen=True)
-class LocalRetypeRequest:
-    identifier: str
-    selector: LocalSelector
-    decl: str
-
-    def to_params(self) -> dict[str, Any]:
-        params: dict[str, Any] = {"identifier": self.identifier, "decl": self.decl}
-        self.selector.apply(params)
-        return params
-
-
-@dataclass(frozen=True)
-class LocalUpdateRequest:
-    identifier: str
-    selector: LocalSelector
-    new_name: str | None
-    decl: str | None
-
-    def to_params(self) -> dict[str, Any]:
-        params: dict[str, Any] = {"identifier": self.identifier}
-        self.selector.apply(params)
-        if self.new_name is not None:
-            params["new_name"] = self.new_name
-        if self.decl is not None:
-            params["decl"] = self.decl
-        return params
-
-    def has_changes(self) -> bool:
-        return self.new_name is not None or self.decl is not None
 
 
 def command_result(
@@ -97,9 +44,36 @@ def send_op(
     render_op: str | None = None,
     preview: bool | None = None,
 ) -> CommandResult:
-    payload = dict(params)
+    invocation = getattr(args, "_invocation", None)
+    if isinstance(invocation, Invocation):
+        return send_invocation_op(invocation, op=op, params=params, render_op=render_op, preview=preview)
+
     preview_requested = bool(args._preview_wrapper and args._mutating_command) if preview is None else preview
-    if preview_requested:
+    return _send_backend_op(args, op=op, params=params, render_op=render_op, preview=preview_requested)
+
+
+def send_invocation_op(
+    invocation: Invocation,
+    *,
+    op: str,
+    params: dict[str, Any],
+    render_op: str | None = None,
+    preview: bool | None = None,
+) -> CommandResult:
+    preview_requested = (invocation.preview and invocation.spec.mutating) if preview is None else preview
+    return _send_backend_op(invocation.args, op=op, params=params, render_op=render_op, preview=preview_requested)
+
+
+def _send_backend_op(
+    args: argparse.Namespace,
+    *,
+    op: str,
+    params: dict[str, Any],
+    render_op: str | None,
+    preview: bool,
+) -> CommandResult:
+    payload = dict(params)
+    if preview:
         payload["preview"] = True
     response = send_request(
         RequestEnvelope(
@@ -148,68 +122,60 @@ def _infer_local_selector(token: str) -> tuple[str, Any]:
     return "old_name", text
 
 
-def _local_selector_from_args(
+def local_selector_params(
     args: argparse.Namespace,
     *,
     name_param: Literal["old_name", "local_name"],
     require_selector: bool,
-) -> LocalSelector:
+) -> dict[str, Any]:
     if args.local_id and args.index is not None:
         raise CliUserError("--local-id and --index are mutually exclusive")
     selector_text = str(args.selector or "").strip()
     if (args.local_id or args.index is not None) and selector_text:
         raise CliUserError("do not combine a positional selector with --local-id or --index")
     if args.local_id:
-        return LocalSelector("local_id", str(args.local_id))
+        return {"local_id": str(args.local_id)}
     if args.index is not None:
-        return LocalSelector("index", _parse_cli_int_text(args.index, label="local index", minimum=0))
+        return {"index": _parse_cli_int_text(args.index, label="local index", minimum=0)}
     if not selector_text:
         if require_selector:
             raise CliUserError("local selector is required via selector, --local-id, or --index")
         raise CliUserError("missing local selector")
     selector_kind, selector_value = _infer_local_selector(selector_text)
     if selector_kind == "old_name":
-        return LocalSelector(name_param, str(selector_value))
+        return {name_param: str(selector_value)}
     if selector_kind == "local_id":
-        return LocalSelector("local_id", str(selector_value))
-    return LocalSelector("index", int(selector_value))
-
-
-def _local_rename_request(args: argparse.Namespace) -> LocalRenameRequest:
-    return LocalRenameRequest(
-        identifier=str(args.function),
-        selector=_local_selector_from_args(args, name_param="old_name", require_selector=True),
-        new_name=str(args.new_name),
-    )
-
-
-def _local_retype_request(args: argparse.Namespace) -> LocalRetypeRequest:
-    return LocalRetypeRequest(
-        identifier=str(args.function),
-        selector=_local_selector_from_args(args, name_param="local_name", require_selector=True),
-        decl=read_decl_or_type_text(args),
-    )
-
-
-def _local_update_request(args: argparse.Namespace) -> LocalUpdateRequest:
-    request = LocalUpdateRequest(
-        identifier=str(args.function),
-        selector=_local_selector_from_args(args, name_param="local_name", require_selector=True),
-        new_name=str(args.rename or "").strip() or None,
-        decl=read_decl_text_if_present(args),
-    )
-    if not request.has_changes():
-        raise CliUserError("at least one of --rename or declaration input is required")
-    return request
+        return {"local_id": str(selector_value)}
+    return {"index": int(selector_value)}
 
 
 def local_rename_params(args: argparse.Namespace) -> dict[str, Any]:
-    return _local_rename_request(args).to_params()
+    return {
+        "identifier": str(args.function),
+        "new_name": str(args.new_name),
+        **local_selector_params(args, name_param="old_name", require_selector=True),
+    }
 
 
 def local_retype_params(args: argparse.Namespace) -> dict[str, Any]:
-    return _local_retype_request(args).to_params()
+    return {
+        "identifier": str(args.function),
+        "decl": read_decl_or_type_text(args),
+        **local_selector_params(args, name_param="local_name", require_selector=True),
+    }
 
 
 def local_update_params(args: argparse.Namespace) -> dict[str, Any]:
-    return _local_update_request(args).to_params()
+    new_name = str(args.rename or "").strip() or None
+    decl = read_decl_text_if_present(args)
+    if new_name is None and decl is None:
+        raise CliUserError("at least one of --rename or declaration input is required")
+    params: dict[str, Any] = {
+        "identifier": str(args.function),
+        **local_selector_params(args, name_param="local_name", require_selector=True),
+    }
+    if new_name is not None:
+        params["new_name"] = new_name
+    if decl is not None:
+        params["decl"] = decl
+    return params

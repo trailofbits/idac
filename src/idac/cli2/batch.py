@@ -12,10 +12,8 @@ from typing import Any
 from ..output import write_output_result
 from ..transport import BackendError
 from .argparse_utils import add_command, add_context_options, bind_root_handler
-from .context import merge_parent_context
 from .errors import CliUserError
-from .execute import execute_parsed
-from .path_resolution import resolve_relative_paths
+from .invocation import Invocation, parse_invocation, run_invocation
 from .renderers import TEXT_RENDERERS
 from .result import CommandResult
 from .serialize import emit_result, json_or_jsonl_from_path
@@ -91,24 +89,37 @@ def _render_child_failure(result: CommandResult) -> str | None:
     return fallback_text or None
 
 
-def _parse_batch_args(root_parser: argparse.ArgumentParser, argv: list[str]) -> argparse.Namespace:
+def _parse_batch_invocation(
+    root_parser: argparse.ArgumentParser,
+    argv: list[str],
+    *,
+    parent: Invocation | argparse.Namespace,
+    base_dir: Path,
+) -> Invocation:
     stdout_buffer = io.StringIO()
     stderr_buffer = io.StringIO()
     try:
         with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stderr_buffer):
-            return root_parser.parse_args(argv)
+            return parse_invocation(
+                root_parser,
+                argv,
+                parent=parent,
+                base_dir=base_dir,
+                batch_mode=True,
+                prepare=False,
+            )
     except SystemExit as exc:
         message = _captured_cli_message(stdout_buffer.getvalue(), stderr_buffer.getvalue(), fallback="parse failed")
         exit_code = int(exc.code) if isinstance(exc.code, int) else 1
         raise BatchParseError(message, exit_code=exit_code) from exc
 
 
-def _execute_batch_args(parsed: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> CommandResult:
+def _execute_batch_invocation(invocation: Invocation) -> CommandResult:
     stdout_buffer = io.StringIO()
     stderr_buffer = io.StringIO()
     try:
         with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(stderr_buffer):
-            return execute_parsed(parsed, root_parser=root_parser)
+            return run_invocation(invocation)
     except SystemExit as exc:
         message = _captured_cli_message(stdout_buffer.getvalue(), stderr_buffer.getvalue(), fallback="command exited")
         exit_code = int(exc.code) if isinstance(exc.code, int) else 1
@@ -143,6 +154,7 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
     rows: list[dict[str, Any]] = []
     batch_path = Path(args.batch_file)
     batch_dir = batch_path.parent.resolve(strict=False)
+    batch_invocation = getattr(args, "_invocation", args)
     for line_number, raw_line in enumerate(batch_path.read_text(encoding="utf-8").splitlines(), start=1):
         stripped = raw_line.strip()
         if not stripped or stripped.startswith("#"):
@@ -157,17 +169,11 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
                 argv = argv[1:]
             if not argv:
                 raise CliUserError("empty command")
-            parsed = _parse_batch_args(root_parser, argv)
-            parsed._raw_argv = list(argv)
-            parsed_map = vars(parsed)
-            if parsed_map.get("_hidden_command", False) or not parsed_map.get("allow_batch", True):
+            child = _parse_batch_invocation(root_parser, argv, parent=batch_invocation, base_dir=batch_dir)
+            if child.spec.hidden or not child.spec.allow_batch:
                 raise CliUserError("command is not available in batch mode")
-            merge_parent_context(parsed, args)
-            resolve_relative_paths(parsed, base_dir=batch_dir)
-            parsed._relative_path_base_dir = batch_dir
-            parsed._batch_mode = True
-            result = _execute_batch_args(parsed, root_parser=root_parser)
-            artifacts = _serialize_child_if_needed(result, parsed)
+            result = _execute_batch_invocation(child)
+            artifacts = _serialize_child_if_needed(result, child.args)
             rows.append(
                 _line_record(
                     line=line_number,

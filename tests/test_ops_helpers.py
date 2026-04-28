@@ -371,10 +371,10 @@ def test_segment_list_filters_with_regex_pattern() -> None:
         segments.SegmentListRequest(pattern="__TEXT|__cstring", glob=False, regex=True, ignore_case=False),
     )
 
-    assert rows == (
-        segments.SegmentListEntry(name="__TEXT:__text", start="0x1000", end="0x2000", size=0x1000),
-        segments.SegmentListEntry(name="__TEXT:__cstring", start="0x3000", end="0x3400", size=0x400),
-    )
+    assert rows == [
+        {"name": "__TEXT:__text", "start": "0x1000", "end": "0x2000", "size": 0x1000},
+        {"name": "__TEXT:__cstring", "start": "0x3000", "end": "0x3400", "size": 0x400},
+    ]
 
 
 def test_xrefs_collect_code_and_data_references_explicitly() -> None:
