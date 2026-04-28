@@ -150,31 +150,6 @@ class DeclarationChunk:
 
 
 @dataclass(frozen=True)
-class TypeDiagnostic:
-    kind: str
-    message: str
-    line: int | None = None
-    end_line: int | None = None
-    snippet: str | None = None
-    construct: str | None = None
-    balance: int | None = None
-
-    def to_dict(self) -> TypeDiagnosticDict:
-        item: TypeDiagnosticDict = {"kind": self.kind, "message": self.message}
-        if self.line is not None:
-            item["line"] = self.line
-        if self.end_line is not None:
-            item["end_line"] = self.end_line
-        if self.snippet:
-            item["snippet"] = self.snippet[:240]
-        if self.construct:
-            item["construct"] = self.construct
-        if self.balance is not None:
-            item["balance"] = self.balance
-        return item
-
-
-@dataclass(frozen=True)
 class TypeDeclareRequest:
     decl: str
     aliases: tuple[TypeAlias, ...]
@@ -183,14 +158,31 @@ class TypeDeclareRequest:
     clang: bool
 
 
-@dataclass(frozen=True)
-class TypeDeclarePreviewSnapshot:
-    type_count: int
-    class_count: int
-    type_names_sample: tuple[str, ...]
-
-
 ChunkLike = Union[DeclarationChunk, DeclarationChunkDict]
+
+
+def _make_type_diagnostic(
+    *,
+    kind: str,
+    message: str,
+    line: int | None = None,
+    end_line: int | None = None,
+    snippet: str | None = None,
+    construct: str | None = None,
+    balance: int | None = None,
+) -> TypeDiagnosticDict:
+    item: TypeDiagnosticDict = {"kind": kind, "message": message}
+    if line is not None:
+        item["line"] = line
+    if end_line is not None:
+        item["end_line"] = end_line
+    if snippet:
+        item["snippet"] = snippet[:240]
+    if construct:
+        item["construct"] = construct
+    if balance is not None:
+        item["balance"] = balance
+    return item
 
 
 def _coerce_chunk(chunk: ChunkLike) -> DeclarationChunk:
@@ -432,7 +424,7 @@ def _next_chunk_start_line(text: str, index: int, line: int) -> int:
 
 
 def _append_type_diagnostic(
-    diagnostics: list[TypeDiagnostic],
+    diagnostics: list[TypeDiagnosticDict],
     *,
     kind: str,
     message: str,
@@ -442,7 +434,7 @@ def _append_type_diagnostic(
     construct: str | None = None,
 ) -> None:
     diagnostics.append(
-        TypeDiagnostic(
+        _make_type_diagnostic(
             kind=kind,
             message=message,
             line=line,
@@ -457,12 +449,12 @@ def _chunk_type_diagnostics(
     chunk: DeclarationChunk,
     *,
     aliases_applied: list[AppliedAlias],
-) -> list[TypeDiagnostic]:
+) -> list[TypeDiagnosticDict]:
     text = chunk.text
     snippet = text[:240]
     line = chunk.start_line
     end_line = chunk.end_line
-    diagnostics: list[TypeDiagnostic] = []
+    diagnostics: list[TypeDiagnosticDict] = []
 
     if "__cppobj" in text:
         _append_type_diagnostic(
@@ -523,11 +515,11 @@ def _type_declare_diagnostics(
     chunks: list[DeclarationChunk] | None = None,
     brace_balance: int | None = None,
 ) -> list[TypeDiagnosticDict]:
-    diagnostics: list[TypeDiagnostic] = []
+    diagnostics: list[TypeDiagnosticDict] = []
     seen: set[tuple[str, int | None, str | None]] = set()
 
-    def add_unique(item: TypeDiagnostic) -> None:
-        key = (item.kind, item.line, item.construct)
+    def add_unique(item: TypeDiagnosticDict) -> None:
+        key = (item["kind"], item.get("line"), item.get("construct"))
         if key in seen:
             return
         seen.add(key)
@@ -544,7 +536,7 @@ def _type_declare_diagnostics(
     for chunk in resolved_chunks:
         if not chunk.terminated:
             add_unique(
-                TypeDiagnostic(
+                _make_type_diagnostic(
                     kind="unterminated_declaration",
                     message="declaration does not end with a top-level semicolon",
                     line=chunk.start_line,
@@ -554,7 +546,7 @@ def _type_declare_diagnostics(
             )
     if resolved_brace_balance > 0:
         add_unique(
-            TypeDiagnostic(
+            _make_type_diagnostic(
                 kind="unbalanced_braces",
                 message="more opening braces than closing braces were found",
                 balance=resolved_brace_balance,
@@ -567,7 +559,7 @@ def _type_declare_diagnostics(
     if errors and not diagnostics:
         first = resolved_chunks[0] if resolved_chunks else DeclarationChunk(decl.strip(), 1, 1, False)
         add_unique(
-            TypeDiagnostic(
+            _make_type_diagnostic(
                 kind="parser_error",
                 message=f"IDA reported {errors} parser error(s); rerun with smaller declaration batches if needed",
                 line=first.start_line,
@@ -575,7 +567,7 @@ def _type_declare_diagnostics(
                 snippet=first.text[:240],
             )
         )
-    return [item.to_dict() for item in diagnostics]
+    return diagnostics
 
 
 def _parse_type_declarations(runtime: IdaRuntime, decl: str, *, replace: bool, clang: bool) -> int:
@@ -968,15 +960,15 @@ def _type_declare_result(
 def _preview_snapshot(
     context: OperationContext,
     request: TypeDeclareRequest,
-) -> TypeDeclarePreviewSnapshot:
+) -> dict[str, object]:
     del request
     runtime = context.runtime
     names = runtime.list_named_types()
-    return TypeDeclarePreviewSnapshot(
-        type_count=len(names),
-        class_count=len(runtime.list_named_classes()),
-        type_names_sample=tuple(str(item.get("name") or "") for item in names[:10]),
-    )
+    return {
+        "type_count": len(names),
+        "class_count": len(runtime.list_named_classes()),
+        "type_names_sample": [str(item.get("name") or "") for item in names[:10]],
+    }
 
 
 def _type_declare(context: OperationContext, request: TypeDeclareRequest) -> TypeDeclareResult:
@@ -1032,7 +1024,6 @@ __all__ = [
     "TypeAlias",
     "TypeDeclareBisectResult",
     "TypeDeclareDiagnostic",
-    "TypeDeclarePreviewSnapshot",
     "TypeDeclareRequest",
     "TypeDeclareResult",
     "_apply_type_aliases",
