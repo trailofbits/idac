@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from idac.ops.base import OperationContext
-from idac.ops.families.search import SearchBytesRequest, SearchMatch, _search_bytes
+from idac.ops.families.search import SearchBytesRequest, _search_bytes
 from idac.ops.runtime import IdaOperationError, IdaRuntime, SegmentRange
 
 
@@ -114,10 +114,10 @@ def test_search_bytes_compiles_pattern_once_and_uses_bin_search() -> None:
         SearchBytesRequest(pattern="aa bb", segment="__TEXT", start="0x1000", end="0x1030", limit=2),
     )
 
-    assert result.results == (
-        SearchMatch(address="0x1010"),
-        SearchMatch(address="0x1020"),
-    )
+    assert result["results"] == [
+        {"address": "0x1010"},
+        {"address": "0x1020"},
+    ]
     assert ida_bytes.compiled_binpat_vec_t.calls == [(0x1000, "aa bb", 16, -1)]
     assert [call[:4] for call in ida_bytes.bin_search_calls] == [
         (0x1000, 0x1030, "aa bb", 0x1000),
@@ -150,8 +150,8 @@ def test_search_bytes_returns_empty_results_when_no_matches_found() -> None:
         SearchBytesRequest(pattern="aa bb", segment="__TEXT", start="0x1000", end="0x1030", limit=5),
     )
 
-    assert result.results == ()
-    assert result.truncated is False
+    assert result["results"] == []
+    assert result["truncated"] is False
     assert ida_bytes.find_bytes_called is False
 
 
@@ -164,8 +164,8 @@ def test_search_bytes_marks_results_truncated_when_limit_is_hit() -> None:
         SearchBytesRequest(pattern="aa bb", segment="__TEXT", start="0x1000", end="0x1030", limit=1),
     )
 
-    assert result.results == (SearchMatch(address="0x1010"),)
-    assert result.truncated is True
+    assert result["results"] == [{"address": "0x1010"}]
+    assert result["truncated"] is True
     assert ida_bytes.find_bytes_called is False
 
 
@@ -182,10 +182,10 @@ def test_search_bytes_walks_each_matching_segment_range() -> None:
         SearchBytesRequest(pattern="aa bb", segment="__TEXT", start=None, end=None, limit=10),
     )
 
-    assert result.results == (
-        SearchMatch(address="0x1010"),
-        SearchMatch(address="0x2018"),
-    )
+    assert result["results"] == [
+        {"address": "0x1010"},
+        {"address": "0x2018"},
+    ]
     assert [call[:2] for call in ida_bytes.bin_search_calls] == [
         (0x1000, 0x1030),
         (0x1011, 0x1030),

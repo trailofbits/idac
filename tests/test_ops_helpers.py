@@ -434,32 +434,32 @@ def test_xrefs_collect_code_and_data_references_explicitly() -> None:
     rows = search._xrefs(OperationContext(runtime=FakeRuntime()), search.XrefsRequest(identifier="target"))
 
     assert seen_flags == [0, 4, 2]
-    assert rows == (
-        search.XrefRow(
-            from_="0x401000",
-            to="0x401004",
-            type="Code_Near_Call",
-            kind="call",
-            user=False,
-            function=None,
-        ),
-        search.XrefRow(
-            from_="0x400ff0",
-            to="0x401004",
-            type="Ordinary_Flow",
-            kind="flow",
-            user=False,
-            function=None,
-        ),
-        search.XrefRow(
-            from_="0x402000",
-            to="0x401004",
-            type="Data_Read",
-            kind="read",
-            user=False,
-            function=None,
-        ),
-    )
+    assert rows == [
+        {
+            "from": "0x401000",
+            "to": "0x401004",
+            "type": "Code_Near_Call",
+            "kind": "call",
+            "user": False,
+            "function": None,
+        },
+        {
+            "from": "0x400ff0",
+            "to": "0x401004",
+            "type": "Ordinary_Flow",
+            "kind": "flow",
+            "user": False,
+            "function": None,
+        },
+        {
+            "from": "0x402000",
+            "to": "0x401004",
+            "type": "Data_Read",
+            "kind": "read",
+            "user": False,
+            "function": None,
+        },
+    ]
 
 
 def test_runtime_xrefs_to_requests_flow_by_default() -> None:

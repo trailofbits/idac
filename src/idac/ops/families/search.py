@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from ..base import OperationContext, OperationSpec
 from ..helpers.matching import pattern_from_params, text_matches
 from ..helpers.params import optional_param_int, optional_str, require_str
-from ..models import payload_from_model
 from ..runtime import IdaOperationError, IdaRuntime, SegmentRange
 
 MEBIBYTE = 1024 * 1024
@@ -24,41 +23,8 @@ class SearchBytesRequest:
 
 
 @dataclass(frozen=True)
-class SearchMatch:
-    address: str
-
-
-@dataclass(frozen=True)
-class SearchMatchInFunction:
-    address: str
-    function: str
-
-
-@dataclass(frozen=True)
-class SearchBytesResult:
-    pattern: str
-    segment: str
-    start: str
-    end: str
-    limit: int
-    truncated: bool
-    ranges: tuple[SearchScopeRange, ...]
-    results: tuple[SearchMatch | SearchMatchInFunction, ...]
-
-
-@dataclass(frozen=True)
 class XrefsRequest:
     identifier: str
-
-
-@dataclass(frozen=True)
-class XrefRow:
-    from_: str
-    to: str
-    type: str
-    kind: str
-    user: bool
-    function: str | None = None
 
 
 @dataclass(frozen=True)
@@ -71,32 +37,6 @@ class StringsRequest:
     segment: str
     start: str | None
     end: str | None
-
-
-@dataclass(frozen=True)
-class StringRow:
-    address: str
-    text: str
-
-
-@dataclass(frozen=True)
-class SearchScopeRange:
-    name: str
-    start: str
-    end: str
-
-
-@dataclass(frozen=True)
-class ImportEntry:
-    address: str
-    name: str
-    ordinal: int
-
-
-@dataclass(frozen=True)
-class ImportModule:
-    module: str
-    entries: tuple[ImportEntry, ...]
 
 
 def _require_identifier(params: dict[str, object], *, key: str = "identifier") -> str:
@@ -116,10 +56,10 @@ def _parse_search_bytes(params: dict[str, object]) -> SearchBytesRequest:
     return SearchBytesRequest(pattern=pattern, segment=segment, start=start, end=end, limit=limit)
 
 
-def _match_row(address: int, function: str | None) -> SearchMatch | SearchMatchInFunction:
+def _match_row(address: int, function: str | None) -> dict[str, object]:
     if function:
-        return SearchMatchInFunction(address=hex(address), function=function)
-    return SearchMatch(address=hex(address))
+        return {"address": hex(address), "function": function}
+    return {"address": hex(address)}
 
 
 def _bin_search_address(result: object) -> int:
@@ -153,7 +93,7 @@ def _has_more_search_bytes_matches(
     return False
 
 
-def _search_bytes(context: OperationContext, request: SearchBytesRequest) -> SearchBytesResult:
+def _search_bytes(context: OperationContext, request: SearchBytesRequest) -> dict[str, object]:
     runtime = context.runtime
     ida_bytes = runtime.mod("ida_bytes")
     idaapi = runtime.mod("idaapi")
@@ -166,7 +106,7 @@ def _search_bytes(context: OperationContext, request: SearchBytesRequest) -> Sea
     flags = ida_bytes.BIN_SEARCH_FORWARD | ida_bytes.BIN_SEARCH_NOBREAK | ida_bytes.BIN_SEARCH_NOSHOW
     compiled_pattern = runtime.compile_binpat(request.pattern, ea=ranges[0].start_ea)
 
-    rows: list[SearchMatch | SearchMatchInFunction] = []
+    rows: list[dict[str, object]] = []
     truncated = False
     for index, scope in enumerate(ranges):
         cursor = scope.start_ea
@@ -189,18 +129,18 @@ def _search_bytes(context: OperationContext, request: SearchBytesRequest) -> Sea
                 badaddr=idaapi.BADADDR,
             )
             break
-    return SearchBytesResult(
-        pattern=request.pattern,
-        segment=request.segment,
-        start=hex(ranges[0].start_ea),
-        end=hex(ranges[-1].end_ea),
-        limit=request.limit,
-        truncated=truncated,
-        ranges=tuple(
-            SearchScopeRange(name=item.name, start=hex(item.start_ea), end=hex(item.end_ea)) for item in ranges
-        ),
-        results=tuple(rows),
-    )
+    return {
+        "pattern": request.pattern,
+        "segment": request.segment,
+        "start": hex(ranges[0].start_ea),
+        "end": hex(ranges[-1].end_ea),
+        "limit": request.limit,
+        "truncated": truncated,
+        "ranges": [
+            {"name": item.name, "start": hex(item.start_ea), "end": hex(item.end_ea)} for item in ranges
+        ],
+        "results": rows,
+    }
 
 
 def _parse_xrefs(params: dict[str, object]) -> XrefsRequest:
@@ -210,10 +150,10 @@ def _parse_xrefs(params: dict[str, object]) -> XrefsRequest:
 def _xrefs(
     context: OperationContext,
     request: XrefsRequest,
-) -> tuple[XrefRow, ...]:
+) -> list[dict[str, object]]:
     runtime = context.runtime
     ea = runtime.resolve_address(request.identifier)
-    rows: list[XrefRow] = []
+    rows: list[dict[str, object]] = []
     seen: set[tuple[str, str, str, str, bool, str | None]] = set()
     for flags in (
         runtime.ida_xref.XREF_FLOW,
@@ -222,21 +162,21 @@ def _xrefs(
     ):
         for ref in runtime.xrefs_to(ea, flags=flags):
             func = runtime.ida_funcs.get_func(ref.from_ea)
-            row = XrefRow(
-                from_=hex(ref.from_ea),
-                to=hex(ref.to_ea),
-                type=ref.type,
-                kind=ref.kind,
-                user=ref.user,
-                function=None if func is None else runtime.function_name(func.start_ea),
-            )
-            key = (row.from_, row.to, row.type, row.kind, row.user, row.function)
+            row: dict[str, object] = {
+                "from": hex(ref.from_ea),
+                "to": hex(ref.to_ea),
+                "type": ref.type,
+                "kind": ref.kind,
+                "user": ref.user,
+                "function": None if func is None else runtime.function_name(func.start_ea),
+            }
+            key = (row["from"], row["to"], row["type"], row["kind"], row["user"], row["function"])
             if key in seen:
                 continue
             seen.add(key)
             rows.append(row)
-    rows.sort(key=lambda item: (item.kind, item.from_))
-    return tuple(rows)
+    rows.sort(key=lambda item: (item["kind"], item["from"]))
+    return rows
 
 
 def _parse_strings(params: dict[str, object]) -> StringsRequest:
@@ -271,7 +211,7 @@ def _defined_string_rows(
     glob: bool,
     regex: bool,
     ignore_case: bool,
-) -> tuple[StringRow, ...]:
+) -> list[dict[str, object]]:
     ida_strlist = runtime.ida_strlist
     known_types = (
         "STRTYPE_TERMCHR",
@@ -304,7 +244,7 @@ def _defined_string_rows(
     saved_only_7bit = bool(options.only_7bit)
     saved_ignore_heads = bool(options.ignore_heads)
 
-    rows: list[StringRow] = []
+    rows: list[dict[str, object]] = []
     try:
         options.strtypes = string_types or [runtime.ida_nalt.STRTYPE_C]
         options.minlen = 1
@@ -322,7 +262,7 @@ def _defined_string_rows(
                 continue
             text = _string_text(runtime, ea, int(item.length), int(item.type))
             if text_matches(text, pattern=pattern, glob=glob, regex=regex, ignore_case=ignore_case):
-                rows.append(StringRow(address=hex(ea), text=text))
+                rows.append({"address": hex(ea), "text": text})
     finally:
         options.strtypes = saved_strtypes
         options.minlen = saved_minlen
@@ -330,7 +270,7 @@ def _defined_string_rows(
         options.only_7bit = saved_only_7bit
         options.ignore_heads = saved_ignore_heads
         ida_strlist.build_strlist()
-    return tuple(rows)
+    return rows
 
 
 def _scan_string_rows(
@@ -341,8 +281,8 @@ def _scan_string_rows(
     glob: bool,
     regex: bool,
     ignore_case: bool,
-) -> tuple[StringRow, ...]:
-    rows: list[StringRow] = []
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
     for scope in ranges:
         cursor = scope.start_ea
         while cursor < scope.end_ea:
@@ -361,9 +301,9 @@ def _scan_string_rows(
             if not text_matches(text, pattern=pattern, glob=glob, regex=regex, ignore_case=ignore_case):
                 cursor += max(length, 1)
                 continue
-            rows.append(StringRow(address=hex(cursor), text=text))
+            rows.append({"address": hex(cursor), "text": text})
             cursor += max(length, 1)
-    return tuple(rows)
+    return rows
 
 
 def _input_file_basename(runtime: IdaRuntime) -> str:
@@ -398,7 +338,7 @@ def _validate_dsc_string_scan_ranges(ranges: tuple[SegmentRange, ...]) -> None:
     )
 
 
-def _strings(context: OperationContext, request: StringsRequest) -> tuple[StringRow, ...]:
+def _strings(context: OperationContext, request: StringsRequest) -> list[dict[str, object]]:
     runtime = context.runtime
     is_dsc = _is_current_file_dsc(runtime)
     ranges = runtime.resolve_segment_ranges(
@@ -439,27 +379,27 @@ def _parse_imports(_params: dict[str, object]) -> None:
     return None
 
 
-def _imports(context: OperationContext, request: None) -> tuple[ImportModule, ...]:
+def _imports(context: OperationContext, request: None) -> list[dict[str, object]]:
     del request
     runtime = context.runtime
-    modules: list[ImportModule] = []
+    modules: list[dict[str, object]] = []
     for index in range(runtime.ida_nalt.get_import_module_qty()):
         module_name = runtime.ida_nalt.get_import_module_name(index) or "<unnamed>"
-        entries: list[ImportEntry] = []
+        entries: list[dict[str, object]] = []
 
-        def imp_cb(ea: int, name: str | None, ordinal: int, entries: list[ImportEntry] = entries) -> bool:
+        def imp_cb(ea: int, name: str | None, ordinal: int, entries: list[dict[str, object]] = entries) -> bool:
             entries.append(
-                ImportEntry(
-                    address=hex(ea),
-                    name=name or f"ordinal_{ordinal}",
-                    ordinal=ordinal,
-                )
+                {
+                    "address": hex(ea),
+                    "name": name or f"ordinal_{ordinal}",
+                    "ordinal": ordinal,
+                }
             )
             return True
 
         runtime.ida_nalt.enum_import_names(index, imp_cb)
-        modules.append(ImportModule(module=module_name, entries=tuple(entries)))
-    return tuple(modules)
+        modules.append({"module": module_name, "entries": entries})
+    return modules
 
 
 def search_operations() -> tuple[OperationSpec[object, object], ...]:
@@ -489,20 +429,12 @@ def search_operations() -> tuple[OperationSpec[object, object], ...]:
 
 def op_strings(runtime: IdaRuntime, params: dict[str, object]) -> list[dict[str, object]]:
     request = _parse_strings(params)
-    return payload_from_model(_strings(OperationContext(runtime=runtime), request))
+    return _strings(OperationContext(runtime=runtime), request)
 
 
 __all__ = [
-    "ImportEntry",
-    "ImportModule",
     "SearchBytesRequest",
-    "SearchBytesResult",
-    "SearchMatch",
-    "SearchMatchInFunction",
-    "SearchScopeRange",
-    "StringRow",
     "StringsRequest",
-    "XrefRow",
     "XrefsRequest",
     "op_strings",
     "search_operations",
