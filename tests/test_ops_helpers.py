@@ -226,7 +226,7 @@ def test_disasm_uses_direct_ida_lines_api() -> None:
 
     rendered = functions._disasm(OperationContext(runtime=FakeRuntime()), functions.FunctionIdentifierRequest("main"))
 
-    assert rendered.text == "0x401000: insn_401000\n0x401004: insn_401004"
+    assert rendered["text"] == "0x401000: insn_401000\n0x401004: insn_401004"
     assert calls == [("generate", 0x401000), ("tag_remove", 0), ("generate", 0x401004), ("tag_remove", 0)]
 
 
@@ -276,7 +276,7 @@ def test_function_list_honors_limit() -> None:
         ),
     )
 
-    assert [row.name for row in rows] == ["alpha", "beta"]
+    assert [row["name"] for row in rows] == ["alpha", "beta"]
 
 
 def test_database_info_reports_start_ea_separately_from_first_entry() -> None:
@@ -352,8 +352,8 @@ def test_database_info_reports_start_ea_separately_from_first_entry() -> None:
 
     result = database._database_info(OperationContext(runtime=FakeRuntime()), database.DatabaseInfoRequest())
 
-    assert result.start_ea == "0x401000"
-    assert result.entry_ea == "0x402000"
+    assert result["start_ea"] == "0x401000"
+    assert result["entry_ea"] == "0x402000"
 
 
 def test_segment_list_filters_with_regex_pattern() -> None:
@@ -671,11 +671,7 @@ def test_local_rename_uses_direct_hexrays_rename_for_name_selector(monkeypatch) 
     monkeypatch.setattr(
         locals,
         "_local_list_result",
-        lambda runtime, func_ea: locals.LocalListResult(
-            function="main",
-            address="0x401000",
-            locals=(),
-        ),
+        lambda runtime, func_ea: {"function": "main", "address": "0x401000", "locals": []},
     )
 
     payload = locals.op_local_rename(
@@ -1526,7 +1522,7 @@ def test_local_update_allows_unnamed_local_selected_by_stable_selector(monkeypat
     monkeypatch.setattr(
         locals,
         "_local_list_result",
-        lambda runtime, func_ea: locals.LocalListResult(function="main", address="0x401000", locals=()),
+        lambda runtime, func_ea: {"function": "main", "address": "0x401000", "locals": []},
     )
 
     payload = locals.op_local_update(
@@ -2223,12 +2219,12 @@ def test_first_free_bookmark_slot_reports_full_range() -> None:
     occupied = {0, 1, 2}
     original = bookmarks._bookmark_state
     try:
-        bookmarks._bookmark_state = lambda runtime, slot: bookmarks.BookmarkState(  # type: ignore[assignment]
-            slot=slot,
-            present=slot in occupied,
-            address=None,
-            comment=None,
-        )
+        bookmarks._bookmark_state = lambda runtime, slot: {  # type: ignore[assignment]
+            "slot": slot,
+            "present": slot in occupied,
+            "address": None,
+            "comment": None,
+        }
         with pytest.raises(IdaOperationError, match=r"no free bookmark slots remain \(0\.\.2\)"):
             bookmarks._first_free_bookmark_slot(FakeRuntime())
     finally:

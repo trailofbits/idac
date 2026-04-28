@@ -26,23 +26,6 @@ class CommentChange:
     repeatable: bool
 
 
-@dataclass(frozen=True)
-class CommentView:
-    address: str
-    scope: CommentScope
-    repeatable: bool
-    comment: str | None
-
-
-@dataclass(frozen=True)
-class CommentMutationResult:
-    address: str
-    scope: CommentScope
-    repeatable: bool
-    comment: str | None
-    changed: bool
-
-
 def _normalize_comment_text(text: str | None) -> str | None:
     return None if text in (None, "") else str(text)
 
@@ -120,22 +103,41 @@ def _write_extra_comment(runtime: IdaRuntime, ea: int, *, scope: CommentScope, t
         raise IdaOperationError(f"failed to set {scope} comment at {hex(ea)}") from exc
 
 
-def _read_comment(runtime: IdaRuntime, request: CommentLookup | CommentChange) -> CommentView:
+def _comment_payload(
+    *,
+    address: str,
+    scope: CommentScope,
+    repeatable: bool,
+    comment: str | None,
+    changed: bool | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "address": address,
+        "scope": scope,
+        "repeatable": repeatable,
+        "comment": comment,
+    }
+    if changed is not None:
+        payload["changed"] = changed
+    return payload
+
+
+def _read_comment(runtime: IdaRuntime, request: CommentLookup | CommentChange) -> dict[str, object]:
     ida_bytes = runtime.mod("ida_bytes")
     ea = runtime.resolve_address(request.identifier)
     if request.scope == "line":
         comment = _normalize_comment_text(ida_bytes.get_cmt(ea, request.repeatable))
-        return CommentView(address=hex(ea), scope=request.scope, repeatable=request.repeatable, comment=comment)
+        return _comment_payload(address=hex(ea), scope=request.scope, repeatable=request.repeatable, comment=comment)
     if request.scope == "function":
         func = _function_for_comment(runtime, ea)
         comment = _normalize_comment_text(runtime.ida_funcs.get_func_cmt(func, request.repeatable))
-        return CommentView(
+        return _comment_payload(
             address=hex(func.start_ea),
             scope=request.scope,
             repeatable=request.repeatable,
             comment=comment,
         )
-    return CommentView(
+    return _comment_payload(
         address=hex(ea),
         scope=request.scope,
         repeatable=False,
@@ -143,13 +145,13 @@ def _read_comment(runtime: IdaRuntime, request: CommentLookup | CommentChange) -
     )
 
 
-def _write_comment(runtime: IdaRuntime, request: CommentChange, *, text: str) -> CommentMutationResult:
+def _write_comment(runtime: IdaRuntime, request: CommentChange, *, text: str) -> dict[str, object]:
     ida_bytes = runtime.mod("ida_bytes")
     ea = runtime.resolve_address(request.identifier)
     if request.scope == "line":
         if not ida_bytes.set_cmt(ea, text, request.repeatable):
             raise IdaOperationError(f"failed to set comment at {hex(ea)}")
-        return CommentMutationResult(
+        return _comment_payload(
             address=hex(ea),
             scope=request.scope,
             repeatable=request.repeatable,
@@ -160,7 +162,7 @@ def _write_comment(runtime: IdaRuntime, request: CommentChange, *, text: str) ->
         func = _function_for_comment(runtime, ea)
         if not runtime.ida_funcs.set_func_cmt(func, text, request.repeatable):
             raise IdaOperationError(f"failed to set function comment at {hex(func.start_ea)}")
-        return CommentMutationResult(
+        return _comment_payload(
             address=hex(func.start_ea),
             scope=request.scope,
             repeatable=request.repeatable,
@@ -168,7 +170,7 @@ def _write_comment(runtime: IdaRuntime, request: CommentChange, *, text: str) ->
             changed=True,
         )
     _write_extra_comment(runtime, ea, scope=request.scope, text=text)
-    return CommentMutationResult(
+    return _comment_payload(
         address=hex(ea),
         scope=request.scope,
         repeatable=False,
@@ -177,7 +179,7 @@ def _write_comment(runtime: IdaRuntime, request: CommentChange, *, text: str) ->
     )
 
 
-def _comment_view(context: OperationContext, request: CommentLookup | CommentChange) -> CommentView:
+def _comment_view(context: OperationContext, request: CommentLookup | CommentChange) -> dict[str, object]:
     return _read_comment(context.runtime, request)
 
 
@@ -197,11 +199,11 @@ def _parse_change(params: dict[str, object]) -> CommentChange:
     )
 
 
-def _set_comment(context: OperationContext, request: CommentChange) -> CommentMutationResult:
+def _set_comment(context: OperationContext, request: CommentChange) -> dict[str, object]:
     return _write_comment(context.runtime, request, text=request.text)
 
 
-def _delete_comment(context: OperationContext, request: CommentLookup) -> CommentMutationResult:
+def _delete_comment(context: OperationContext, request: CommentLookup) -> dict[str, object]:
     return _write_comment(
         context.runtime,
         CommentChange(
@@ -217,19 +219,19 @@ def _delete_comment(context: OperationContext, request: CommentLookup) -> Commen
 def _restore_comment(
     context: OperationContext,
     request: CommentLookup | CommentChange,
-    before: CommentView,
-    result: CommentMutationResult,
+    before: dict[str, object],
+    result: dict[str, object],
 ) -> None:
     del result
     _write_comment(
         context.runtime,
         CommentChange(
             identifier=request.identifier,
-            text="" if before.comment is None else before.comment,
-            scope=before.scope,
-            repeatable=before.repeatable,
+            text="" if before.get("comment") is None else str(before.get("comment")),
+            scope=before["scope"],  # type: ignore[arg-type]
+            repeatable=bool(before.get("repeatable")),
         ),
-        text="" if before.comment is None else before.comment,
+        text="" if before.get("comment") is None else str(before.get("comment")),
     )
 
 
@@ -268,7 +270,5 @@ def comment_operations() -> tuple[OperationSpec[object, object], ...]:
 __all__ = [
     "CommentChange",
     "CommentLookup",
-    "CommentMutationResult",
-    "CommentView",
     "comment_operations",
 ]

@@ -31,31 +31,27 @@ class BookmarkDeleteRequest:
     slot: int
 
 
-@dataclass(frozen=True)
-class BookmarkState:
-    slot: int
-    present: bool
-    address: str | None
-    comment: str | None
-
-
-@dataclass(frozen=True)
-class BookmarkList:
-    bookmarks: list[BookmarkState]
-    count: int
-
-
-@dataclass(frozen=True)
-class BookmarkMutationResult:
-    slot: int
-    present: bool
-    address: str | None
-    comment: str | None
-    changed: bool
-
-
 def _require_identifier(value: object, *, label: str) -> str:
     return require_str(value, field=label)
+
+
+def _bookmark_payload(
+    *,
+    slot: int,
+    present: bool,
+    address: str | None,
+    comment: str | None,
+    changed: bool | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "slot": slot,
+        "present": present,
+        "address": address,
+        "comment": comment,
+    }
+    if changed is not None:
+        payload["changed"] = changed
+    return payload
 
 
 def _parse_slot(value: object) -> int:
@@ -92,19 +88,19 @@ def _bookmark_template(runtime: IdaRuntime):
     return loc
 
 
-def _bookmark_state(runtime: IdaRuntime, slot: int) -> BookmarkState:
+def _bookmark_state(runtime: IdaRuntime, slot: int) -> dict[str, object]:
     ida_kernwin = runtime.mod("ida_kernwin")
     ida_moves = runtime.mod("ida_moves")
     loc = _bookmark_template(runtime)
     desc, found_slot = ida_moves.bookmarks_t.get(loc, slot, None)
     if desc is None or found_slot is None:
-        return BookmarkState(slot=slot, present=False, address=None, comment=None)
+        return _bookmark_payload(slot=slot, present=False, address=None, comment=None)
     place = loc.place()
     idaplace = ida_kernwin.place_t.as_idaplace_t(place)
     if idaplace is None:
         raise IdaOperationError(f"failed to decode bookmark slot {slot}")
     address = hex(idaplace.ea)
-    return BookmarkState(
+    return _bookmark_payload(
         slot=slot,
         present=True,
         address=address,
@@ -114,18 +110,18 @@ def _bookmark_state(runtime: IdaRuntime, slot: int) -> BookmarkState:
 
 def _bookmark_slots(runtime: IdaRuntime) -> list[int]:
     ida_moves = runtime.mod("ida_moves")
-    return [slot for slot in range(ida_moves.MAX_MARK_SLOT + 1) if _bookmark_state(runtime, slot).present]
+    return [slot for slot in range(ida_moves.MAX_MARK_SLOT + 1) if _bookmark_state(runtime, slot)["present"]]
 
 
-def _bookmark_list(runtime: IdaRuntime) -> BookmarkList:
+def _bookmark_list(runtime: IdaRuntime) -> dict[str, object]:
     bookmarks = [_bookmark_state(runtime, slot) for slot in _bookmark_slots(runtime)]
-    return BookmarkList(bookmarks=bookmarks, count=len(bookmarks))
+    return {"bookmarks": bookmarks, "count": len(bookmarks)}
 
 
 def _first_free_slot(runtime: IdaRuntime) -> int:
     ida_moves = runtime.mod("ida_moves")
     for slot in range(ida_moves.MAX_MARK_SLOT + 1):
-        if not _bookmark_state(runtime, slot).present:
+        if not _bookmark_state(runtime, slot)["present"]:
             return slot
     raise IdaOperationError(f"no free bookmark slots remain (0..{ida_moves.MAX_MARK_SLOT})")
 
@@ -141,18 +137,18 @@ def _erase_bookmark(runtime: IdaRuntime, slot: int) -> None:
         raise IdaOperationError(f"failed to delete bookmark slot {slot}")
 
 
-def _write_bookmark(runtime: IdaRuntime, *, slot: int, identifier: str, comment: str) -> BookmarkMutationResult:
+def _write_bookmark(runtime: IdaRuntime, *, slot: int, identifier: str, comment: str) -> dict[str, object]:
     ida_idc = runtime.mod("ida_idc")
     ea = runtime.resolve_address(identifier)
     ida_idc.mark_position(ea, 0, 0, 0, slot, comment)
     state = _bookmark_state(runtime, slot)
-    if not state.present:
+    if not state["present"]:
         raise IdaOperationError(f"failed to set bookmark slot {slot}")
-    return BookmarkMutationResult(
-        slot=state.slot,
-        present=state.present,
-        address=state.address,
-        comment=state.comment,
+    return _bookmark_payload(
+        slot=int(state["slot"]),
+        present=bool(state["present"]),
+        address=state["address"],  # type: ignore[arg-type]
+        comment=state["comment"],  # type: ignore[arg-type]
         changed=True,
     )
 
@@ -183,44 +179,44 @@ def _parse_delete(params: dict[str, object]) -> BookmarkDeleteRequest:
     return BookmarkDeleteRequest(slot=_parse_slot(params.get("slot")))
 
 
-def _get_bookmark(context: OperationContext, request: BookmarkGetRequest) -> BookmarkState | BookmarkList:
+def _get_bookmark(context: OperationContext, request: BookmarkGetRequest) -> dict[str, object]:
     runtime = context.runtime
     if request.slot is None:
         return _bookmark_list(runtime)
     return _bookmark_state(runtime, _validate_slot(runtime, request.slot))
 
 
-def _set_bookmark(context: OperationContext, request: BookmarkSetRequest) -> BookmarkMutationResult:
+def _set_bookmark(context: OperationContext, request: BookmarkSetRequest) -> dict[str, object]:
     runtime = context.runtime
     slot = _validate_slot(runtime, request.slot)
     return _write_bookmark(runtime, slot=slot, identifier=request.identifier, comment=request.comment)
 
 
-def _add_bookmark(context: OperationContext, request: BookmarkAddRequest) -> BookmarkMutationResult:
+def _add_bookmark(context: OperationContext, request: BookmarkAddRequest) -> dict[str, object]:
     runtime = context.runtime
     slot = _first_free_slot(runtime)
     return _write_bookmark(runtime, slot=slot, identifier=request.identifier, comment=request.comment)
 
 
-def _delete_bookmark(context: OperationContext, request: BookmarkDeleteRequest) -> BookmarkMutationResult:
+def _delete_bookmark(context: OperationContext, request: BookmarkDeleteRequest) -> dict[str, object]:
     runtime = context.runtime
     slot = _validate_slot(runtime, request.slot)
     before = _bookmark_state(runtime, slot)
-    if not before.present:
-        return BookmarkMutationResult(
-            slot=before.slot,
-            present=before.present,
-            address=before.address,
-            comment=before.comment,
+    if not before["present"]:
+        return _bookmark_payload(
+            slot=int(before["slot"]),
+            present=bool(before["present"]),
+            address=before["address"],  # type: ignore[arg-type]
+            comment=before["comment"],  # type: ignore[arg-type]
             changed=False,
         )
     _erase_bookmark(runtime, slot)
     after = _bookmark_state(runtime, slot)
-    return BookmarkMutationResult(
-        slot=after.slot,
-        present=after.present,
-        address=after.address,
-        comment=after.comment,
+    return _bookmark_payload(
+        slot=int(after["slot"]),
+        present=bool(after["present"]),
+        address=after["address"],  # type: ignore[arg-type]
+        comment=after["comment"],  # type: ignore[arg-type]
         changed=True,
     )
 
@@ -228,12 +224,12 @@ def _delete_bookmark(context: OperationContext, request: BookmarkDeleteRequest) 
 def _preview_single_slot(
     context: OperationContext,
     request: BookmarkSetRequest | BookmarkDeleteRequest,
-) -> BookmarkState:
+) -> dict[str, object]:
     runtime = context.runtime
     return _bookmark_state(runtime, _validate_slot(runtime, request.slot))
 
 
-def _preview_bookmark_list(context: OperationContext, request: BookmarkAddRequest) -> BookmarkList:
+def _preview_bookmark_list(context: OperationContext, request: BookmarkAddRequest) -> dict[str, object]:
     del request
     return _bookmark_list(context.runtime)
 
@@ -241,29 +237,34 @@ def _preview_bookmark_list(context: OperationContext, request: BookmarkAddReques
 def _restore_bookmark_state(
     context: OperationContext,
     request: BookmarkSetRequest | BookmarkDeleteRequest,
-    before: BookmarkState,
-    result: BookmarkMutationResult,
+    before: dict[str, object],
+    result: dict[str, object],
 ) -> None:
     runtime = context.runtime
     slot = _validate_slot(runtime, request.slot)
-    if before.present:
-        if before.address is None:
+    if before["present"]:
+        if before["address"] is None:
             raise IdaOperationError(f"bookmark slot {slot} is present but has no saved address")
-        _write_bookmark(runtime, slot=slot, identifier=before.address, comment=before.comment or "")
+        _write_bookmark(
+            runtime,
+            slot=slot,
+            identifier=str(before["address"]),
+            comment="" if before["comment"] is None else str(before["comment"]),
+        )
         return
-    if result.present:
+    if result["present"]:
         _erase_bookmark(runtime, slot)
 
 
 def _restore_added_bookmark(
     context: OperationContext,
     request: BookmarkAddRequest,
-    before: BookmarkList,
-    result: BookmarkMutationResult,
+    before: dict[str, object],
+    result: dict[str, object],
 ) -> None:
     del request, before
-    if result.present:
-        _erase_bookmark(context.runtime, result.slot)
+    if result["present"]:
+        _erase_bookmark(context.runtime, int(result["slot"]))
 
 
 def bookmark_operations() -> tuple[OperationSpec[object, object], ...]:
@@ -313,10 +314,7 @@ __all__ = [
     "BookmarkAddRequest",
     "BookmarkDeleteRequest",
     "BookmarkGetRequest",
-    "BookmarkList",
-    "BookmarkMutationResult",
     "BookmarkSetRequest",
-    "BookmarkState",
     "_first_free_bookmark_slot",
     "bookmark_operations",
 ]

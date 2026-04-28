@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from ..base import OperationContext, OperationSpec
 from ..helpers.matching import pattern_from_params, text_matches
 from ..helpers.params import optional_param_int, optional_str, require_str
-from ..models import payload_from_model
 from ..runtime import IdaOperationError, IdaRuntime, _ea_text, _strip_tags
 
 
@@ -38,128 +37,6 @@ class CtreeRequest:
     maturity: str
 
 
-@dataclass(frozen=True)
-class FunctionListEntry:
-    name: str
-    display_name: str
-    render_name: str
-    address: str
-    size: int
-
-
-@dataclass(frozen=True)
-class FunctionShowResult:
-    name: str
-    display_name: str
-    address: str
-    size: int
-    prototype: str
-    flags: str
-
-
-@dataclass(frozen=True)
-class FrameXref:
-    address: str
-    operand: int
-    type: int
-    access: str
-
-
-@dataclass(frozen=True)
-class FrameMember:
-    index: int
-    name: str
-    offset: int
-    end_offset: int
-    size: int
-    type: str
-    kind: str
-    is_special: bool
-    is_arg: bool
-    fp_offset: int | None = None
-    xrefs: tuple[FrameXref, ...] = ()
-    xref_count: int | None = None
-
-
-@dataclass(frozen=True)
-class FunctionFrameResult:
-    function: str
-    address: str
-    frame_size: int
-    local_size: int
-    saved_registers_size: int
-    argument_size: int
-    members: tuple[FrameMember, ...]
-
-
-@dataclass(frozen=True)
-class FunctionStackvarsResult:
-    function: str
-    address: str
-    stackvars: tuple[FrameMember, ...]
-
-
-@dataclass(frozen=True)
-class CallerEdge:
-    call_site: str
-    caller: str
-    caller_address: str
-
-
-@dataclass(frozen=True)
-class CalleeEdge:
-    call_site: str
-    callee: str
-    callee_address: str
-
-
-@dataclass(frozen=True)
-class IncomingEdgesResult:
-    function: str
-    address: str
-    edges: tuple[CallerEdge, ...]
-
-
-@dataclass(frozen=True)
-class OutgoingEdgesResult:
-    function: str
-    address: str
-    edges: tuple[CalleeEdge, ...]
-
-
-@dataclass(frozen=True)
-class TextResult:
-    text: str
-
-
-@dataclass(frozen=True)
-class CtreeNode:
-    kind: str
-    depth: int
-    op: str
-    ea: str | None
-    text: str
-
-
-@dataclass(frozen=True)
-class CtreeResult:
-    function: str
-    address: str
-    level: str
-    nodes: tuple[CtreeNode, ...]
-    text: str
-
-
-@dataclass(frozen=True)
-class MicrocodeResult:
-    function: str
-    address: str
-    level: str
-    maturity: str
-    lines: tuple[str, ...]
-    text: str
-
-
 def _function_header(runtime: IdaRuntime, func) -> tuple[str, str]:
     return runtime.function_identity(func)
 
@@ -181,10 +58,10 @@ def _parse_function_list(params: dict[str, object]) -> FunctionListRequest:
     )
 
 
-def _function_list(context: OperationContext, request: FunctionListRequest) -> tuple[FunctionListEntry, ...]:
+def _function_list(context: OperationContext, request: FunctionListRequest) -> list[dict[str, object]]:
     runtime = context.runtime
     ranges = () if request.segment is None else runtime.resolve_segment_ranges(request.segment)
-    rows: list[FunctionListEntry] = []
+    rows: list[dict[str, object]] = []
     for ea in runtime.idautils.Functions():
         if ranges and not runtime.ea_in_ranges(ea, ranges):
             continue
@@ -200,37 +77,37 @@ def _function_list(context: OperationContext, request: FunctionListRequest) -> t
             continue
         func = runtime.ida_funcs.get_func(ea)
         rows.append(
-            FunctionListEntry(
-                name=name,
-                display_name=display_name,
-                render_name=display_name if request.demangle else name,
-                address=hex(ea),
-                size=0 if func is None else func.end_ea - func.start_ea,
-            )
+            {
+                "name": name,
+                "display_name": display_name,
+                "render_name": display_name if request.demangle else name,
+                "address": hex(ea),
+                "size": 0 if func is None else func.end_ea - func.start_ea,
+            }
         )
         if request.limit is not None and len(rows) >= request.limit:
             break
-    return tuple(rows)
+    return rows
 
 
 def _parse_identifier(params: dict[str, object]) -> FunctionIdentifierRequest:
     return FunctionIdentifierRequest(identifier=_require_identifier(params))
 
 
-def _function_show(context: OperationContext, request: FunctionIdentifierRequest) -> FunctionShowResult:
+def _function_show(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
     runtime = context.runtime
     func = runtime.resolve_function(request.identifier)
     ida_typeinf = runtime.ida_typeinf
     name, address = _function_header(runtime, func)
     ea = func.start_ea
-    return FunctionShowResult(
-        name=name,
-        display_name=runtime.display_function_name(ea, demangle=True),
-        address=address,
-        size=func.end_ea - func.start_ea,
-        prototype=ida_typeinf.print_type(ea, ida_typeinf.PRTYPE_1LINE) or "",
-        flags=hex(func.flags),
-    )
+    return {
+        "name": name,
+        "display_name": runtime.display_function_name(ea, demangle=True),
+        "address": address,
+        "size": func.end_ea - func.start_ea,
+        "prototype": ida_typeinf.print_type(ea, ida_typeinf.PRTYPE_1LINE) or "",
+        "flags": hex(func.flags),
+    }
 
 
 def _frame_members(
@@ -240,7 +117,7 @@ def _frame_members(
     include_special: bool,
     include_xrefs: bool,
     query: str | None = None,
-) -> tuple[FrameMember, ...]:
+) -> list[dict[str, object]]:
     frame_tif = runtime.ida_typeinf.tinfo_t()
     if not frame_tif.get_func_frame(func):
         raise IdaOperationError(f"function has no frame: {hex(func.start_ea)}")
@@ -249,7 +126,7 @@ def _frame_members(
         runtime.ida_xref.dr_R: "read",
         runtime.ida_xref.dr_W: "write",
     }
-    members: list[FrameMember] = []
+    members: list[dict[str, object]] = []
     for index, frame_udm in enumerate(frame_tif.iter_struct()):
         offset = frame_udm.begin() // 8
         end_offset = frame_udm.end() // 8
@@ -264,80 +141,78 @@ def _frame_members(
         if query and not text_matches(name, pattern=query, ignore_case=True):
             continue
         is_arg = False if is_special else bool(runtime.ida_frame.is_funcarg_off(func, offset))
-        xrefs: tuple[FrameXref, ...] = ()
+        xrefs: list[dict[str, object]] = []
         xref_count: int | None = None
         if include_xrefs:
             xreflist = runtime.ida_frame.xreflist_t()
             runtime.ida_frame.build_stkvar_xrefs(xreflist, func, offset, end_offset)
-            xref_rows: list[FrameXref] = []
             for item_index in range(xreflist.size()):
                 item = xreflist[item_index]
-                xref_rows.append(
-                    FrameXref(
-                        address=hex(item.ea),
-                        operand=item.opnum,
-                        type=item.type,
-                        access=xref_names.get(item.type, "unknown"),
-                    )
+                xrefs.append(
+                    {
+                        "address": hex(item.ea),
+                        "operand": item.opnum,
+                        "type": item.type,
+                        "access": xref_names.get(item.type, "unknown"),
+                    }
                 )
-            xrefs = tuple(xref_rows)
-            xref_count = len(xref_rows)
+            xref_count = len(xrefs)
         members.append(
-            FrameMember(
-                index=index,
-                name=name,
-                offset=offset,
-                end_offset=end_offset,
-                size=max(0, end_offset - offset),
-                type=runtime.tinfo_decl(frame_udm.type, multi=False),
-                kind="special" if is_special else "arg" if is_arg else "local",
-                is_special=is_special,
-                is_arg=is_arg,
-                fp_offset=None if is_special else runtime.ida_frame.soff_to_fpoff(func, offset),
-                xrefs=xrefs,
-                xref_count=xref_count,
-            )
+            {
+                "index": index,
+                "name": name,
+                "offset": offset,
+                "end_offset": end_offset,
+                "size": max(0, end_offset - offset),
+                "type": runtime.tinfo_decl(frame_udm.type, multi=False),
+                "kind": "special" if is_special else "arg" if is_arg else "local",
+                "is_special": is_special,
+                "is_arg": is_arg,
+                "fp_offset": None if is_special else runtime.ida_frame.soff_to_fpoff(func, offset),
+                "xrefs": xrefs,
+                "xref_count": xref_count,
+            }
         )
-    members.sort(key=lambda item: (item.offset, item.name.lower()))
-    return tuple(members)
+    members.sort(key=lambda item: (int(item["offset"]), str(item["name"]).lower()))
+    return members
 
 
-def _function_frame(context: OperationContext, request: FunctionIdentifierRequest) -> FunctionFrameResult:
+def _function_frame(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
     runtime = context.runtime
     func = runtime.resolve_function(request.identifier)
     name, address = _function_header(runtime, func)
     frame_tif = runtime.ida_typeinf.tinfo_t()
     if not frame_tif.get_func_frame(func):
         raise IdaOperationError(f"function has no frame: {address}")
-    return FunctionFrameResult(
-        function=name,
-        address=address,
-        frame_size=frame_tif.get_size(),
-        local_size=func.frsize,
-        saved_registers_size=func.frregs,
-        argument_size=func.argsize,
-        members=_frame_members(runtime, func, include_special=True, include_xrefs=False),
-    )
+    return {
+        "function": name,
+        "address": address,
+        "frame_size": frame_tif.get_size(),
+        "local_size": func.frsize,
+        "saved_registers_size": func.frregs,
+        "argument_size": func.argsize,
+        "members": _frame_members(runtime, func, include_special=True, include_xrefs=False),
+    }
 
 
-def _function_stackvars(context: OperationContext, request: FunctionIdentifierRequest) -> FunctionStackvarsResult:
+def _function_stackvars(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
     runtime = context.runtime
     func = runtime.resolve_function(request.identifier)
     name, address = _function_header(runtime, func)
-    return FunctionStackvarsResult(
-        function=name,
-        address=address,
-        stackvars=_frame_members(
+    return {
+        "function": name,
+        "address": address,
+        "stackvars": _frame_members(
             runtime,
             func,
             include_special=False,
             include_xrefs=True,
         ),
-    )
+    }
 
 
-def _incoming_edges(runtime: IdaRuntime, func) -> tuple[CallerEdge, ...]:
-    rows: list[CallerEdge] = []
+def _incoming_edges(runtime: IdaRuntime, func) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
     seen: set[tuple[int, int]] = set()
     target_ea = func.start_ea
     flags = runtime.ida_xref.XREF_CODE | runtime.ida_xref.XREF_NOFLOW
@@ -353,18 +228,18 @@ def _incoming_edges(runtime: IdaRuntime, func) -> tuple[CallerEdge, ...]:
             continue
         seen.add(key)
         rows.append(
-            CallerEdge(
-                call_site=hex(ref.from_ea),
-                caller=runtime.function_name(caller_ea),
-                caller_address=hex(caller_ea),
-            )
+            {
+                "call_site": hex(ref.from_ea),
+                "caller": runtime.function_name(caller_ea),
+                "caller_address": hex(caller_ea),
+            }
         )
-    rows.sort(key=lambda item: (item.caller.lower(), item.call_site))
-    return tuple(rows)
+    rows.sort(key=lambda item: (str(item["caller"]).lower(), str(item["call_site"])))
+    return rows
 
 
-def _outgoing_edges(runtime: IdaRuntime, func) -> tuple[CalleeEdge, ...]:
-    rows: list[CalleeEdge] = []
+def _outgoing_edges(runtime: IdaRuntime, func) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
     seen: set[tuple[int, int]] = set()
     flags = runtime.ida_xref.XREF_CODE | runtime.ida_xref.XREF_NOFLOW
     for item in runtime.ida_funcs.func_item_iterator_t(func).code_items():
@@ -380,31 +255,31 @@ def _outgoing_edges(runtime: IdaRuntime, func) -> tuple[CalleeEdge, ...]:
                 continue
             seen.add(key)
             rows.append(
-                CalleeEdge(
-                    call_site=hex(item),
-                    callee=runtime.function_name(callee_ea),
-                    callee_address=hex(callee_ea),
-                )
+                {
+                    "call_site": hex(item),
+                    "callee": runtime.function_name(callee_ea),
+                    "callee_address": hex(callee_ea),
+                }
             )
-    rows.sort(key=lambda item: (item.callee.lower(), item.call_site))
-    return tuple(rows)
+    rows.sort(key=lambda item: (str(item["callee"]).lower(), str(item["call_site"])))
+    return rows
 
 
-def _function_callers(context: OperationContext, request: FunctionIdentifierRequest) -> IncomingEdgesResult:
+def _function_callers(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
     runtime = context.runtime
     func = runtime.resolve_function(request.identifier)
     name, address = _function_header(runtime, func)
-    return IncomingEdgesResult(function=name, address=address, edges=_incoming_edges(runtime, func))
+    return {"function": name, "address": address, "edges": _incoming_edges(runtime, func)}
 
 
-def _function_callees(context: OperationContext, request: FunctionIdentifierRequest) -> OutgoingEdgesResult:
+def _function_callees(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
     runtime = context.runtime
     func = runtime.resolve_function(request.identifier)
     name, address = _function_header(runtime, func)
-    return OutgoingEdgesResult(function=name, address=address, edges=_outgoing_edges(runtime, func))
+    return {"function": name, "address": address, "edges": _outgoing_edges(runtime, func)}
 
 
-def _disasm(context: OperationContext, request: FunctionIdentifierRequest) -> TextResult:
+def _disasm(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
     runtime = context.runtime
     func_ea = runtime.function_ea(request.identifier)
     ida_lines = runtime.mod("ida_lines")
@@ -412,7 +287,7 @@ def _disasm(context: OperationContext, request: FunctionIdentifierRequest) -> Te
         f"{hex(ea)}: {_strip_tags(runtime, ida_lines.generate_disasm_line(ea, 0) or '')}"
         for ea in runtime.idautils.FuncItems(func_ea)
     ]
-    return TextResult(text="\n".join(lines))
+    return {"text": "\n".join(lines)}
 
 
 def _parse_decompile(params: dict[str, object]) -> DecompileRequest:
@@ -422,7 +297,7 @@ def _parse_decompile(params: dict[str, object]) -> DecompileRequest:
     )
 
 
-def _decompile(context: OperationContext, request: DecompileRequest) -> TextResult:
+def _decompile(context: OperationContext, request: DecompileRequest) -> dict[str, object]:
     runtime = context.runtime
     ida_hexrays = runtime.require_hexrays()
     ea = runtime.function_ea(request.identifier)
@@ -430,7 +305,7 @@ def _decompile(context: OperationContext, request: DecompileRequest) -> TextResu
     cfunc = ida_hexrays.decompile(ea, None, flags) if flags else ida_hexrays.decompile(ea)
     if cfunc is None:
         raise IdaOperationError(f"failed to decompile function at {hex(ea)}")
-    return TextResult(text=runtime.pseudocode_text(cfunc))
+    return {"text": runtime.pseudocode_text(cfunc)}
 
 
 def _parse_ctree(params: dict[str, object]) -> CtreeRequest:
@@ -441,9 +316,9 @@ def _parse_ctree(params: dict[str, object]) -> CtreeRequest:
     )
 
 
-def _ctree_rows(runtime: IdaRuntime, cfunc) -> tuple[CtreeNode, ...]:
+def _ctree_rows(runtime: IdaRuntime, cfunc) -> list[dict[str, object]]:
     ida_hexrays = runtime.require_hexrays()
-    rows: list[CtreeNode] = []
+    rows: list[dict[str, object]] = []
 
     class Visitor(ida_hexrays.ctree_visitor_t):
         def __init__(self) -> None:
@@ -451,13 +326,13 @@ def _ctree_rows(runtime: IdaRuntime, cfunc) -> tuple[CtreeNode, ...]:
 
         def _append(self, kind: str, node) -> int:
             rows.append(
-                CtreeNode(
-                    kind=kind,
-                    depth=max(0, len(self.parents) - 1),
-                    op=node.opname,
-                    ea=_ea_text(runtime, node.ea),
-                    text=_strip_tags(runtime, node.print1(cfunc)),
-                )
+                {
+                    "kind": kind,
+                    "depth": max(0, len(self.parents) - 1),
+                    "op": node.opname,
+                    "ea": _ea_text(runtime, node.ea),
+                    "text": _strip_tags(runtime, node.print1(cfunc)),
+                }
             )
             return 0
 
@@ -469,14 +344,14 @@ def _ctree_rows(runtime: IdaRuntime, cfunc) -> tuple[CtreeNode, ...]:
 
     visitor = Visitor()
     visitor.apply_to(cfunc.body, None)
-    return tuple(rows)
+    return rows
 
 
-def _render_ctree_text(nodes: tuple[CtreeNode, ...]) -> str:
+def _render_ctree_text(nodes: list[dict[str, object]]) -> str:
     return "\n".join(
-        f"{'  ' * int(node.depth)}{node.kind}:{node.op}"
-        + (f" @{node.ea}" if node.ea else "")
-        + (f"  {node.text}" if node.text else "")
+        f"{'  ' * int(node['depth'])}{node['kind']}:{node['op']}"
+        + (f" @{node['ea']}" if node["ea"] else "")
+        + (f"  {node['text']}" if node["text"] else "")
         for node in nodes
     )
 
@@ -531,7 +406,7 @@ def _microcode_lines(runtime: IdaRuntime, func, maturity: str) -> tuple[str, ...
     return tuple(line for line in printer.lines if line)
 
 
-def _ctree(context: OperationContext, request: CtreeRequest) -> CtreeResult | MicrocodeResult:
+def _ctree(context: OperationContext, request: CtreeRequest) -> dict[str, object]:
     runtime = context.runtime
     func = runtime.resolve_function(request.identifier)
     name, address = _function_header(runtime, func)
@@ -540,23 +415,23 @@ def _ctree(context: OperationContext, request: CtreeRequest) -> CtreeResult | Mi
         if cfunc is None:
             raise IdaOperationError(f"failed to decompile function at {address}")
         nodes = _ctree_rows(runtime, cfunc)
-        return CtreeResult(
-            function=name,
-            address=address,
-            level=request.level,
-            nodes=nodes,
-            text=_render_ctree_text(nodes),
-        )
+        return {
+            "function": name,
+            "address": address,
+            "level": request.level,
+            "nodes": nodes,
+            "text": _render_ctree_text(nodes),
+        }
     if request.level == "micro":
         lines = _microcode_lines(runtime, func, request.maturity)
-        return MicrocodeResult(
-            function=name,
-            address=address,
-            level=request.level,
-            maturity=request.maturity,
-            lines=lines,
-            text="\n".join(lines),
-        )
+        return {
+            "function": name,
+            "address": address,
+            "level": request.level,
+            "maturity": request.maturity,
+            "lines": list(lines),
+            "text": "\n".join(lines),
+        }
     raise IdaOperationError(f"unsupported ctree level: {request.level}")
 
 
@@ -616,33 +491,19 @@ def _direct_context(runtime: IdaRuntime) -> OperationContext:
 
 def op_decompile(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
     request = _parse_decompile(params)
-    return payload_from_model(_decompile(_direct_context(runtime), request))
+    return _decompile(_direct_context(runtime), request)
 
 
 def op_function_frame(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
     request = _parse_identifier(params)
-    return payload_from_model(_function_frame(_direct_context(runtime), request))
+    return _function_frame(_direct_context(runtime), request)
 
 
 __all__ = [
-    "CalleeEdge",
-    "CallerEdge",
-    "CtreeNode",
     "CtreeRequest",
-    "CtreeResult",
     "DecompileRequest",
-    "FrameMember",
-    "FrameXref",
-    "FunctionFrameResult",
     "FunctionIdentifierRequest",
-    "FunctionListEntry",
     "FunctionListRequest",
-    "FunctionShowResult",
-    "FunctionStackvarsResult",
-    "IncomingEdgesResult",
-    "MicrocodeResult",
-    "OutgoingEdgesResult",
-    "TextResult",
     "function_operations",
     "op_decompile",
     "op_function_frame",

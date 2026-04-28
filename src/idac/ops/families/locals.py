@@ -7,7 +7,6 @@ from typing import Any
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import optional_param_int, require_str
-from ..models import payload_from_model
 from ..preview import PreviewSpec
 from ..runtime import (
     IdaOperationError,
@@ -56,36 +55,6 @@ class LocalUpdateRequest:
     selector: LocalSelector
     new_name: str | None = None
     decl: str | None = None
-
-
-@dataclass(frozen=True)
-class LocalRow:
-    index: int
-    local_id: str
-    definition_address: str
-    location: str
-    name: str
-    display_name: str
-    type: str
-    is_arg: bool
-    is_stack: bool
-    stack_offset: int | None
-    size: int
-
-
-@dataclass(frozen=True)
-class LocalListResult:
-    function: str
-    address: str
-    locals: tuple[LocalRow, ...]
-
-
-@dataclass(frozen=True)
-class LocalMutationResult:
-    function: str
-    address: str
-    locals: tuple[LocalRow, ...]
-    changed: bool
 
 
 @dataclass(frozen=True)
@@ -236,7 +205,7 @@ def _lvar_locator(runtime: IdaRuntime, lvar):
     return locator
 
 
-def _local_row(runtime: IdaRuntime, index: int, lvar, saved) -> LocalRow:
+def _local_row(runtime: IdaRuntime, index: int, lvar, saved) -> dict[str, object]:
     stack_offset = None
     if lvar.is_stk_var():
         with suppress_recoverable_ida_errors():
@@ -255,22 +224,22 @@ def _local_row(runtime: IdaRuntime, index: int, lvar, saved) -> LocalRow:
             saved_type = ""
         if saved_type:
             type_text = saved_type
-    return LocalRow(
-        index=index,
-        local_id=local_id,
-        definition_address=definition_address,
-        location=location,
-        name=name,
-        display_name=name or f"<unnamed_{index}>",
-        type=type_text,
-        is_arg=lvar.is_arg_var,
-        is_stack=lvar.is_stk_var(),
-        stack_offset=stack_offset,
-        size=lvar.width,
-    )
+    return {
+        "index": index,
+        "local_id": local_id,
+        "definition_address": definition_address,
+        "location": location,
+        "name": name,
+        "display_name": name or f"<unnamed_{index}>",
+        "type": type_text,
+        "is_arg": lvar.is_arg_var,
+        "is_stack": lvar.is_stk_var(),
+        "stack_offset": stack_offset,
+        "size": lvar.width,
+    }
 
 
-def _local_rows(runtime: IdaRuntime, func_ea: int) -> tuple[LocalRow, ...]:
+def _local_rows(runtime: IdaRuntime, func_ea: int) -> list[dict[str, object]]:
     ida_hexrays = runtime.require_hexrays()
     cfunc = _decompile_locals(runtime, func_ea, action="inspect locals")
     user_rows: dict[tuple[int, str], Any] = {}
@@ -279,19 +248,19 @@ def _local_rows(runtime: IdaRuntime, func_ea: int) -> tuple[LocalRow, ...]:
         for saved in user_info.lvvec:
             user_rows[(saved.ll.defea, _vdloc_text(saved.ll.location))] = saved
 
-    rows: list[LocalRow] = []
+    rows: list[dict[str, object]] = []
     for index, lvar in enumerate(cfunc.get_lvars()):
         saved = user_rows.get((lvar.defea, _vdloc_text(lvar.location)))
         rows.append(_local_row(runtime, index, lvar, saved))
-    return tuple(rows)
+    return rows
 
 
-def _local_list_result(runtime: IdaRuntime, func_ea: int) -> LocalListResult:
-    return LocalListResult(
-        function=runtime.function_name(func_ea),
-        address=hex(func_ea),
-        locals=_local_rows(runtime, func_ea),
-    )
+def _local_list_result(runtime: IdaRuntime, func_ea: int) -> dict[str, object]:
+    return {
+        "function": runtime.function_name(func_ea),
+        "address": hex(func_ea),
+        "locals": _local_rows(runtime, func_ea),
+    }
 
 
 def _stable_local_matches(
@@ -368,8 +337,9 @@ def _available_locals_suffix(runtime: IdaRuntime, func_ea: int) -> str:
         return ""
     rendered: list[str] = []
     for row in rows[:12]:
-        name = row.display_name or row.name or f"<unnamed_{row.index}>"
-        rendered.append(f"#{row.index} {name} ({row.local_id})")
+        index = int(row["index"])
+        name = str(row.get("display_name") or row.get("name") or f"<unnamed_{index}>")
+        rendered.append(f"#{index} {name} ({row['local_id']})")
     suffix = "; available locals: " + ", ".join(rendered)
     if len(rows) > 12:
         suffix += f", ... {len(rows) - 12} more"
@@ -394,18 +364,18 @@ def _local_saved_info(runtime: IdaRuntime, locator):
     return info
 
 
-def _readback_local_change(runtime: IdaRuntime, func_ea: int, *, success_message: str) -> LocalMutationResult:
+def _readback_local_change(runtime: IdaRuntime, func_ea: int, *, success_message: str) -> dict[str, object]:
     try:
         refreshed = _local_list_result(runtime, func_ea)
     except Exception as exc:
         detail = str(exc) or exc.__class__.__name__
         raise IdaOperationError(f"{success_message} but failed to read back locals: {detail}") from exc
-    return LocalMutationResult(
-        function=refreshed.function,
-        address=refreshed.address,
-        locals=refreshed.locals,
-        changed=True,
-    )
+    return {
+        "function": refreshed["function"],
+        "address": refreshed["address"],
+        "locals": refreshed["locals"],
+        "changed": True,
+    }
 
 
 def _rename_local_by_name(
@@ -416,7 +386,7 @@ def _rename_local_by_name(
     *,
     failure_message: str,
     success_message: str,
-) -> LocalMutationResult | None:
+) -> dict[str, object] | None:
     rename_lvar = getattr(runtime.require_hexrays(), "rename_lvar", None)
     if not callable(rename_lvar):
         return None
@@ -433,7 +403,7 @@ def _apply_local_change(
     modify_flag: int,
     failure_message: str,
     success_message: str,
-) -> LocalMutationResult:
+) -> dict[str, object]:
     if not runtime.require_hexrays().modify_user_lvar_info(func_ea, modify_flag, info):
         raise IdaOperationError(failure_message)
     return _readback_local_change(runtime, func_ea, success_message=success_message)
@@ -450,7 +420,7 @@ def _cleanup_local_preview(context: OperationContext, request: LocalRenameReques
             raise
 
 
-def _local_list(context: OperationContext, request: LocalListRequest) -> LocalListResult:
+def _local_list(context: OperationContext, request: LocalListRequest) -> dict[str, object]:
     runtime = context.runtime
     func_ea = runtime.function_ea(request.identifier)
     return _local_list_result(runtime, func_ea)
@@ -459,13 +429,13 @@ def _local_list(context: OperationContext, request: LocalListRequest) -> LocalLi
 def _local_list_for_change(
     context: OperationContext,
     request: LocalRenameRequest | LocalRetypeRequest | LocalUpdateRequest,
-) -> LocalListResult:
+) -> dict[str, object]:
     runtime = context.runtime
     func_ea = runtime.function_ea(request.identifier)
     return _local_list_result(runtime, func_ea)
 
 
-def _local_rename(context: OperationContext, request: LocalRenameRequest) -> LocalMutationResult:
+def _local_rename(context: OperationContext, request: LocalRenameRequest) -> dict[str, object]:
     runtime = context.runtime
     func_ea = runtime.function_ea(request.identifier)
     selected = _select_local(runtime, func_ea, request.selector)
@@ -494,7 +464,7 @@ def _local_rename(context: OperationContext, request: LocalRenameRequest) -> Loc
     )
 
 
-def _local_retype(context: OperationContext, request: LocalRetypeRequest) -> LocalMutationResult:
+def _local_retype(context: OperationContext, request: LocalRetypeRequest) -> dict[str, object]:
     runtime = context.runtime
     func_ea = runtime.function_ea(request.identifier)
     selected = _select_local(runtime, func_ea, request.selector)
@@ -515,7 +485,7 @@ def _local_retype(context: OperationContext, request: LocalRetypeRequest) -> Loc
     )
 
 
-def _local_update(context: OperationContext, request: LocalUpdateRequest) -> LocalMutationResult:
+def _local_update(context: OperationContext, request: LocalUpdateRequest) -> dict[str, object]:
     runtime = context.runtime
     func_ea = runtime.function_ea(request.identifier)
     selected = _select_local(runtime, func_ea, request.selector)
@@ -597,26 +567,23 @@ def local_operations() -> tuple[OperationSpec[object, object], ...]:
 
 def op_local_list(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
     request = _parse_local_list(params)
-    return payload_from_model(_local_list(OperationContext(runtime=runtime), request))
+    return _local_list(OperationContext(runtime=runtime), request)
 
 
 def op_local_rename(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
     request = _parse_local_rename(params)
-    return payload_from_model(_local_rename(OperationContext(runtime=runtime), request))
+    return _local_rename(OperationContext(runtime=runtime), request)
 
 
 def op_local_update(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
     request = _parse_local_update(params)
-    return payload_from_model(_local_update(OperationContext(runtime=runtime), request))
+    return _local_update(OperationContext(runtime=runtime), request)
 
 
 __all__ = [
     "LocalListRequest",
-    "LocalListResult",
-    "LocalMutationResult",
     "LocalRenameRequest",
     "LocalRetypeRequest",
-    "LocalRow",
     "LocalSelector",
     "LocalUpdateRequest",
     "local_operations",

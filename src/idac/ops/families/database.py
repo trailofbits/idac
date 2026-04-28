@@ -12,28 +12,8 @@ class DatabaseInfoRequest:
 
 
 @dataclass(frozen=True)
-class DatabaseInfoResult:
-    path: str
-    database_path: str
-    module: str
-    processor: str
-    bits: int
-    base: str
-    min_ea: str
-    max_ea: str
-    start_ea: str | None
-    entry_ea: str | None
-
-
-@dataclass(frozen=True)
 class DatabaseSaveRequest:
     path: str | None = None
-
-
-@dataclass(frozen=True)
-class DatabaseSaveResult:
-    saved: bool
-    path: str
 
 
 def _parse_info(_params: dict[str, object]) -> DatabaseInfoRequest:
@@ -45,7 +25,7 @@ def _parse_save(params: dict[str, object]) -> DatabaseSaveRequest:
     return DatabaseSaveRequest(path=path or None)
 
 
-def _database_info(context: OperationContext, request: DatabaseInfoRequest) -> DatabaseInfoResult:
+def _database_info(context: OperationContext, request: DatabaseInfoRequest) -> dict[str, object]:
     del request
     runtime = context.runtime
     ida_entry = runtime.mod("ida_entry")
@@ -55,21 +35,21 @@ def _database_info(context: OperationContext, request: DatabaseInfoRequest) -> D
     entry_ord = ida_entry.get_entry_ordinal(0)
     entry_ea = ida_entry.get_entry(entry_ord) if entry_ord != idaapi.BADADDR else idaapi.BADADDR
     start_ea = ida_ida.inf_get_start_ea()
-    return DatabaseInfoResult(
-        path=idaapi.get_input_file_path() or "",
-        database_path=ida_loader.get_path(ida_loader.PATH_TYPE_IDB) or "",
-        module=idaapi.get_root_filename() or "",
-        processor=ida_ida.inf_get_procname(),
-        bits=runtime.database_bits(),
-        base=hex(idaapi.get_imagebase()),
-        min_ea=hex(ida_ida.inf_get_min_ea()),
-        max_ea=hex(ida_ida.inf_get_max_ea()),
-        start_ea=None if start_ea == idaapi.BADADDR else hex(start_ea),
-        entry_ea=None if entry_ea == idaapi.BADADDR else hex(entry_ea),
-    )
+    return {
+        "path": idaapi.get_input_file_path() or "",
+        "database_path": ida_loader.get_path(ida_loader.PATH_TYPE_IDB) or "",
+        "module": idaapi.get_root_filename() or "",
+        "processor": ida_ida.inf_get_procname(),
+        "bits": runtime.database_bits(),
+        "base": hex(idaapi.get_imagebase()),
+        "min_ea": hex(ida_ida.inf_get_min_ea()),
+        "max_ea": hex(ida_ida.inf_get_max_ea()),
+        "start_ea": None if start_ea == idaapi.BADADDR else hex(start_ea),
+        "entry_ea": None if entry_ea == idaapi.BADADDR else hex(entry_ea),
+    }
 
 
-def _database_save(context: OperationContext, request: DatabaseSaveRequest) -> DatabaseSaveResult:
+def _database_save(context: OperationContext, request: DatabaseSaveRequest) -> dict[str, object]:
     runtime = context.runtime
     ida_loader = runtime.mod("ida_loader")
     save_path = request.path or ida_loader.get_path(ida_loader.PATH_TYPE_IDB) or ""
@@ -77,7 +57,7 @@ def _database_save(context: OperationContext, request: DatabaseSaveRequest) -> D
         raise IdaOperationError("could not resolve database path")
     if not bool(ida_loader.save_database(save_path, 0)):
         raise IdaOperationError(f"failed to save database: {save_path}")
-    return DatabaseSaveResult(saved=True, path=save_path)
+    return {"saved": True, "path": save_path}
 
 
 def database_operations() -> tuple[OperationSpec[object, object], ...]:
@@ -98,8 +78,6 @@ def database_operations() -> tuple[OperationSpec[object, object], ...]:
 
 __all__ = [
     "DatabaseInfoRequest",
-    "DatabaseInfoResult",
     "DatabaseSaveRequest",
-    "DatabaseSaveResult",
     "database_operations",
 ]
