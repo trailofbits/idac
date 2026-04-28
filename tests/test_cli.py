@@ -228,7 +228,7 @@ def test_docs_topic_prints_bundled_reference(capsys) -> None:
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "# idac Quick Reference" in output
-    assert "This is the current command grammar" in output
+    assert "The command grammar for the `idac` CLI." in output
 
 
 def test_docs_large_topic_prints_inline(capsys) -> None:
