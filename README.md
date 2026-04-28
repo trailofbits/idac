@@ -1,8 +1,21 @@
 # idac
 
-An agent-friendly CLI for IDA Pro. Not an MCP server — a proper CLI that composes with shell pipelines, runs in agent sandboxes without a sidecar process, and doesn't need you to debug JSON-RPC framing when things go wrong.
+idac is the IDA Pro CLI for the agents (and humans). One Unix socket, no JSON-RPC framing, no sidecar daemon, no babysitting — just `idac decompile sub_08041337` from any shell, any sandbox, any agent loop.
 
-Most commands can run with no context at all when exactly one live IDA GUI session is open. For explicit selection, use `-c/--context` with either a GUI selector or an explicit database locator such as `db:sample.i64`.
+## Why idac
+
+- **Agent-native by default** — every command emits structured JSON, every mutation supports `preview` for dry-run, and the bundled skill teaches Claude Code and Codex to drive it.
+- **Not an MCP server** — composes with shell, pipes, `xargs`, `jq`, and your agent's existing tool-use loop.
+- **Built for batches** — recover an entire class hierarchy, retype a hundred locals, or decompile every `Handler_*` in one `idac batch` invocation against a shared context.
+- **Live or headless** — the same commands work against any of your seven open IDA databases or saved database. Switch with one flag, no separate tooling.
+
+## Demo
+
+```bash
+idac decompilemany "Handler_" --out-dir decomp/ -c "db:sample.i64"
+```
+
+Every `Handler_*` function decompiled into its own `.c` file with a `manifest.json`. Works identically against a live GUI session — drop the `-c` flag and idac auto-targets the only open instance.
 
 ## Quick start
 
@@ -17,7 +30,6 @@ idac misc skill install
 Talk to a live GUI session:
 
 ```bash
-idac doctor
 idac targets list --json
 idac decompile "sub_08041337"
 idac decompile "sub_08041337" --f5
@@ -29,12 +41,9 @@ Work headless against an existing database:
 ```bash
 idac doctor
 idac database show -c "db:sample.i64"
-idac decompile "sub_08041337" -c "db:sample.i64"
 idac decompile "ExampleClass::method_1" -c "db:sample.i64"
 idac decompile "sub_08041337" --no-cache -c "db:sample.i64"
 ```
-
-For `idalib`, `idapro` must already be installed. This repo assumes the standard IDA 9.3 macOS layout at `/Applications/IDA Professional 9.3.app/Contents/MacOS`.
 
 If running from the repo without a global install:
 
@@ -42,11 +51,17 @@ If running from the repo without a global install:
 uv run idac --help
 ```
 
-## Backends
+## Requirements
 
-**Live GUI** — connects to a running IDA desktop session over a Unix socket bridge. Use `idac targets list --json` to discover instances. If only one is open, most commands can omit `-c` entirely. Use `-c pid:<pid>` or `-c <module>` when multiple GUI sessions are open.
+For `idalib`, `idapro` must already be installed. This repo assumes the standard IDA 9.3 macOS layout at `/Applications/IDA Professional 9.3.app/Contents/MacOS`.
 
-**Database context** — passing `-c "db:<database.i64>"` or `-c "db:<database.idb>"` starts or reuses a headless per-database `idalib` process automatically. Use `idac database save -c "db:<database>"` to checkpoint and `idac database close -c "db:<database>"` to tear down.
+## How it works
+
+Most commands can run with no context at all when exactly one live IDA GUI session is open. For explicit selection, use `-c/--context` with either a GUI selector or a database locator such as `db:sample.i64`.
+
+**Drive your live IDA session** — idac connects to a running IDA desktop over a Unix socket bridge. Use `idac targets list --json` to discover instances. If only one is open, most commands can omit `-c` entirely. Use `-c pid:<pid>` or `-c <module>` when multiple GUI sessions are open.
+
+**Spin up headless databases on demand** — passing `-c "db:<database.i64|idb>"` starts or reuses a headless per-database `idalib` process automatically. No daemon to manage, no port to allocate. Use `idac database save -c "db:<database>"` to checkpoint and `idac database close -c "db:<database>"` to tear down.
 
 ## Agent sandbox setup
 
@@ -70,18 +85,19 @@ Use `idac --help` for a specific subcommand or `idac --full-help` for the comple
 
 | Family | Commands |
 |--------|----------|
-| Discovery | `doctor`, `targets list`, `database show`, `segment list` |
-| Functions | `function list`, `metadata`, `frame`, `stackvars`, `callees`, `prototype`, `locals` |
-| Decompilation | `decompile`, `disasm`, `ctree` |
+| Discovery | `doctor`, `docs`, `targets list`, `database show`, `segment list`, `bookmark list/show`, `comment show` |
+| Functions | `function list`, `metadata`, `frame`, `stackvars`, `callees`, `callers`, `prototype`, `locals` |
+| Decompilation | `decompile`, `decompilemany`, `disasm`, `ctree` |
 | Search | `search bytes`, `search strings`, `xrefs`, `imports` |
-| Types | `type list`, `show`, `declare`, `struct`, `enum`, `type class vtable` |
+| Types | `type list`, `show`, `declare`, `type struct list/show/field`, `type enum list/show/member`, `type class vtable` |
 | Classes | `type class list`, `show`, `hierarchy`, `fields`, `candidates` |
-| Mutations | `misc rename`, `comment set`, `bookmark add/set`, `function prototype set`, `function locals update/rename/retype` |
+| Mutations | `misc rename`, `comment set/delete`, `bookmark add/set/delete`, `function prototype set`, `function locals update/rename/retype`, `type struct field set/rename/delete`, `type enum member set/rename/delete` |
 | Batch | `batch`, `preview` |
 | IDAPython | `py exec` |
-| Maintenance | `misc reanalyze`, `database save`, `database close`, `targets cleanup`, `misc plugin`, `misc skill` |
+| Workspace | `workspace init` |
+| Maintenance | `misc reanalyze`, `database open/save/close`, `targets cleanup`, `misc plugin`, `misc skill` |
 
-`search bytes` and `search strings` require both `--timeout` and `--segment`. On dyld shared caches, `search strings` only allows `--scan` with explicit `--start` / `--end` bounds up to 16 MiB.
+Many models want to fill up their context quickly by running strings so currently `search bytes` and `search strings` require both `--timeout` and `--segment`.
 
 ### Preview
 
@@ -126,7 +142,7 @@ Prefer `function locals update` when a recovered local needs both a better name 
 
 ### Output
 
-Most read commands default to `text`. Use `--json` when parsing output. Use `--out <path>` for large results. When `--out` is set, `stdout` stays empty and the CLI prints a short `stderr` summary with the artifact path; broad discovery commands also include result counts there. Matching is case-sensitive by default, broad list commands use one positional name filter, `--regex` treats that filter as a regular expression, `function list --demangle` renders demangled display names in text output, and `type list` / `type struct list` / `type enum list` require `--out` when no filter is given.
+Most read commands default to `--format text`. Use `--format json` (or the `-j` shortcut) or `--format jsonl` when parsing output, and `-o/--out <path>` for large results. When `--out` is set, `stdout` stays empty and the CLI prints a short `stderr` summary with the artifact path; broad discovery commands also include result counts there. Matching is case-sensitive by default, broad list commands use one positional name filter, `--regex` treats that filter as a regular expression, `function list --demangle` renders demangled display names in text output, and `type list` / `type struct list` / `type enum list` require `--out` when no filter is given.
 
 ### Fresh Decompile
 
@@ -139,7 +155,21 @@ idac decompile "sub_08041337" --f5
 
 `--f5` is an alias for `--no-cache`, named after the usual Hex-Rays refresh shortcut in the UI.
 
-Identifier-taking commands such as `decompile` also accept demangled C++ names when they resolve uniquely, for example `idac decompile "ExampleClass::method_1"`. If multiple overloads share the same short demangled name, use a mangled name, full signature, or address instead.
+### Decompile Many
+
+`decompilemany` decompiles a set of functions in one pass against a shared context. Select either by name filter or by reading exact identifiers from a file, and choose between one combined output file (`--out-file`) or one `.c` file per function plus a `manifest.json` (`--out-dir`):
+
+```bash
+idac decompilemany "Handler_" --out-dir ".idac/tmp/decomp" -c "db:sample.i64"
+idac decompilemany "Handler_.*" --regex --out-dir ".idac/tmp/decomp" -c "db:sample.i64"
+
+printf '%s\n' main sub_401000 0x401234 > funcs.txt
+idac decompilemany --functions-file "funcs.txt" --out-file ".idac/tmp/decompile.c" -c "db:sample.i64"
+```
+
+Pass `--f5` (alias for `--no-cache`) when running readback after type or prototype changes so each function reflects the latest state.
+
+Function-targeting commands (`decompile`, `disasm`, `ctree`, and the `function` family) accept demangled C++ names when they resolve uniquely, for example `idac decompile "ExampleClass::method_1"`. On non-unique matches, use a mangled name, full signature, or address. Other identifier-taking commands (`name`, `comment`, `bookmark`, `search`, `xref`, vtable lookups) take only addresses or mangled names.
 
 `function metadata` and `function list --json` include a `display_name` field with the demangled symbol name when available. `function list --demangle` changes text output to use that display name while keeping JSON `name` stable.
 
@@ -149,9 +179,28 @@ Run many subcommands against one shared context:
 
 ```bash
 idac batch "recovery.idac" --out "/tmp/recovery_batch.json"
+idac batch "rename-pass.idac" -c "db:sample.i64" --out "/tmp/rename-pass.jsonl"
 ```
 
-Batch files use one shell-like subcommand per line, omit the leading `idac` (a leading `idac` is also accepted), and inherit `-c/--context` and `--timeout` from `batch`. Relative child paths such as `--decl-file`, `--functions-file`, and per-line `--out` resolve from the batch file directory.
+Batch files use one shell-like subcommand per line, omit the leading `idac` (a leading `idac` is also accepted), and inherit `-c/--context` and `--timeout` from `batch`. Relative child paths such as `--decl-file`, `--functions-file`, and per-line `--out` resolve from the batch file directory. Blank lines and `#` comments are ignored.
+
+A prototype-cleanup batch file (`prototype-pass.idac`) might look like:
+
+```
+# Run after support types already exist locally.
+function prototype set "0x100000000" --decl "int __fastcall ExampleClass__parseHeader(ExampleClass *__hidden this, const unsigned __int8 *buf, unsigned int len)"
+function prototype set "0x100000100" --decl "void *__fastcall ExampleClass__buildResult(ExampleClass *__hidden this, InputContext *ctx, const ExampleOptions *options)"
+function prototype set "0x100000200" --decl "unsigned int __fastcall ExampleClass__getCount(const ExampleClass *__hidden this)"
+```
+
+A local-rename pass (`rename-pass.idac`) is just a sequence of `function locals rename` lines:
+
+```
+function locals rename "0x100000000" 5 --new-name header_size
+function locals rename "0x100000000" 6 --new-name record_type
+function locals rename "0x100000100" 4 --new-name result_ptr
+function locals rename "0x100000100" 11 --new-name error_code
+```
 
 Batch reuses the same handler surface as normal execution, accepts `preview ...` lines, and writes JSON or JSONL based on the output filename. Maintenance and setup `misc` commands are intentionally rejected from `batch`.
 
@@ -181,4 +230,4 @@ See [docs/development.md](docs/development.md) for fixture regeneration, live GU
 ## Credits
 
 Inspired by [@banteg's `bn` Binary Ninja CLI tool](https://github.com/banteg/bn).
-Written by [Codex](https://openai.com/codex).
+Written by [Codex](https://openai.com/codex)/gpt-5.3-codex and gpt-5.4.
