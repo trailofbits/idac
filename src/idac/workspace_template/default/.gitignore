@@ -1,0 +1,17 @@
+# Machine-managed ephemeral content
+.idac/tmp/
+
+# IDA temporaries
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db

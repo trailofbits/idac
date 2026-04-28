@@ -1,0 +1,14 @@
+# Generic prototype cleanup pass
+#
+# Use this after support types already exist locally.
+# Prefer addresses or mangled names for overloaded functions.
+# Keep declarations parser-friendly and verify each one with:
+#   idac function prototype show <function>
+# Then run:
+#   idac batch prototype-pass.idac -o /tmp/prototype-pass.json
+#   idac misc reanalyze <function>
+#   idac decompile <function> --f5
+
+function prototype set 0x100000000 --decl "int __fastcall ExampleClass__parseHeader(ExampleClass *__hidden this, const unsigned __int8 *buf, unsigned int len)"
+function prototype set 0x100000100 --decl "void *__fastcall ExampleClass__buildResult(ExampleClass *__hidden this, InputContext *ctx, const ExampleOptions *options)"
+function prototype set 0x100000200 --decl "unsigned int __fastcall ExampleClass__getCount(const ExampleClass *__hidden this)"

@@ -1,0 +1,11 @@
+prefix_rule(
+    pattern = ["idac"],
+    decision = "allow",
+    justification = "Auto-approve idac CLI and all subcommands",
+)
+
+prefix_rule(
+    pattern = ["uv", "run", "idac"],
+    decision = "allow",
+    justification = "Auto-approve uv run idac",
+)

@@ -1,0 +1,7 @@
+interface:
+  display_name: "idac"
+  short_description: "Use idac for IDA CLI reversing, mutation, and class recovery"
+  default_prompt: "Use $idac for reverse-engineering work through the local idac CLI against a live IDA GUI target or an existing .i64/.idb database, including decompilation, xrefs, type and class recovery, safe mutations, backend selection, troubleshooting, and IDAPython when needed."
+
+policy:
+  allow_implicit_invocation: true

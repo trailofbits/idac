@@ -1,0 +1,15 @@
+# Generic local rename pass
+#
+# Run only after prototype fixes and reanalysis.
+# Refresh locals first:
+#   idac function locals list <function> --json --out /tmp/locals.json
+# Prefer --index or --local-id after any prototype or reanalysis change.
+# Stop on the first miss, refresh locals, and recalibrate selectors.
+
+function locals rename 0x100000000 5 --new-name header_size
+function locals rename 0x100000000 6 --new-name record_type
+function locals rename 0x100000000 7 --new-name entry_count
+function locals rename 0x100000000 12 --new-name parse_status
+function locals rename 0x100000100 4 --new-name result_ptr
+function locals rename 0x100000100 9 --new-name output_size
+function locals rename 0x100000100 11 --new-name error_code

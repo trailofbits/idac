@@ -1,0 +1,86 @@
+[project]
+name = "idac"
+version = "0.15.0"
+description = "Agent-friendly CLI for IDA with GUI and idalib backends"
+readme = "README.md"
+authors = [
+    { name = "Jay Little / Trail of Bits", email = "jay@trailofbits.com" }
+]
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+idac = "idac.cli:main"
+
+[dependency-groups]
+dev = [
+    { include-group = "lint" },
+    { include-group = "test" },
+    { include-group = "audit" },
+]
+lint = [
+    "ruff>=0.15.6",
+]
+test = [
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+]
+audit = ["pip-audit>=2.9.0"]
+
+[build-system]
+requires = ["uv_build>=0.9.18,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-exclude = [
+    "/src/idac/skills/idac/references/temp",
+    "/src/idac/skills/idac/references/temp/**",
+]
+wheel-exclude = [
+    "/src/idac/skills/idac/references/temp",
+    "/src/idac/skills/idac/references/temp/**",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+src = ["src", "tests", "plugin"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["UP045"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"src/idac/ida_plugin/idac_bridge_plugin.py" = ["E402"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+    "--cov=idac",
+    "--cov-report=term-missing",
+]
+markers = [
+    "gui_live: optional Unix-socket GUI transport integration tests",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src/idac"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]

@@ -1,0 +1,327 @@
+from __future__ import annotations
+
+import contextlib
+import json
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from ..metadata import WIRE_PROTOCOL_VERSION
+from ..paths import (
+    ensure_user_runtime_dir,
+    idalib_registry_path,
+    idalib_registry_paths,
+)
+from .common import normalize_timeout, pid_is_live, recv_all, require_timeout_for_operation
+from .idalib_common import build_target_row, load_registry, normalize_database_path
+from .schema import RequestEnvelope, response_ok
+
+IDALIB_CONNECT_RETRIES = 3
+IDALIB_STARTUP_PROBE_TIMEOUT = 1.0
+IDALIB_STARTUP_TIMEOUT = 10.0
+
+
+@dataclass(frozen=True)
+class IdaLibInstance:
+    pid: int
+    socket_path: Path
+    registry_path: Path
+    database_path: str
+    started_at: str | None
+    meta: dict[str, Any]
+
+
+def _timeout_text(timeout: float | None) -> str:
+    return "blocking mode" if timeout is None else f"{timeout:g}s"
+
+
+def _timeout_error(op: str, timeout: float | None) -> RuntimeError:
+    return RuntimeError(f"idalib request timed out after {_timeout_text(timeout)}: {op}")
+
+
+def _purge_instance_files(
+    *,
+    registry_path: Path | None = None,
+    socket_path: Path | None = None,
+) -> None:
+    if registry_path is not None:
+        with contextlib.suppress(FileNotFoundError):
+            registry_path.unlink()
+    if socket_path is not None:
+        with contextlib.suppress(FileNotFoundError):
+            socket_path.unlink()
+
+
+def _instance_from_registry(path: Path) -> IdaLibInstance | None:
+    payload = load_registry(path)
+    if payload is None:
+        _purge_instance_files(registry_path=path)
+        return None
+    try:
+        pid = int(payload["pid"])
+        socket_path = Path(str(payload["socket_path"]))
+        database_path = normalize_database_path(str(payload["database_path"]))
+    except (KeyError, TypeError, ValueError):
+        _purge_instance_files(registry_path=path)
+        return None
+    if not pid_is_live(pid) or not socket_path.exists():
+        _purge_instance_files(registry_path=path, socket_path=socket_path)
+        return None
+    started_at = payload.get("started_at")
+    return IdaLibInstance(
+        pid=pid,
+        socket_path=socket_path,
+        registry_path=path,
+        database_path=database_path,
+        started_at=None if started_at in (None, "") else str(started_at),
+        meta=dict(payload),
+    )
+
+
+def _list_instances() -> list[IdaLibInstance]:
+    ensure_user_runtime_dir()
+    rows: list[IdaLibInstance] = []
+    for registry_path in idalib_registry_paths():
+        instance = _instance_from_registry(registry_path)
+        if instance is not None:
+            rows.append(instance)
+    return rows
+
+
+def _find_instance_for_database(database_path: str) -> IdaLibInstance | None:
+    requested = normalize_database_path(database_path)
+    for instance in _list_instances():
+        if instance.database_path == requested:
+            return instance
+    return None
+
+
+def _socket_request(
+    socket_path: Path,
+    payload: dict[str, Any],
+    *,
+    timeout: float | None,
+) -> dict[str, Any]:
+    encoded = json.dumps(payload).encode("utf-8")
+    last_error: OSError | None = None
+    for _ in range(IDALIB_CONNECT_RETRIES):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            if timeout is not None:
+                sock.settimeout(timeout)
+            sock.connect(str(socket_path))
+            sock.sendall(encoded)
+            sock.shutdown(socket.SHUT_WR)
+            chunks = recv_all(sock)
+            response = json.loads(b"".join(chunks).decode("utf-8"))
+            if not isinstance(response, dict):
+                raise RuntimeError("idalib daemon returned a non-object JSON payload")
+            return response
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.05)
+        finally:
+            sock.close()
+    detail = "idalib daemon is not running" if last_error is None else str(last_error)
+    raise RuntimeError(detail)
+
+
+def _probe_instance(
+    instance: IdaLibInstance,
+    *,
+    timeout: float | None,
+    purge_on_failure: bool = True,
+) -> bool:
+    try:
+        response = _socket_request(
+            instance.socket_path,
+            {"version": WIRE_PROTOCOL_VERSION, "op": "daemon_status", "params": {}},
+            timeout=timeout,
+        )
+    except socket.timeout:
+        raise
+    except RuntimeError:
+        if purge_on_failure:
+            _purge_instance_files(
+                registry_path=instance.registry_path,
+                socket_path=instance.socket_path,
+            )
+        return False
+    return bool(response.get("ok"))
+
+
+def _build_target_row(instance: IdaLibInstance) -> dict[str, Any]:
+    return build_target_row(
+        pid=instance.pid,
+        database_path=instance.database_path,
+        socket_path=instance.socket_path,
+    )
+
+
+def _start_daemon_for_database(
+    database_path: str,
+    *,
+    probe_timeout: float,
+    run_auto_analysis: bool,
+) -> IdaLibInstance:
+    ensure_user_runtime_dir()
+    cmd = [
+        sys.executable,
+        "-m",
+        "idac.transport.idalib_server",
+        "--database",
+        database_path,
+    ]
+    if not run_auto_analysis:
+        cmd.append("--no-auto-analysis")
+    with tempfile.TemporaryFile("w+", encoding="utf-8") as stderr_log:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_log,
+            text=True,
+            start_new_session=True,
+        )
+
+        expected_registry = idalib_registry_path(proc.pid)
+        deadline = time.monotonic() + IDALIB_STARTUP_TIMEOUT
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                stderr_log.seek(0)
+                detail = stderr_log.read().strip()
+                if detail:
+                    raise RuntimeError(detail)
+                raise RuntimeError(f"idalib daemon failed to start for `{database_path}`")
+            instance = _instance_from_registry(expected_registry)
+            if instance is not None and instance.database_path == database_path:
+                try:
+                    if _probe_instance(
+                        instance,
+                        timeout=probe_timeout,
+                        purge_on_failure=False,
+                    ):
+                        return instance
+                except socket.timeout:
+                    pass
+            time.sleep(0.05)
+        with contextlib.suppress(ProcessLookupError):
+            proc.terminate()
+        raise RuntimeError(f"timed out waiting for idalib daemon to start for `{database_path}`")
+
+
+def _ensure_instance_for_database(
+    database_path: str,
+    *,
+    timeout: float | None,
+    run_auto_analysis: bool,
+    start_if_missing: bool,
+) -> tuple[IdaLibInstance, bool]:
+    normalized = normalize_database_path(database_path)
+    instance = _find_instance_for_database(normalized)
+    if instance is not None:
+        if _probe_instance(instance, timeout=timeout):
+            return instance, True
+        instance = None
+    if not start_if_missing:
+        raise RuntimeError(
+            f"idalib database is not open: {normalized}; use `idac database open {shlex_quote(normalized)}`"
+        )
+    return (
+        _start_daemon_for_database(
+            normalized,
+            probe_timeout=IDALIB_STARTUP_PROBE_TIMEOUT,
+            run_auto_analysis=run_auto_analysis,
+        ),
+        False,
+    )
+
+
+def _already_closed_result(database: str) -> dict[str, Any]:
+    return {
+        "closed": False,
+        "database": normalize_database_path(database),
+        "already_closed": True,
+    }
+
+
+def shlex_quote(value: str) -> str:
+    if value and all(ch.isalnum() or ch in "._/-" for ch in value):
+        return value
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+class IdaLibBackend:
+    name = "idalib"
+
+    def send(self, request: RequestEnvelope) -> dict[str, Any]:
+        timeout = normalize_timeout(request.timeout)
+        require_timeout_for_operation(request.op, timeout)
+        if request.op == "list_targets":
+            return response_ok(
+                [_build_target_row(instance) for instance in _list_instances()],
+                backend="idalib",
+            )
+
+        if request.op == "db_open":
+            raw_path = str(request.params.get("path") or "").strip()
+            if not raw_path:
+                raise RuntimeError("database open requires a path")
+            try:
+                instance, already_open = _ensure_instance_for_database(
+                    raw_path,
+                    timeout=timeout,
+                    run_auto_analysis=bool(request.params.get("run_auto_analysis", True)),
+                    start_if_missing=True,
+                )
+            except socket.timeout as exc:
+                raise _timeout_error("db_open", timeout) from exc
+            return response_ok(
+                {
+                    "opened": True,
+                    "database": instance.database_path,
+                    "already_open": already_open,
+                    "pid": instance.pid,
+                    "socket_path": str(instance.socket_path),
+                },
+                backend="idalib",
+            )
+
+        database = str(request.database or "").strip()
+        if not database:
+            raise RuntimeError("idalib commands require a database context")
+
+        if request.op == "db_close":
+            instance = _find_instance_for_database(database)
+            if instance is None:
+                return response_ok(_already_closed_result(database), backend="idalib")
+            try:
+                if not _probe_instance(instance, timeout=timeout):
+                    return response_ok(_already_closed_result(database), backend="idalib")
+            except socket.timeout as exc:
+                raise _timeout_error(request.op, timeout) from exc
+        else:
+            try:
+                instance, _ = _ensure_instance_for_database(
+                    database,
+                    timeout=timeout,
+                    run_auto_analysis=True,
+                    start_if_missing=True,
+                )
+            except socket.timeout as exc:
+                raise _timeout_error(request.op, timeout) from exc
+
+        payload = {
+            "version": WIRE_PROTOCOL_VERSION,
+            "op": request.op,
+            "params": request.params,
+        }
+        try:
+            return _socket_request(instance.socket_path, payload, timeout=timeout)
+        except socket.timeout as exc:
+            raise _timeout_error(request.op, timeout) from exc

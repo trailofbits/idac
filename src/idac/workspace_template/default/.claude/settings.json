@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(idac)",
+      "Bash(idac:*)"
+    ]
+  },
+  "sandbox": {
+    "network": {
+      "allowAllUnixSockets": true
+    }
+  }
+}
