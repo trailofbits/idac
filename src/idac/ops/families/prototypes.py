@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import require_str
-from ..models import payload_from_model
 from ..preview import PreviewSpec
 from ..runtime import (
     IdaOperationError,
@@ -82,37 +81,6 @@ class PrototypeSetRequest:
     propagate_callers: bool = False
 
 
-@dataclass(frozen=True)
-class PrototypeView:
-    address: str
-    prototype: str
-
-
-@dataclass(frozen=True)
-class PrototypePreviewView:
-    address: str
-    prototype: str
-    decompile: str
-
-
-@dataclass(frozen=True)
-class PrototypePreviewErrorView:
-    address: str
-    prototype: str
-    decompile: None
-    decompile_error: str
-
-
-@dataclass(frozen=True)
-class PrototypeMutationResult:
-    address: str
-    prototype: str
-    changed: bool
-    callers_considered: int = 0
-    callers_updated: int = 0
-    callers_failed: int = 0
-
-
 def _require_identifier(params: dict[str, object]) -> str:
     return require_str(params.get("identifier"), field="address or identifier")
 
@@ -136,25 +104,25 @@ def _parse_proto_set(params: dict[str, object]) -> PrototypeSetRequest:
 def _prototype_view(
     context: OperationContext,
     request: PrototypeGetRequest | PrototypeSetRequest,
-) -> PrototypeView | PrototypePreviewView | PrototypePreviewErrorView:
+) -> dict[str, object]:
     runtime = context.runtime
     ea = runtime.function_ea(request.identifier)
     prototype = runtime.ida_typeinf.print_type(ea, runtime.ida_typeinf.PRTYPE_1LINE) or ""
     if not isinstance(request, PrototypeSetRequest) or not request.preview_decompile:
-        return PrototypeView(address=hex(ea), prototype=prototype)
+        return {"address": hex(ea), "prototype": prototype}
     try:
         cfunc = runtime.require_hexrays().decompile(ea)
         if cfunc is None:
             raise IdaOperationError(f"failed to decompile function at {hex(ea)}")
     except Exception as exc:
         detail = str(exc) or exc.__class__.__name__
-        return PrototypePreviewErrorView(
-            address=hex(ea),
-            prototype=prototype,
-            decompile=None,
-            decompile_error=detail,
-        )
-    return PrototypePreviewView(address=hex(ea), prototype=prototype, decompile=runtime.pseudocode_text(cfunc))
+        return {
+            "address": hex(ea),
+            "prototype": prototype,
+            "decompile": None,
+            "decompile_error": detail,
+        }
+    return {"address": hex(ea), "prototype": prototype, "decompile": runtime.pseudocode_text(cfunc)}
 
 
 def _propagate_callee_tinfo(runtime: IdaRuntime, callee_ea: int, tif) -> tuple[int, int, int]:
@@ -234,14 +202,11 @@ def _parse_prototype_decl(runtime: IdaRuntime, decl: str):
     return None
 
 
-def _proto_get(context: OperationContext, request: PrototypeGetRequest) -> PrototypeView:
-    viewed = _prototype_view(context, request)
-    if isinstance(viewed, PrototypeView):
-        return viewed
-    raise IdaOperationError("internal error: expected a prototype view for proto_get")
+def _proto_get(context: OperationContext, request: PrototypeGetRequest) -> dict[str, object]:
+    return _prototype_view(context, request)
 
 
-def _proto_set(context: OperationContext, request: PrototypeSetRequest) -> PrototypeMutationResult:
+def _proto_set(context: OperationContext, request: PrototypeSetRequest) -> dict[str, object]:
     runtime = context.runtime
     ea = runtime.function_ea(request.identifier)
     decl = request.decl
@@ -275,14 +240,14 @@ def _proto_set(context: OperationContext, request: PrototypeSetRequest) -> Proto
         if current_name and current_name != original_name:
             with suppress_recoverable_ida_errors():
                 runtime.ida_name.set_name(ea, original_name, runtime.ida_name.SN_CHECK)
-    return PrototypeMutationResult(
-        address=hex(ea),
-        prototype=runtime.ida_typeinf.print_type(ea, runtime.ida_typeinf.PRTYPE_1LINE) or "",
-        changed=True,
-        callers_considered=callers_considered,
-        callers_updated=callers_updated,
-        callers_failed=callers_failed,
-    )
+    return {
+        "address": hex(ea),
+        "prototype": runtime.ida_typeinf.print_type(ea, runtime.ida_typeinf.PRTYPE_1LINE) or "",
+        "changed": True,
+        "callers_considered": callers_considered,
+        "callers_updated": callers_updated,
+        "callers_failed": callers_failed,
+    }
 
 
 def prototype_operations() -> tuple[OperationSpec[object, object], ...]:
@@ -308,16 +273,12 @@ def prototype_operations() -> tuple[OperationSpec[object, object], ...]:
 
 def op_proto_set(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
     request = _parse_proto_set(params)
-    return payload_from_model(_proto_set(OperationContext(runtime=runtime), request))
+    return _proto_set(OperationContext(runtime=runtime), request)
 
 
 __all__ = [
     "PrototypeGetRequest",
-    "PrototypeMutationResult",
-    "PrototypePreviewErrorView",
-    "PrototypePreviewView",
     "PrototypeSetRequest",
-    "PrototypeView",
     "op_proto_set",
     "prototype_operations",
 ]
