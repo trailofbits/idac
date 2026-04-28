@@ -6,7 +6,6 @@ from typing import Any
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import optional_param_int, param_int
-from ..models import payload_from_model
 from ..preview import PreviewSpec
 from ..runtime import IdaOperationError, IdaRuntime
 
@@ -65,98 +64,6 @@ class EnumMemberRenameRequest:
 class EnumMemberDeleteRequest:
     enum_name: str
     member_name: str
-
-
-@dataclass(frozen=True)
-class NamedTypeEntry:
-    name: str
-    kind: str
-    decl: str
-
-
-@dataclass(frozen=True)
-class StructMember:
-    index: int
-    name: str | None
-    offset_bits: int
-    offset: int
-    size_bits: int
-    size: int | None
-    type: str
-    comment: str
-
-
-@dataclass(frozen=True)
-class EnumMember:
-    index: int
-    name: str | None
-    value: int
-    value_hex: str
-    comment: str
-
-
-@dataclass(frozen=True)
-class NamedTypeView:
-    name: str
-    kind: str
-    size: int | None
-    size_known: bool
-    decl: str
-
-
-@dataclass(frozen=True)
-class StructuredTypeView:
-    name: str
-    kind: str
-    size: int | None
-    size_known: bool
-    decl: str
-    layout: str
-    members: tuple[StructMember, ...]
-
-
-@dataclass(frozen=True)
-class EnumTypeView:
-    name: str
-    kind: str
-    size: int | None
-    size_known: bool
-    decl: str
-    members: tuple[EnumMember, ...]
-
-
-@dataclass(frozen=True)
-class StructView:
-    name: str
-    kind: str
-    layout: str
-    members: tuple[StructMember, ...]
-
-
-@dataclass(frozen=True)
-class StructMutationResult:
-    name: str
-    kind: str
-    layout: str
-    members: tuple[StructMember, ...]
-    changed: bool
-
-
-@dataclass(frozen=True)
-class EnumView:
-    name: str
-    kind: str
-    decl: str
-    members: tuple[EnumMember, ...]
-
-
-@dataclass(frozen=True)
-class EnumMutationResult:
-    name: str
-    kind: str
-    decl: str
-    members: tuple[EnumMember, ...]
-    changed: bool
 
 
 _UNKNOWN_TINFO_SIZE_THRESHOLD = 1 << 63
@@ -252,44 +159,44 @@ def _normalize_tinfo_size(value: object) -> int | None:
     return size
 
 
-def _coerce_named_type_entries(rows: list[dict[str, object]]) -> tuple[NamedTypeEntry, ...]:
-    return tuple(
-        NamedTypeEntry(
-            name=str(item.get("name") or ""),
-            kind=str(item.get("kind") or ""),
-            decl=str(item.get("decl") or ""),
-        )
+def _named_type_entry_rows(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
+    return [
+        {
+            "name": str(item.get("name") or ""),
+            "kind": str(item.get("kind") or ""),
+            "decl": str(item.get("decl") or ""),
+        }
         for item in rows
-    )
+    ]
 
 
-def _coerce_struct_members(rows: list[dict[str, object]]) -> tuple[StructMember, ...]:
-    return tuple(
-        StructMember(
-            index=int(item.get("index") or 0),
-            name=None if item.get("name") is None else str(item.get("name")),
-            offset_bits=int(item.get("offset_bits") or 0),
-            offset=int(item.get("offset") or 0),
-            size_bits=int(item.get("size_bits") or 0),
-            size=None if item.get("size") is None else int(item.get("size")),
-            type=str(item.get("type") or ""),
-            comment=str(item.get("comment") or ""),
-        )
+def _struct_member_rows(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
+    return [
+        {
+            "index": int(item.get("index") or 0),
+            "name": None if item.get("name") is None else str(item.get("name")),
+            "offset_bits": int(item.get("offset_bits") or 0),
+            "offset": int(item.get("offset") or 0),
+            "size_bits": int(item.get("size_bits") or 0),
+            "size": None if item.get("size") is None else int(item.get("size")),
+            "type": str(item.get("type") or ""),
+            "comment": str(item.get("comment") or ""),
+        }
         for item in rows
-    )
+    ]
 
 
-def _coerce_enum_members(rows: list[dict[str, object]]) -> tuple[EnumMember, ...]:
-    return tuple(
-        EnumMember(
-            index=int(item.get("index") or 0),
-            name=None if item.get("name") is None else str(item.get("name")),
-            value=int(item.get("value") or 0),
-            value_hex=str(item.get("value_hex") or hex(int(item.get("value") or 0))),
-            comment=str(item.get("comment") or ""),
-        )
+def _enum_member_rows(rows: list[dict[str, Any]]) -> list[dict[str, object]]:
+    return [
+        {
+            "index": int(item.get("index") or 0),
+            "name": None if item.get("name") is None else str(item.get("name")),
+            "value": int(item.get("value") or 0),
+            "value_hex": str(item.get("value_hex") or hex(int(item.get("value") or 0))),
+            "comment": str(item.get("comment") or ""),
+        }
         for item in rows
-    )
+    ]
 
 
 def _ensure_terr_ok(runtime: IdaRuntime, code: int, action: str) -> None:
@@ -339,9 +246,9 @@ def _parse_member_type(runtime: IdaRuntime, decl: str, field_name: str):
     raise IdaOperationError(f"failed to parse member type: {decl}")
 
 
-def _type_list(context: OperationContext, request: NamedTypeListRequest) -> tuple[NamedTypeEntry, ...]:
+def _type_list(context: OperationContext, request: NamedTypeListRequest) -> list[dict[str, object]]:
     runtime = context.runtime
-    return _coerce_named_type_entries(
+    return _named_type_entry_rows(
         runtime.list_named_types(
             query=request.query,
             pattern=request.pattern,
@@ -352,55 +259,51 @@ def _type_list(context: OperationContext, request: NamedTypeListRequest) -> tupl
     )
 
 
-def op_type_list(runtime: IdaRuntime, params: dict[str, Any]) -> tuple[NamedTypeEntry, ...]:
+def op_type_list(runtime: IdaRuntime, params: dict[str, Any]) -> list[dict[str, object]]:
     return _type_list(OperationContext(runtime=runtime), _parse_list(params))
 
 
-def _type_show(
-    context: OperationContext,
-    request: NamedTypeShowRequest,
-) -> NamedTypeView | StructuredTypeView | EnumTypeView:
+def _type_show(context: OperationContext, request: NamedTypeShowRequest) -> dict[str, object]:
     runtime = context.runtime
     tif = runtime.get_named_type(request.name)
     kind = runtime.classify_tinfo(tif)
     size = _normalize_tinfo_size(tif.get_size())
     decl = runtime.tinfo_decl(tif, name=request.name, multi=True)
     if kind in {"struct", "union"}:
-        members = _coerce_struct_members(runtime.tinfo_members(tif))
-        return StructuredTypeView(
-            name=request.name,
-            kind=kind,
-            size=size,
-            size_known=size is not None,
-            decl=decl,
-            layout=decl,
-            members=members,
-        )
+        return {
+            "name": request.name,
+            "kind": kind,
+            "size": size,
+            "size_known": size is not None,
+            "decl": decl,
+            "layout": decl,
+            "members": _struct_member_rows(runtime.tinfo_members(tif)),
+        }
     if kind == "enum":
-        return EnumTypeView(
-            name=request.name,
-            kind=kind,
-            size=size,
-            size_known=size is not None,
-            decl=decl,
-            members=_coerce_enum_members(runtime.enum_members(tif)),
-        )
-    return NamedTypeView(
-        name=request.name,
-        kind=kind,
-        size=size,
-        size_known=size is not None,
-        decl=decl,
-    )
+        return {
+            "name": request.name,
+            "kind": kind,
+            "size": size,
+            "size_known": size is not None,
+            "decl": decl,
+            "members": _enum_member_rows(runtime.enum_members(tif)),
+        }
+    return {
+        "name": request.name,
+        "kind": kind,
+        "size": size,
+        "size_known": size is not None,
+        "decl": decl,
+    }
 
 
 def op_type_show(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
-    return payload_from_model(_type_show(OperationContext(runtime=runtime), _parse_show(params)))
+    return _type_show(OperationContext(runtime=runtime), _parse_show(params))
 
 
-def _struct_list(context: OperationContext, request: NamedTypeListRequest) -> tuple[NamedTypeEntry, ...]:
+def _struct_list(context: OperationContext, request: NamedTypeListRequest) -> list[dict[str, object]]:
     runtime = context.runtime
-    return _coerce_named_type_entries(
+    return _named_type_entry_rows(
         runtime.list_named_types(
             query=request.query,
             pattern=request.pattern,
@@ -412,42 +315,36 @@ def _struct_list(context: OperationContext, request: NamedTypeListRequest) -> tu
     )
 
 
-def op_struct_list(runtime: IdaRuntime, params: dict[str, Any]) -> tuple[NamedTypeEntry, ...]:
+def op_struct_list(runtime: IdaRuntime, params: dict[str, Any]) -> list[dict[str, object]]:
     return _struct_list(OperationContext(runtime=runtime), _parse_list(params))
 
 
-def _struct_view(context: OperationContext, request: NamedTypeShowRequest) -> StructView:
+def _struct_view(context: OperationContext, request: NamedTypeShowRequest) -> dict[str, object]:
     runtime = context.runtime
     tif = runtime.get_struct_or_union(request.name)
-    return StructView(
-        name=request.name,
-        kind=runtime.classify_tinfo(tif),
-        layout=runtime.tinfo_decl(tif, name=request.name, multi=True),
-        members=_coerce_struct_members(runtime.tinfo_members(tif)),
-    )
+    return {
+        "name": request.name,
+        "kind": runtime.classify_tinfo(tif),
+        "layout": runtime.tinfo_decl(tif, name=request.name, multi=True),
+        "members": _struct_member_rows(runtime.tinfo_members(tif)),
+    }
 
 
-def op_struct_show(runtime: IdaRuntime, params: dict[str, Any]) -> StructView:
+def op_struct_show(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
     return _struct_view(OperationContext(runtime=runtime), _parse_struct_show(params))
 
 
-def _persist_and_show_struct(runtime: IdaRuntime, tif, *, name: str) -> StructMutationResult:
+def _persist_and_show_struct(runtime: IdaRuntime, tif, *, name: str) -> dict[str, object]:
     _persist_named_type(runtime, tif, name)
     try:
         shown = _struct_view(OperationContext(runtime=runtime), NamedTypeShowRequest(name=name))
     except Exception as exc:
         detail = str(exc) or exc.__class__.__name__
         raise IdaOperationError(f"persisted named type `{name}` but failed to read it back: {detail}") from exc
-    return StructMutationResult(
-        name=shown.name,
-        kind=shown.kind,
-        layout=shown.layout,
-        members=shown.members,
-        changed=True,
-    )
+    return {**shown, "changed": True}
 
 
-def _struct_field_set(context: OperationContext, request: StructFieldSetRequest) -> StructMutationResult:
+def _struct_field_set(context: OperationContext, request: StructFieldSetRequest) -> dict[str, object]:
     runtime = context.runtime
     tif = runtime.get_struct_or_union(request.struct_name)
     offset_bits = request.offset * 8
@@ -462,11 +359,11 @@ def _struct_field_set(context: OperationContext, request: StructFieldSetRequest)
     return _persist_and_show_struct(runtime, tif, name=request.struct_name)
 
 
-def op_struct_field_set(runtime: IdaRuntime, params: dict[str, Any]) -> StructMutationResult:
+def op_struct_field_set(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
     return _struct_field_set(OperationContext(runtime=runtime), _parse_struct_field_set(params))
 
 
-def _struct_field_rename(context: OperationContext, request: StructFieldRenameRequest) -> StructMutationResult:
+def _struct_field_rename(context: OperationContext, request: StructFieldRenameRequest) -> dict[str, object]:
     runtime = context.runtime
     tif = runtime.get_struct_or_union(request.struct_name)
     idx = _struct_member_index(tif, request.struct_name, request.field_name)
@@ -474,11 +371,11 @@ def _struct_field_rename(context: OperationContext, request: StructFieldRenameRe
     return _persist_and_show_struct(runtime, tif, name=request.struct_name)
 
 
-def op_struct_field_rename(runtime: IdaRuntime, params: dict[str, Any]) -> StructMutationResult:
+def op_struct_field_rename(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
     return _struct_field_rename(OperationContext(runtime=runtime), _parse_struct_field_rename(params))
 
 
-def _struct_field_delete(context: OperationContext, request: StructFieldDeleteRequest) -> StructMutationResult:
+def _struct_field_delete(context: OperationContext, request: StructFieldDeleteRequest) -> dict[str, object]:
     runtime = context.runtime
     tif = runtime.get_struct_or_union(request.struct_name)
     idx = _struct_member_index(tif, request.struct_name, request.field_name)
@@ -486,25 +383,25 @@ def _struct_field_delete(context: OperationContext, request: StructFieldDeleteRe
     return _persist_and_show_struct(runtime, tif, name=request.struct_name)
 
 
-def op_struct_field_delete(runtime: IdaRuntime, params: dict[str, Any]) -> StructMutationResult:
+def op_struct_field_delete(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
     return _struct_field_delete(OperationContext(runtime=runtime), _parse_struct_field_delete(params))
 
 
-def _struct_view_for_set(context: OperationContext, request: StructFieldSetRequest) -> StructView:
+def _struct_view_for_set(context: OperationContext, request: StructFieldSetRequest) -> dict[str, object]:
     return _struct_view(context, NamedTypeShowRequest(name=request.struct_name))
 
 
-def _struct_view_for_rename(context: OperationContext, request: StructFieldRenameRequest) -> StructView:
+def _struct_view_for_rename(context: OperationContext, request: StructFieldRenameRequest) -> dict[str, object]:
     return _struct_view(context, NamedTypeShowRequest(name=request.struct_name))
 
 
-def _struct_view_for_delete(context: OperationContext, request: StructFieldDeleteRequest) -> StructView:
+def _struct_view_for_delete(context: OperationContext, request: StructFieldDeleteRequest) -> dict[str, object]:
     return _struct_view(context, NamedTypeShowRequest(name=request.struct_name))
 
 
-def _enum_list(context: OperationContext, request: NamedTypeListRequest) -> tuple[NamedTypeEntry, ...]:
+def _enum_list(context: OperationContext, request: NamedTypeListRequest) -> list[dict[str, object]]:
     runtime = context.runtime
-    return _coerce_named_type_entries(
+    return _named_type_entry_rows(
         runtime.list_named_types(
             query=request.query,
             pattern=request.pattern,
@@ -516,42 +413,36 @@ def _enum_list(context: OperationContext, request: NamedTypeListRequest) -> tupl
     )
 
 
-def op_enum_list(runtime: IdaRuntime, params: dict[str, Any]) -> tuple[NamedTypeEntry, ...]:
+def op_enum_list(runtime: IdaRuntime, params: dict[str, Any]) -> list[dict[str, object]]:
     return _enum_list(OperationContext(runtime=runtime), _parse_list(params))
 
 
-def _enum_view(context: OperationContext, request: NamedTypeShowRequest) -> EnumView:
+def _enum_view(context: OperationContext, request: NamedTypeShowRequest) -> dict[str, object]:
     runtime = context.runtime
     tif = _enum_type(runtime, request.name)
-    return EnumView(
-        name=request.name,
-        kind="enum",
-        decl=runtime.tinfo_decl(tif, name=request.name, multi=True),
-        members=_coerce_enum_members(runtime.enum_members(tif)),
-    )
+    return {
+        "name": request.name,
+        "kind": "enum",
+        "decl": runtime.tinfo_decl(tif, name=request.name, multi=True),
+        "members": _enum_member_rows(runtime.enum_members(tif)),
+    }
 
 
-def op_enum_show(runtime: IdaRuntime, params: dict[str, Any]) -> EnumView:
+def op_enum_show(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
     return _enum_view(OperationContext(runtime=runtime), _parse_enum_show(params))
 
 
-def _persist_and_show_enum(runtime: IdaRuntime, tif, *, name: str) -> EnumMutationResult:
+def _persist_and_show_enum(runtime: IdaRuntime, tif, *, name: str) -> dict[str, object]:
     _persist_named_type(runtime, tif, name)
     try:
         shown = _enum_view(OperationContext(runtime=runtime), NamedTypeShowRequest(name=name))
     except Exception as exc:
         detail = str(exc) or exc.__class__.__name__
         raise IdaOperationError(f"persisted named type `{name}` but failed to read it back: {detail}") from exc
-    return EnumMutationResult(
-        name=shown.name,
-        kind=shown.kind,
-        decl=shown.decl,
-        members=shown.members,
-        changed=True,
-    )
+    return {**shown, "changed": True}
 
 
-def _enum_member_set(context: OperationContext, request: EnumMemberSetRequest) -> EnumMutationResult:
+def _enum_member_set(context: OperationContext, request: EnumMemberSetRequest) -> dict[str, object]:
     runtime = context.runtime
     tif = _enum_type(runtime, request.enum_name)
     ida_typeinf = runtime.mod("ida_typeinf")
@@ -564,11 +455,11 @@ def _enum_member_set(context: OperationContext, request: EnumMemberSetRequest) -
     return _persist_and_show_enum(runtime, tif, name=request.enum_name)
 
 
-def op_enum_member_set(runtime: IdaRuntime, params: dict[str, Any]) -> EnumMutationResult:
+def op_enum_member_set(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
     return _enum_member_set(OperationContext(runtime=runtime), _parse_enum_member_set(params))
 
 
-def _enum_member_rename(context: OperationContext, request: EnumMemberRenameRequest) -> EnumMutationResult:
+def _enum_member_rename(context: OperationContext, request: EnumMemberRenameRequest) -> dict[str, object]:
     runtime = context.runtime
     tif = _enum_type(runtime, request.enum_name)
     idx = _enum_member_index(tif, request.enum_name, request.member_name)
@@ -576,30 +467,30 @@ def _enum_member_rename(context: OperationContext, request: EnumMemberRenameRequ
     return _persist_and_show_enum(runtime, tif, name=request.enum_name)
 
 
-def op_enum_member_rename(runtime: IdaRuntime, params: dict[str, Any]) -> EnumMutationResult:
+def op_enum_member_rename(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
     return _enum_member_rename(OperationContext(runtime=runtime), _parse_enum_member_rename(params))
 
 
-def _enum_member_delete(context: OperationContext, request: EnumMemberDeleteRequest) -> EnumMutationResult:
+def _enum_member_delete(context: OperationContext, request: EnumMemberDeleteRequest) -> dict[str, object]:
     runtime = context.runtime
     tif = _enum_type(runtime, request.enum_name)
     _ensure_terr_ok(runtime, tif.del_edm(request.member_name), "failed to delete enum member")
     return _persist_and_show_enum(runtime, tif, name=request.enum_name)
 
 
-def op_enum_member_delete(runtime: IdaRuntime, params: dict[str, Any]) -> EnumMutationResult:
+def op_enum_member_delete(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
     return _enum_member_delete(OperationContext(runtime=runtime), _parse_enum_member_delete(params))
 
 
-def _enum_view_for_set(context: OperationContext, request: EnumMemberSetRequest) -> EnumView:
+def _enum_view_for_set(context: OperationContext, request: EnumMemberSetRequest) -> dict[str, object]:
     return _enum_view(context, NamedTypeShowRequest(name=request.enum_name))
 
 
-def _enum_view_for_rename(context: OperationContext, request: EnumMemberRenameRequest) -> EnumView:
+def _enum_view_for_rename(context: OperationContext, request: EnumMemberRenameRequest) -> dict[str, object]:
     return _enum_view(context, NamedTypeShowRequest(name=request.enum_name))
 
 
-def _enum_view_for_delete(context: OperationContext, request: EnumMemberDeleteRequest) -> EnumView:
+def _enum_view_for_delete(context: OperationContext, request: EnumMemberDeleteRequest) -> dict[str, object]:
     return _enum_view(context, NamedTypeShowRequest(name=request.enum_name))
 
 
@@ -681,24 +572,14 @@ def named_type_operations() -> tuple[OperationSpec[object, object], ...]:
 
 
 __all__ = [
-    "EnumMember",
     "EnumMemberDeleteRequest",
     "EnumMemberRenameRequest",
     "EnumMemberSetRequest",
-    "EnumMutationResult",
-    "EnumTypeView",
-    "EnumView",
-    "NamedTypeEntry",
     "NamedTypeListRequest",
     "NamedTypeShowRequest",
-    "NamedTypeView",
     "StructFieldDeleteRequest",
     "StructFieldRenameRequest",
     "StructFieldSetRequest",
-    "StructMember",
-    "StructMutationResult",
-    "StructView",
-    "StructuredTypeView",
     "_parse_member_type",
     "named_type_operations",
     "op_enum_list",
