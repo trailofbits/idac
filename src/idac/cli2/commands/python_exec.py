@@ -8,6 +8,7 @@ from pathlib import Path
 from ..argparse_utils import add_command, add_context_options, add_output_options
 from ..commands.common import send_op
 from ..errors import CliUserError
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
@@ -35,8 +36,10 @@ def _python_exec_request(args: argparse.Namespace) -> PythonExecRequest:
     return PythonExecRequest(script=script, persist=bool(args.persist))
 
 
-def _exec(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="python_exec", params=_python_exec_request(args).to_params(), render_op="python_exec")
+def _exec(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation, op="python_exec", params=_python_exec_request(invocation.args).to_params(), render_op="python_exec"
+    )
 
 
 def register(

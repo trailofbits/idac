@@ -6,10 +6,12 @@ from pathlib import Path
 from ...workspace import initialize_workspace
 from ..argparse_utils import add_command, add_output_options
 from ..commands.common import command_result
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
-def _init(args: argparse.Namespace) -> CommandResult:
+def _init(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     return command_result("workspace_init", initialize_workspace(Path(args.dest), force=bool(args.force)))
 
 

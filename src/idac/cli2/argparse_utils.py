@@ -4,8 +4,12 @@ import argparse
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .errors import CliUserError
+
+if TYPE_CHECKING:
+    from .invocation import Invocation
 
 
 def positive_timeout(value: str) -> float:
@@ -71,9 +75,9 @@ def add_full_help_option(parser: argparse.ArgumentParser) -> None:
 def bind_root_handler(
     root_parser: argparse.ArgumentParser,
     handler: Callable[..., object],
-) -> Callable[[argparse.Namespace], object]:
-    def bound(args: argparse.Namespace) -> object:
-        return handler(args, root_parser=root_parser)
+) -> Callable[[Invocation], object]:
+    def bound(invocation: Invocation) -> object:
+        return handler(invocation, root_parser=root_parser)
 
     return bound
 
@@ -90,8 +94,6 @@ def create_parser(
         _hidden_command=False,
         _accepts_timeout=False,
         run=None,
-        _preview_wrapper=False,
-        _batch_mode=False,
     )
     add_full_help_option(parser)
     return parser
@@ -117,8 +119,6 @@ def add_command(
         _hidden_command=hidden,
         _accepts_timeout=False,
         run=None,
-        _preview_wrapper=False,
-        _batch_mode=False,
     )
     add_full_help_option(parser)
     _append_child(parent_parser, parser, hidden=hidden)

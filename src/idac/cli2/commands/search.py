@@ -13,6 +13,7 @@ from ..argparse_utils import (
 )
 from ..commands.common import send_op
 from ..errors import CliUserError
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
@@ -73,8 +74,10 @@ def _bytes_request(args: argparse.Namespace) -> BytesRequest:
     )
 
 
-def _bytes(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="search_bytes", params=_bytes_request(args).to_params(), render_op="search_bytes")
+def _bytes(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation, op="search_bytes", params=_bytes_request(invocation.args).to_params(), render_op="search_bytes"
+    )
 
 
 def _strings_request(args: argparse.Namespace) -> StringsRequest:
@@ -91,8 +94,10 @@ def _strings_request(args: argparse.Namespace) -> StringsRequest:
     )
 
 
-def _strings(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="strings", params=_strings_request(args).to_params(), render_op="strings")
+def _strings(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation, op="strings", params=_strings_request(invocation.args).to_params(), render_op="strings"
+    )
 
 
 def register(

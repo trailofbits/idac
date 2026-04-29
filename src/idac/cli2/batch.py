@@ -150,11 +150,11 @@ def failure_lines(payload: Any) -> list[str]:
     return lines
 
 
-def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> CommandResult:
+def run(invocation: Invocation, *, root_parser: argparse.ArgumentParser) -> CommandResult:
+    args = invocation.args
     rows: list[dict[str, Any]] = []
     batch_path = Path(args.batch_file)
     batch_dir = batch_path.parent.resolve(strict=False)
-    batch_invocation = getattr(args, "_invocation", args)
     for line_number, raw_line in enumerate(batch_path.read_text(encoding="utf-8").splitlines(), start=1):
         stripped = raw_line.strip()
         if not stripped or stripped.startswith("#"):
@@ -169,7 +169,7 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
                 argv = argv[1:]
             if not argv:
                 raise CliUserError("empty command")
-            child = _parse_batch_invocation(root_parser, argv, parent=batch_invocation, base_dir=batch_dir)
+            child = _parse_batch_invocation(root_parser, argv, parent=invocation, base_dir=batch_dir)
             if child.spec.hidden or not child.spec.allow_batch:
                 raise CliUserError("command is not available in batch mode")
             result = _execute_batch_invocation(child)

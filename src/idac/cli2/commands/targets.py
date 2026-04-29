@@ -5,14 +5,15 @@ import argparse
 from ...doctor import run_doctor_cleanup
 from ..argparse_utils import add_command, add_context_options, add_output_options
 from ..commands.common import command_result, send_op
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
-def _list(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="list_targets", params={}, render_op="list_targets")
+def _list(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="list_targets", params={}, render_op="list_targets")
 
 
-def _cleanup(_args: argparse.Namespace) -> CommandResult:
+def _cleanup(_invocation: Invocation) -> CommandResult:
     return command_result("targets_cleanup", run_doctor_cleanup())
 
 

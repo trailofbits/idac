@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from ..argparse_utils import add_command, add_context_options, add_output_options
 from ..commands.common import send_op
 from ..errors import CliUserError
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
@@ -91,19 +92,29 @@ def _add_comment_target_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="comment_get", params=_comment_lookup_request(args).to_params(), render_op="comment_get")
-
-
-def _set(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="comment_set", params=_comment_change_request(args).to_params(), render_op="comment_set")
-
-
-def _delete(args: argparse.Namespace) -> CommandResult:
+def _show(invocation: Invocation) -> CommandResult:
     return send_op(
-        args,
+        invocation,
+        op="comment_get",
+        params=_comment_lookup_request(invocation.args).to_params(),
+        render_op="comment_get",
+    )
+
+
+def _set(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation,
+        op="comment_set",
+        params=_comment_change_request(invocation.args).to_params(),
+        render_op="comment_set",
+    )
+
+
+def _delete(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation,
         op="comment_delete",
-        params=_comment_lookup_request(args).to_params(),
+        params=_comment_lookup_request(invocation.args).to_params(),
         render_op="comment_delete",
     )
 

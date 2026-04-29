@@ -16,6 +16,7 @@ from ..argparse_utils import (
 )
 from ..commands.common import local_rename_params, local_retype_params, local_update_params, send_op
 from ..errors import CliUserError
+from ..invocation import Invocation
 from ..result import CommandResult
 
 LOCAL_SELECTOR_HELP = (
@@ -55,66 +56,80 @@ def _list_params(args: argparse.Namespace) -> dict[str, object]:
     return params
 
 
-def run_list(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_list", params=_list_params(args), render_op="function_list")
+def run_list(invocation: Invocation) -> CommandResult:
+    args = invocation.args
+    return send_op(invocation, op="function_list", params=_list_params(args), render_op="function_list")
 
 
-def run_metadata(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_show", params={"identifier": args.function}, render_op="function_show")
+def run_metadata(invocation: Invocation) -> CommandResult:
+    args = invocation.args
+    return send_op(invocation, op="function_show", params={"identifier": args.function}, render_op="function_show")
 
 
-def run_frame(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_frame", params={"identifier": args.function}, render_op="function_frame")
+def run_frame(invocation: Invocation) -> CommandResult:
+    args = invocation.args
+    return send_op(invocation, op="function_frame", params={"identifier": args.function}, render_op="function_frame")
 
 
-def run_stackvars(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_stackvars", params={"identifier": args.function}, render_op="function_stackvars")
+def run_stackvars(invocation: Invocation) -> CommandResult:
+    args = invocation.args
+    return send_op(
+        invocation, op="function_stackvars", params={"identifier": args.function}, render_op="function_stackvars"
+    )
 
 
-def run_callees(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_callees", params={"identifier": args.function}, render_op="function_callees")
+def run_callees(invocation: Invocation) -> CommandResult:
+    args = invocation.args
+    return send_op(
+        invocation, op="function_callees", params={"identifier": args.function}, render_op="function_callees"
+    )
 
 
-def run_callers(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_callers", params={"identifier": args.function}, render_op="function_callers")
+def run_callers(invocation: Invocation) -> CommandResult:
+    args = invocation.args
+    return send_op(
+        invocation, op="function_callers", params={"identifier": args.function}, render_op="function_callers"
+    )
 
 
-def run_locals_list(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="local_list", params={"identifier": args.function}, render_op="local_list")
+def run_locals_list(invocation: Invocation) -> CommandResult:
+    args = invocation.args
+    return send_op(invocation, op="local_list", params={"identifier": args.function}, render_op="local_list")
 
 
-def run_locals_rename(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="local_rename", params=local_rename_params(args), render_op="local_rename")
+def run_locals_rename(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="local_rename", params=local_rename_params(invocation.args), render_op="local_rename")
 
 
-def run_locals_retype(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="local_retype", params=local_retype_params(args), render_op="local_retype")
+def run_locals_retype(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="local_retype", params=local_retype_params(invocation.args), render_op="local_retype")
 
 
-def run_locals_update(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="local_update", params=local_update_params(args), render_op="local_update")
+def run_locals_update(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="local_update", params=local_update_params(invocation.args), render_op="local_update")
 
 
-def run_prototype_show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="proto_get", params={"identifier": args.function}, render_op="proto_get")
+def run_prototype_show(invocation: Invocation) -> CommandResult:
+    args = invocation.args
+    return send_op(invocation, op="proto_get", params={"identifier": args.function}, render_op="proto_get")
 
 
-def _prototype_set_params(args: argparse.Namespace) -> dict[str, object]:
+def _prototype_set_params(invocation: Invocation) -> dict[str, object]:
+    args = invocation.args
     params = {
         "identifier": args.function,
         "decl": read_decl_text(args),
     }
     if args.propagate_callers:
         params["propagate_callers"] = True
-    invocation = getattr(args, "_invocation", None)
-    if invocation is not None and getattr(invocation, "preview", False):
+    if invocation.preview:
         params["preview_decompile"] = True
     return params
 
 
-def run_prototype_set(args: argparse.Namespace) -> CommandResult:
-    params = _prototype_set_params(args)
-    return send_op(args, op="proto_set", params=params, render_op="proto_set")
+def run_prototype_set(invocation: Invocation) -> CommandResult:
+    params = _prototype_set_params(invocation)
+    return send_op(invocation, op="proto_set", params=params, render_op="proto_set")
 
 
 def register(

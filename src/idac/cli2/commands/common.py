@@ -37,20 +37,6 @@ def command_result(
 
 
 def send_op(
-    args: argparse.Namespace,
-    *,
-    op: str,
-    params: dict[str, Any],
-    render_op: str | None = None,
-    preview: bool | None = None,
-) -> CommandResult:
-    invocation = getattr(args, "_invocation", None)
-    if not isinstance(invocation, Invocation):
-        raise CliUserError("internal error: command was not parsed through parse_invocation")
-    return send_invocation_op(invocation, op=op, params=params, render_op=render_op, preview=preview)
-
-
-def send_invocation_op(
     invocation: Invocation,
     *,
     op: str,

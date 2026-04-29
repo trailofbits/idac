@@ -18,6 +18,7 @@ from idac.cli2.commands import (
     top_level,
     type_commands,
 )
+from idac.cli2.invocation import CommandSpec, Invocation
 
 
 def test_local_update_params_prefers_stable_selector_without_positional_selector() -> None:
@@ -381,16 +382,42 @@ def test_type_declare_params_builds_aliases_and_flags() -> None:
     }
 
 
+def _stub_invocation(args: argparse.Namespace, *, preview: bool = False) -> Invocation:
+    command_spec = CommandSpec(
+        handler=None,
+        mutating=True,
+        allow_batch=True,
+        allow_preview=True,
+        hidden=False,
+        uses_context=True,
+        accepts_timeout=False,
+        context_policy="standard",
+        requires_timeout=False,
+        timeout_requirement_label=None,
+    )
+    return Invocation(
+        spec=command_spec,
+        args=args,
+        argv=(),
+        context=None,
+        preview=preview,
+        batch_mode=False,
+        prepared=True,
+    )
+
+
 def test_prototype_set_params_omit_default_caller_propagation() -> None:
     args = argparse.Namespace(
         function="add",
         decl="void __fastcall add(int value);",
         decl_file=None,
         propagate_callers=False,
-        _preview_wrapper=False,
     )
 
-    assert function._prototype_set_params(args) == {"identifier": "add", "decl": "void __fastcall add(int value);"}
+    assert function._prototype_set_params(_stub_invocation(args)) == {
+        "identifier": "add",
+        "decl": "void __fastcall add(int value);",
+    }
 
 
 def test_prototype_set_params_include_opt_in_for_caller_propagation() -> None:
@@ -399,10 +426,9 @@ def test_prototype_set_params_include_opt_in_for_caller_propagation() -> None:
         decl="void __fastcall add(int value);",
         decl_file=None,
         propagate_callers=True,
-        _preview_wrapper=False,
     )
 
-    assert function._prototype_set_params(args) == {
+    assert function._prototype_set_params(_stub_invocation(args)) == {
         "identifier": "add",
         "decl": "void __fastcall add(int value);",
         "propagate_callers": True,

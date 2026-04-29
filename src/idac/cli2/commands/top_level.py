@@ -12,6 +12,7 @@ from ...transport import BackendError
 from ..argparse_utils import add_command, add_context_options, add_output_options
 from ..commands.common import send_op
 from ..errors import CliUserError
+from ..invocation import Invocation
 from ..result import CommandResult
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -63,8 +64,8 @@ def _stem_for_text(name: str, address: str, text: str) -> str:
     return f"{safe_name[:_MAX_FILENAME_NAME].rstrip('._-')}_{digest}_{safe_address}"
 
 
-def _decompilemany_targets(args: argparse.Namespace) -> list[dict[str, Any]]:
-    request = _decompilemany_request(args)
+def _decompilemany_targets(invocation: Invocation) -> list[dict[str, Any]]:
+    request = _decompilemany_request(invocation.args)
     if request.extra_patterns:
         examples = " ".join((request.pattern or "", *request.extra_patterns[:3])).strip()
         suffix = f": {examples}" if examples else ""
@@ -88,7 +89,7 @@ def _decompilemany_targets(args: argparse.Namespace) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         for identifier in rows:
             function_result = send_op(
-                args,
+                invocation,
                 op="function_show",
                 params={"identifier": identifier},
                 render_op="function_show",
@@ -110,7 +111,7 @@ def _decompilemany_targets(args: argparse.Namespace) -> list[dict[str, Any]]:
         return items
 
     rows_result = send_op(
-        args,
+        invocation,
         op="function_list",
         params={
             "pattern": request.pattern,
@@ -134,13 +135,13 @@ def _decompilemany_targets(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 
 def _run_single_decompile(
-    args: argparse.Namespace,
+    invocation: Invocation,
     *,
     identifier: str,
 ) -> dict[str, Any]:
-    request = _decompilemany_request(args)
+    request = _decompilemany_request(invocation.args)
     result = send_op(
-        args,
+        invocation,
         op="decompile",
         params={"identifier": identifier, "no_cache": request.no_cache},
         render_op="decompile",
@@ -152,37 +153,42 @@ def _run_single_decompile(
     return value
 
 
-def run_decompile(args: argparse.Namespace) -> CommandResult:
+def run_decompile(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     return send_op(
-        args,
+        invocation,
         op="decompile",
         params={"identifier": args.function, "no_cache": bool(args.no_cache)},
         render_op="decompile",
     )
 
 
-def run_disasm(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="disasm", params={"identifier": args.function}, render_op="disasm")
+def run_disasm(invocation: Invocation) -> CommandResult:
+    args = invocation.args
+    return send_op(invocation, op="disasm", params={"identifier": args.function}, render_op="disasm")
 
 
-def run_ctree(args: argparse.Namespace) -> CommandResult:
+def run_ctree(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     params: dict[str, Any] = {"identifier": args.function, "level": args.level}
     if args.maturity:
         params["maturity"] = args.maturity
-    return send_op(args, op="ctree", params=params, render_op="ctree")
+    return send_op(invocation, op="ctree", params=params, render_op="ctree")
 
 
-def run_xrefs(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="xrefs", params={"identifier": args.identifier}, render_op="xrefs")
+def run_xrefs(invocation: Invocation) -> CommandResult:
+    args = invocation.args
+    return send_op(invocation, op="xrefs", params={"identifier": args.identifier}, render_op="xrefs")
 
 
-def run_imports(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="imports", params={}, render_op="imports")
+def run_imports(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="imports", params={}, render_op="imports")
 
 
-def run_decompilemany(args: argparse.Namespace) -> CommandResult:
+def run_decompilemany(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     request = _decompilemany_request(args)
-    targets = _decompilemany_targets(args)
+    targets = _decompilemany_targets(invocation)
     if not targets:
         raise CliUserError("no functions matched")
 
@@ -198,7 +204,7 @@ def run_decompilemany(args: argparse.Namespace) -> CommandResult:
     for item in targets:
         identifier = str(item["identifier"])
         try:
-            payload = _run_single_decompile(args, identifier=identifier)
+            payload = _run_single_decompile(invocation, identifier=identifier)
         except (BackendError, CliUserError) as exc:
             failed += 1
             entries.append(

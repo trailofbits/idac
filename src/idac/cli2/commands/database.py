@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from ..argparse_utils import add_command, add_context_options, add_output_options, set_context_defaults
 from ..commands.common import send_op
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
@@ -45,20 +46,26 @@ def _database_close_request(args: argparse.Namespace) -> DatabaseCloseRequest:
     return DatabaseCloseRequest(discard=bool(args.discard))
 
 
-def _show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="database_info", params={}, render_op="database_info")
+def _show(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="database_info", params={}, render_op="database_info")
 
 
-def _open(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="db_open", params=_database_open_request(args).to_params(), render_op="db_open")
+def _open(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation, op="db_open", params=_database_open_request(invocation.args).to_params(), render_op="db_open"
+    )
 
 
-def _save(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="db_save", params=_database_save_request(args).to_params(), render_op="db_save")
+def _save(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation, op="db_save", params=_database_save_request(invocation.args).to_params(), render_op="db_save"
+    )
 
 
-def _close(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="db_close", params=_database_close_request(args).to_params(), render_op="db_close")
+def _close(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation, op="db_close", params=_database_close_request(invocation.args).to_params(), render_op="db_close"
+    )
 
 
 def register(

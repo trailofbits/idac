@@ -6,10 +6,12 @@ from ...docs import docs_payload
 from ..argparse_utils import add_command, add_output_options
 from ..commands.common import command_result
 from ..errors import CliUserError
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
-def _show(args: argparse.Namespace) -> CommandResult:
+def _show(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     try:
         payload = docs_payload(args.topic, list_only=bool(args.list), all_topics=bool(args.all))
     except ValueError as exc:

@@ -6,10 +6,12 @@ from typing import Any
 from ...doctor import run_doctor
 from ..argparse_utils import add_command, add_output_options, positive_timeout
 from ..commands.common import command_result
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
-def _check(args: argparse.Namespace) -> CommandResult:
+def _check(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     result = run_doctor(
         backend="all",
         timeout=getattr(args, "timeout", None),

@@ -20,7 +20,7 @@ from .result import CommandResult
 
 @dataclass(frozen=True)
 class CommandSpec:
-    handler: Callable[[argparse.Namespace], CommandResult] | None
+    handler: Callable[[Invocation], CommandResult] | None
     mutating: bool
     allow_batch: bool
     allow_preview: bool
@@ -56,6 +56,7 @@ class Invocation:
     preview: bool = False
     batch_mode: bool = False
     prepared: bool = True
+    base_dir: Path | None = None
 
 
 def _parent_args(parent: Invocation | argparse.Namespace | None) -> argparse.Namespace | None:
@@ -95,8 +96,8 @@ def invocation_from_args(
     argv: list[str] | tuple[str, ...] | None = None,
     parent: Invocation | argparse.Namespace | None = None,
     base_dir: Path | None = None,
-    preview: bool | None = None,
-    batch_mode: bool | None = None,
+    preview: bool = False,
+    batch_mode: bool = False,
     prepare: bool = True,
 ) -> Invocation:
     parent_namespace = _parent_args(parent)
@@ -104,13 +105,6 @@ def invocation_from_args(
         merge_parent_context(args, parent_namespace)
     if base_dir is not None:
         resolve_relative_paths(args, base_dir=base_dir)
-        args._relative_path_base_dir = base_dir
-    if preview is None:
-        preview = bool(getattr(args, "_preview_wrapper", False))
-    if batch_mode is None:
-        batch_mode = bool(getattr(args, "_batch_mode", False))
-    args._preview_wrapper = bool(preview)
-    args._batch_mode = bool(batch_mode)
 
     parser = args._selected_parser
     resolved = _prepare_args(parser, args) if prepare else None
@@ -124,8 +118,8 @@ def invocation_from_args(
         preview=bool(preview),
         batch_mode=bool(batch_mode),
         prepared=prepare,
+        base_dir=base_dir if base_dir is not None else (parent.base_dir if isinstance(parent, Invocation) else None),
     )
-    args._invocation = invocation
     return invocation
 
 
@@ -155,12 +149,20 @@ def parse_invocation(
 def prepare_invocation(invocation: Invocation) -> Invocation:
     if invocation.prepared:
         return invocation
-    return invocation_from_args(
-        invocation.args,
+    args = invocation.args
+    parser = args._selected_parser
+    resolved = _prepare_args(parser, args)
+    spec = CommandSpec.from_args(args)
+    args._spec = spec
+    return Invocation(
+        spec=spec,
+        args=args,
         argv=invocation.argv,
+        context=resolved,
         preview=invocation.preview,
         batch_mode=invocation.batch_mode,
-        prepare=True,
+        prepared=True,
+        base_dir=invocation.base_dir,
     )
 
 
@@ -171,4 +173,4 @@ def run_invocation(invocation: Invocation) -> CommandResult:
         selected_parser = invocation.args._selected_parser
         selected_parser.print_help()
         raise SystemExit(2)
-    return handler(invocation.args)
+    return handler(invocation)

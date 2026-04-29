@@ -22,6 +22,7 @@ from ..argparse_utils import (
     add_output_options,
 )
 from ..commands.common import command_result, send_op
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
@@ -45,19 +46,22 @@ def _install_path(source: Path, dest: Path, *, mode: str, force: bool, is_dir: b
     os.symlink(source, dest, target_is_directory=is_dir)
 
 
-def _rename(args: argparse.Namespace) -> CommandResult:
+def _rename(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     params = {"identifier": args.identifier, "new_name": args.new_name}
-    return send_op(args, op="name_set", params=params, render_op="name_set")
+    return send_op(invocation, op="name_set", params=params, render_op="name_set")
 
 
-def _reanalyze(args: argparse.Namespace) -> CommandResult:
+def _reanalyze(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     params: dict[str, object] = {"identifier": args.identifier}
     if args.end:
         params["end"] = args.end
-    return send_op(args, op="reanalyze", params=params, render_op="reanalyze")
+    return send_op(invocation, op="reanalyze", params=params, render_op="reanalyze")
 
 
-def _plugin_install(args: argparse.Namespace) -> CommandResult:
+def _plugin_install(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     package_source = plugin_source_dir()
     bootstrap_source = plugin_bootstrap_source_path()
     runtime_source = plugin_runtime_package_source_dir()
@@ -82,7 +86,8 @@ def _plugin_install(args: argparse.Namespace) -> CommandResult:
     )
 
 
-def _skill_install(args: argparse.Namespace) -> CommandResult:
+def _skill_install(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     source = skill_source_dir()
     custom_dest = args.dest
     destinations = [custom_dest] if custom_dest else skill_install_dirs(host=args.host)

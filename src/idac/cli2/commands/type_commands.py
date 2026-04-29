@@ -13,6 +13,7 @@ from ..argparse_utils import (
 )
 from ..commands.common import parse_alias_list, send_op
 from ..errors import CliUserError
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
@@ -102,17 +103,20 @@ def _type_list_guard(args: argparse.Namespace) -> None:
         raise CliUserError("this list can be very large; rerun with a pattern or `--out <path>`")
 
 
-def run_type_list(args: argparse.Namespace) -> CommandResult:
+def run_type_list(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     _type_list_guard(args)
-    return send_op(args, op="type_list", params=_pattern_params(args), render_op="type_list")
+    return send_op(invocation, op="type_list", params=_pattern_params(args), render_op="type_list")
 
 
-def run_type_show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="type_show", params=_name_params(args), render_op="type_show")
+def run_type_show(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="type_show", params=_name_params(invocation.args), render_op="type_show")
 
 
-def run_type_declare(args: argparse.Namespace) -> CommandResult:
-    result = send_op(args, op="type_declare", params=_type_declare_params(args), render_op="type_declare")
+def run_type_declare(invocation: Invocation) -> CommandResult:
+    result = send_op(
+        invocation, op="type_declare", params=_type_declare_params(invocation.args), render_op="type_declare"
+    )
     exit_code = 0
     stderr_lines: list[str] = []
     if isinstance(result.value, dict) and (
@@ -179,103 +183,109 @@ def _type_declare_failure_lines(payload: dict[str, Any]) -> list[str]:
     return lines
 
 
-def run_class_list(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="class_list", params=_pattern_params(args), render_op="class_list")
+def run_class_list(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="class_list", params=_pattern_params(invocation.args), render_op="class_list")
 
 
-def run_class_candidates(args: argparse.Namespace) -> CommandResult:
+def run_class_candidates(invocation: Invocation) -> CommandResult:
     return send_op(
-        args,
+        invocation,
         op="class_candidates",
-        params=_class_candidates_params(args),
+        params=_class_candidates_params(invocation.args),
         render_op="class_candidates",
     )
 
 
-def run_class_show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="class_show", params=_name_params(args), render_op="class_show")
+def run_class_show(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="class_show", params=_name_params(invocation.args), render_op="class_show")
 
 
-def run_class_hierarchy(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="class_hierarchy", params=_name_params(args), render_op="class_hierarchy")
+def run_class_hierarchy(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="class_hierarchy", params=_name_params(invocation.args), render_op="class_hierarchy")
 
 
-def run_class_fields(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="class_fields", params=_class_fields_params(args), render_op="class_fields")
-
-
-def run_class_vtable(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="class_vtable", params=_class_vtable_params(args), render_op="class_vtable")
-
-
-def run_struct_list(args: argparse.Namespace) -> CommandResult:
-    _type_list_guard(args)
-    return send_op(args, op="struct_list", params=_pattern_params(args), render_op="struct_list")
-
-
-def run_struct_show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="struct_show", params=_name_params(args), render_op="struct_show")
-
-
-def run_struct_field_set(args: argparse.Namespace) -> CommandResult:
+def run_class_fields(invocation: Invocation) -> CommandResult:
     return send_op(
-        args,
+        invocation, op="class_fields", params=_class_fields_params(invocation.args), render_op="class_fields"
+    )
+
+
+def run_class_vtable(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation, op="class_vtable", params=_class_vtable_params(invocation.args), render_op="class_vtable"
+    )
+
+
+def run_struct_list(invocation: Invocation) -> CommandResult:
+    args = invocation.args
+    _type_list_guard(args)
+    return send_op(invocation, op="struct_list", params=_pattern_params(args), render_op="struct_list")
+
+
+def run_struct_show(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="struct_show", params=_name_params(invocation.args), render_op="struct_show")
+
+
+def run_struct_field_set(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation,
         op="struct_field_set",
-        params=_struct_field_set_params(args),
+        params=_struct_field_set_params(invocation.args),
         render_op="struct_field_set",
     )
 
 
-def run_struct_field_rename(args: argparse.Namespace) -> CommandResult:
+def run_struct_field_rename(invocation: Invocation) -> CommandResult:
     return send_op(
-        args,
+        invocation,
         op="struct_field_rename",
-        params=_struct_field_rename_params(args),
+        params=_struct_field_rename_params(invocation.args),
         render_op="struct_field_rename",
     )
 
 
-def run_struct_field_delete(args: argparse.Namespace) -> CommandResult:
+def run_struct_field_delete(invocation: Invocation) -> CommandResult:
     return send_op(
-        args,
+        invocation,
         op="struct_field_delete",
-        params=_struct_field_delete_params(args),
+        params=_struct_field_delete_params(invocation.args),
         render_op="struct_field_delete",
     )
 
 
-def run_enum_list(args: argparse.Namespace) -> CommandResult:
+def run_enum_list(invocation: Invocation) -> CommandResult:
+    args = invocation.args
     _type_list_guard(args)
-    return send_op(args, op="enum_list", params=_pattern_params(args), render_op="enum_list")
+    return send_op(invocation, op="enum_list", params=_pattern_params(args), render_op="enum_list")
 
 
-def run_enum_show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="enum_show", params=_name_params(args), render_op="enum_show")
+def run_enum_show(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="enum_show", params=_name_params(invocation.args), render_op="enum_show")
 
 
-def run_enum_member_set(args: argparse.Namespace) -> CommandResult:
+def run_enum_member_set(invocation: Invocation) -> CommandResult:
     return send_op(
-        args,
+        invocation,
         op="enum_member_set",
-        params=_enum_member_set_params(args),
+        params=_enum_member_set_params(invocation.args),
         render_op="enum_member_set",
     )
 
 
-def run_enum_member_rename(args: argparse.Namespace) -> CommandResult:
+def run_enum_member_rename(invocation: Invocation) -> CommandResult:
     return send_op(
-        args,
+        invocation,
         op="enum_member_rename",
-        params=_enum_member_rename_params(args),
+        params=_enum_member_rename_params(invocation.args),
         render_op="enum_member_rename",
     )
 
 
-def run_enum_member_delete(args: argparse.Namespace) -> CommandResult:
+def run_enum_member_delete(invocation: Invocation) -> CommandResult:
     return send_op(
-        args,
+        invocation,
         op="enum_member_delete",
-        params=_enum_member_delete_params(args),
+        params=_enum_member_delete_params(invocation.args),
         render_op="enum_member_delete",
     )
 

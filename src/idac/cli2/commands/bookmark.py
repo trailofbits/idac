@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from ..argparse_utils import add_command, add_context_options, add_output_options
 from ..commands.common import parse_bookmark_slot, send_op
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
@@ -65,32 +66,42 @@ def _bookmark_delete_request(args: argparse.Namespace) -> BookmarkDeleteRequest:
     return BookmarkDeleteRequest(slot=parse_bookmark_slot(args.slot))
 
 
-def _list(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="bookmark_get", params={}, render_op="bookmark_get")
+def _list(invocation: Invocation) -> CommandResult:
+    return send_op(invocation, op="bookmark_get", params={}, render_op="bookmark_get")
 
 
-def _show(args: argparse.Namespace) -> CommandResult:
+def _show(invocation: Invocation) -> CommandResult:
     return send_op(
-        args,
+        invocation,
         op="bookmark_get",
-        params=_bookmark_show_request(args).to_params(),
+        params=_bookmark_show_request(invocation.args).to_params(),
         render_op="bookmark_get",
     )
 
 
-def _add(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="bookmark_add", params=_bookmark_add_request(args).to_params(), render_op="bookmark_add")
-
-
-def _set(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="bookmark_set", params=_bookmark_set_request(args).to_params(), render_op="bookmark_set")
-
-
-def _delete(args: argparse.Namespace) -> CommandResult:
+def _add(invocation: Invocation) -> CommandResult:
     return send_op(
-        args,
+        invocation,
+        op="bookmark_add",
+        params=_bookmark_add_request(invocation.args).to_params(),
+        render_op="bookmark_add",
+    )
+
+
+def _set(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation,
+        op="bookmark_set",
+        params=_bookmark_set_request(invocation.args).to_params(),
+        render_op="bookmark_set",
+    )
+
+
+def _delete(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation,
         op="bookmark_delete",
-        params=_bookmark_delete_request(args).to_params(),
+        params=_bookmark_delete_request(invocation.args).to_params(),
         render_op="bookmark_delete",
     )
 

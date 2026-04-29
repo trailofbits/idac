@@ -102,7 +102,7 @@ def main(argv: Optional[list[str]] = None, *, prog: str = "idac") -> int:
         for warning in result.warnings:
             print(f"warning: {warning}", file=sys.stderr)
 
-        if args.command == "preview" and not arg_map.get("_batch_mode", False):
+        if args.command == "preview":
             if result.exit_code == 0:
                 _print_artifact_notices(result, result.artifacts)
             else:

@@ -53,32 +53,31 @@ def _preview_payload(*, command: str, result: CommandResult, wrapped: Invocation
     }
 
 
-def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser):
+def run(invocation: Invocation, *, root_parser: argparse.ArgumentParser):
+    args = invocation.args
     tokens = list(args.command_tokens or [])
     if tokens and tokens[0] == "--":
         tokens = tokens[1:]
     if not tokens:
         raise CliUserError("preview requires a command to wrap")
-    preview_invocation = getattr(args, "_invocation", args)
-    relative_path_base_dir = getattr(args, "_relative_path_base_dir", None)
     child = parse_invocation(
         root_parser,
         tokens,
-        parent=preview_invocation,
-        base_dir=Path(relative_path_base_dir) if relative_path_base_dir is not None else None,
+        parent=invocation,
+        base_dir=invocation.base_dir,
         preview=True,
-        batch_mode=bool(args._batch_mode),
+        batch_mode=invocation.batch_mode,
         prepare=False,
     )
     if child.spec.hidden or not child.spec.allow_preview:
         raise CliUserError("command is not available in preview mode")
     if child.args.command == "preview":
         raise CliUserError("nested preview is not supported")
-    if not args._batch_mode and args.out is None:
+    if not invocation.batch_mode and args.out is None:
         raise CliUserError("preview requires `--out <path.json|path.jsonl>`")
     result = run_invocation(child)
     payload = _preview_payload(command=" ".join(tokens), result=result, wrapped=child)
-    if args._batch_mode:
+    if invocation.batch_mode:
         return CommandResult(
             render_op="preview",
             value=payload,

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from ..argparse_utils import add_command, add_context_options, add_output_options, add_pattern_options
 from ..commands.common import send_op
+from ..invocation import Invocation
 from ..result import CommandResult
 
 
@@ -27,8 +28,10 @@ def _list_request(args: argparse.Namespace) -> SegmentListRequest:
     return SegmentListRequest(pattern=args.pattern, regex=args.regex, ignore_case=args.ignore_case)
 
 
-def _list(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="segment_list", params=_list_request(args).to_params(), render_op="segment_list")
+def _list(invocation: Invocation) -> CommandResult:
+    return send_op(
+        invocation, op="segment_list", params=_list_request(invocation.args).to_params(), render_op="segment_list"
+    )
 
 
 def register(
