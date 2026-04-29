@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
-from ..base import OperationContext, OperationSpec
+from ..base import Op
 from ..helpers.matching import pattern_from_params, text_matches
 from ..helpers.params import optional_param_int, optional_str, require_str
 from ..runtime import IdaOperationError, IdaRuntime, _ea_text, _strip_tags
@@ -41,11 +43,11 @@ def _function_header(runtime: IdaRuntime, func) -> tuple[str, str]:
     return runtime.function_identity(func)
 
 
-def _require_identifier(params: dict[str, object], *, key: str = "identifier") -> str:
+def _require_identifier(params: Mapping[str, Any], *, key: str = "identifier") -> str:
     return require_str(params.get(key), field="address or identifier")
 
 
-def _parse_function_list(params: dict[str, object]) -> FunctionListRequest:
+def _parse_function_list(params: Mapping[str, Any]) -> FunctionListRequest:
     pattern, glob, regex, ignore_case = pattern_from_params(params)
     return FunctionListRequest(
         pattern=pattern,
@@ -58,8 +60,7 @@ def _parse_function_list(params: dict[str, object]) -> FunctionListRequest:
     )
 
 
-def _function_list(context: OperationContext, request: FunctionListRequest) -> list[dict[str, object]]:
-    runtime = context.runtime
+def _function_list(runtime: IdaRuntime, request: FunctionListRequest) -> list[dict[str, object]]:
     ranges = () if request.segment is None else runtime.resolve_segment_ranges(request.segment)
     rows: list[dict[str, object]] = []
     for ea in runtime.idautils.Functions():
@@ -90,12 +91,11 @@ def _function_list(context: OperationContext, request: FunctionListRequest) -> l
     return rows
 
 
-def _parse_identifier(params: dict[str, object]) -> FunctionIdentifierRequest:
+def _parse_identifier(params: Mapping[str, Any]) -> FunctionIdentifierRequest:
     return FunctionIdentifierRequest(identifier=_require_identifier(params))
 
 
-def _function_show(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _function_show(runtime: IdaRuntime, request: FunctionIdentifierRequest) -> dict[str, object]:
     func = runtime.resolve_function(request.identifier)
     ida_typeinf = runtime.ida_typeinf
     name, address = _function_header(runtime, func)
@@ -177,8 +177,7 @@ def _frame_members(
     return members
 
 
-def _function_frame(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _function_frame(runtime: IdaRuntime, request: FunctionIdentifierRequest) -> dict[str, object]:
     func = runtime.resolve_function(request.identifier)
     name, address = _function_header(runtime, func)
     frame_tif = runtime.ida_typeinf.tinfo_t()
@@ -195,8 +194,7 @@ def _function_frame(context: OperationContext, request: FunctionIdentifierReques
     }
 
 
-def _function_stackvars(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _function_stackvars(runtime: IdaRuntime, request: FunctionIdentifierRequest) -> dict[str, object]:
     func = runtime.resolve_function(request.identifier)
     name, address = _function_header(runtime, func)
     return {
@@ -265,22 +263,19 @@ def _outgoing_edges(runtime: IdaRuntime, func) -> list[dict[str, object]]:
     return rows
 
 
-def _function_callers(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _function_callers(runtime: IdaRuntime, request: FunctionIdentifierRequest) -> dict[str, object]:
     func = runtime.resolve_function(request.identifier)
     name, address = _function_header(runtime, func)
     return {"function": name, "address": address, "edges": _incoming_edges(runtime, func)}
 
 
-def _function_callees(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _function_callees(runtime: IdaRuntime, request: FunctionIdentifierRequest) -> dict[str, object]:
     func = runtime.resolve_function(request.identifier)
     name, address = _function_header(runtime, func)
     return {"function": name, "address": address, "edges": _outgoing_edges(runtime, func)}
 
 
-def _disasm(context: OperationContext, request: FunctionIdentifierRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _disasm(runtime: IdaRuntime, request: FunctionIdentifierRequest) -> dict[str, object]:
     func_ea = runtime.function_ea(request.identifier)
     ida_lines = runtime.mod("ida_lines")
     lines = [
@@ -290,15 +285,14 @@ def _disasm(context: OperationContext, request: FunctionIdentifierRequest) -> di
     return {"text": "\n".join(lines)}
 
 
-def _parse_decompile(params: dict[str, object]) -> DecompileRequest:
+def _parse_decompile(params: Mapping[str, Any]) -> DecompileRequest:
     return DecompileRequest(
         identifier=_require_identifier(params),
         no_cache=bool(params.get("no_cache")),
     )
 
 
-def _decompile(context: OperationContext, request: DecompileRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _decompile(runtime: IdaRuntime, request: DecompileRequest) -> dict[str, object]:
     ida_hexrays = runtime.require_hexrays()
     ea = runtime.function_ea(request.identifier)
     flags = ida_hexrays.DECOMP_NO_CACHE if request.no_cache else 0
@@ -308,7 +302,7 @@ def _decompile(context: OperationContext, request: DecompileRequest) -> dict[str
     return {"text": runtime.pseudocode_text(cfunc)}
 
 
-def _parse_ctree(params: dict[str, object]) -> CtreeRequest:
+def _parse_ctree(params: Mapping[str, Any]) -> CtreeRequest:
     return CtreeRequest(
         identifier=_require_identifier(params),
         level=str(params.get("level") or "ctree").lower(),
@@ -406,8 +400,7 @@ def _microcode_lines(runtime: IdaRuntime, func, maturity: str) -> tuple[str, ...
     return tuple(line for line in printer.lines if line)
 
 
-def _ctree(context: OperationContext, request: CtreeRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _ctree(runtime: IdaRuntime, request: CtreeRequest) -> dict[str, object]:
     func = runtime.resolve_function(request.identifier)
     name, address = _function_header(runtime, func)
     if request.level == "ctree":
@@ -435,76 +428,59 @@ def _ctree(context: OperationContext, request: CtreeRequest) -> dict[str, object
     raise IdaOperationError(f"unsupported ctree level: {request.level}")
 
 
-def function_operations() -> tuple[OperationSpec[object, object], ...]:
-    return (
-        OperationSpec(
-            name="function_list",
-            parse=_parse_function_list,
-            run=_function_list,
-        ),
-        OperationSpec(
-            name="function_show",
-            parse=_parse_identifier,
-            run=_function_show,
-        ),
-        OperationSpec(
-            name="function_frame",
-            parse=_parse_identifier,
-            run=_function_frame,
-        ),
-        OperationSpec(
-            name="function_stackvars",
-            parse=_parse_identifier,
-            run=_function_stackvars,
-        ),
-        OperationSpec(
-            name="function_callers",
-            parse=_parse_identifier,
-            run=_function_callers,
-        ),
-        OperationSpec(
-            name="function_callees",
-            parse=_parse_identifier,
-            run=_function_callees,
-        ),
-        OperationSpec(
-            name="disasm",
-            parse=_parse_identifier,
-            run=_disasm,
-        ),
-        OperationSpec(
-            name="decompile",
-            parse=_parse_decompile,
-            run=_decompile,
-        ),
-        OperationSpec(
-            name="ctree",
-            parse=_parse_ctree,
-            run=_ctree,
-        ),
-    )
+def _run_function_list(runtime: IdaRuntime, params: Mapping[str, Any]) -> list[dict[str, object]]:
+    return _function_list(runtime, _parse_function_list(params))
 
 
-def _direct_context(runtime: IdaRuntime) -> OperationContext:
-    return OperationContext(runtime=runtime)
+def _run_function_show(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _function_show(runtime, _parse_identifier(params))
 
 
-def op_decompile(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_decompile(params)
-    return _decompile(_direct_context(runtime), request)
+def _run_function_frame(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _function_frame(runtime, _parse_identifier(params))
 
 
-def op_function_frame(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_identifier(params)
-    return _function_frame(_direct_context(runtime), request)
+def _run_function_stackvars(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _function_stackvars(runtime, _parse_identifier(params))
+
+
+def _run_function_callers(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _function_callers(runtime, _parse_identifier(params))
+
+
+def _run_function_callees(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _function_callees(runtime, _parse_identifier(params))
+
+
+def _run_disasm(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _disasm(runtime, _parse_identifier(params))
+
+
+def _run_decompile(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _decompile(runtime, _parse_decompile(params))
+
+
+def _run_ctree(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _ctree(runtime, _parse_ctree(params))
+
+
+FUNCTION_OPS: dict[str, Op] = {
+    "function_list": Op(run=_run_function_list),
+    "function_show": Op(run=_run_function_show),
+    "function_frame": Op(run=_run_function_frame),
+    "function_stackvars": Op(run=_run_function_stackvars),
+    "function_callers": Op(run=_run_function_callers),
+    "function_callees": Op(run=_run_function_callees),
+    "disasm": Op(run=_run_disasm),
+    "decompile": Op(run=_run_decompile),
+    "ctree": Op(run=_run_ctree),
+}
 
 
 __all__ = [
+    "FUNCTION_OPS",
     "CtreeRequest",
     "DecompileRequest",
     "FunctionIdentifierRequest",
     "FunctionListRequest",
-    "function_operations",
-    "op_decompile",
-    "op_function_frame",
 ]

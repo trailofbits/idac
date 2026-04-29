@@ -1,29 +1,29 @@
-from .bookmarks import bookmark_operations
-from .classes import class_operations
-from .comments import comment_operations
-from .database import database_operations
-from .functions import function_operations
-from .locals import local_operations
-from .misc import misc_operations
-from .named_types import named_type_operations
-from .names import name_operations
-from .prototypes import prototype_operations
-from .search import search_operations
-from .segments import segment_operations
-from .type_declare import type_declare_operations
+from .bookmarks import BOOKMARK_OPS
+from .classes import CLASS_OPS
+from .comments import COMMENT_OPS
+from .database import DATABASE_OPS
+from .functions import FUNCTION_OPS
+from .locals import LOCAL_OPS
+from .misc import MISC_OPS
+from .named_types import NAMED_TYPE_OPS
+from .names import NAME_OPS
+from .prototypes import PROTOTYPE_OPS
+from .search import SEARCH_OPS
+from .segments import SEGMENT_OPS
+from .type_declare import TYPE_DECLARE_OPS
 
 __all__ = [
-    "bookmark_operations",
-    "class_operations",
-    "comment_operations",
-    "database_operations",
-    "function_operations",
-    "local_operations",
-    "misc_operations",
-    "name_operations",
-    "named_type_operations",
-    "prototype_operations",
-    "search_operations",
-    "segment_operations",
-    "type_declare_operations",
+    "BOOKMARK_OPS",
+    "CLASS_OPS",
+    "COMMENT_OPS",
+    "DATABASE_OPS",
+    "FUNCTION_OPS",
+    "LOCAL_OPS",
+    "MISC_OPS",
+    "NAMED_TYPE_OPS",
+    "NAME_OPS",
+    "PROTOTYPE_OPS",
+    "SEARCH_OPS",
+    "SEGMENT_OPS",
+    "TYPE_DECLARE_OPS",
 ]

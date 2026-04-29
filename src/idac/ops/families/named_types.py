@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..base import OperationContext, OperationSpec
+from ..base import Op
 from ..helpers.params import optional_param_int, param_int
 from ..preview import PreviewSpec
 from ..runtime import IdaOperationError, IdaRuntime
@@ -69,14 +70,14 @@ class EnumMemberDeleteRequest:
 _UNKNOWN_TINFO_SIZE_THRESHOLD = 1 << 63
 
 
-def _require_name(params: dict[str, object], *, key: str = "name", message: str = "type name is required") -> str:
+def _require_name(params: Mapping[str, Any], *, key: str = "name", message: str = "type name is required") -> str:
     value = str(params.get(key) or "").strip()
     if not value:
         raise IdaOperationError(message)
     return value
 
 
-def _parse_list(params: dict[str, object]) -> NamedTypeListRequest:
+def _parse_list(params: Mapping[str, Any]) -> NamedTypeListRequest:
     query = str(params.get("query") or "").strip() or None
     pattern = str(params.get("pattern") or "").strip() or None
     return NamedTypeListRequest(
@@ -88,19 +89,19 @@ def _parse_list(params: dict[str, object]) -> NamedTypeListRequest:
     )
 
 
-def _parse_show(params: dict[str, object]) -> NamedTypeShowRequest:
+def _parse_show(params: Mapping[str, Any]) -> NamedTypeShowRequest:
     return NamedTypeShowRequest(name=_require_name(params))
 
 
-def _parse_struct_show(params: dict[str, object]) -> NamedTypeShowRequest:
+def _parse_struct_show(params: Mapping[str, Any]) -> NamedTypeShowRequest:
     return NamedTypeShowRequest(name=_require_name(params, message="struct name is required"))
 
 
-def _parse_enum_show(params: dict[str, object]) -> NamedTypeShowRequest:
+def _parse_enum_show(params: Mapping[str, Any]) -> NamedTypeShowRequest:
     return NamedTypeShowRequest(name=_require_name(params, message="enum name is required"))
 
 
-def _parse_struct_field_set(params: dict[str, object]) -> StructFieldSetRequest:
+def _parse_struct_field_set(params: Mapping[str, Any]) -> StructFieldSetRequest:
     struct_name = _require_name(params, key="struct_name", message="struct name is required")
     field_name = _require_name(params, key="field_name", message="field name is required")
     decl = str(params.get("decl") or "")
@@ -110,7 +111,7 @@ def _parse_struct_field_set(params: dict[str, object]) -> StructFieldSetRequest:
     return StructFieldSetRequest(struct_name=struct_name, field_name=field_name, decl=decl, offset=offset)
 
 
-def _parse_struct_field_rename(params: dict[str, object]) -> StructFieldRenameRequest:
+def _parse_struct_field_rename(params: Mapping[str, Any]) -> StructFieldRenameRequest:
     return StructFieldRenameRequest(
         struct_name=_require_name(params, key="struct_name", message="struct name is required"),
         field_name=_require_name(params, key="field_name", message="field name is required"),
@@ -118,14 +119,14 @@ def _parse_struct_field_rename(params: dict[str, object]) -> StructFieldRenameRe
     )
 
 
-def _parse_struct_field_delete(params: dict[str, object]) -> StructFieldDeleteRequest:
+def _parse_struct_field_delete(params: Mapping[str, Any]) -> StructFieldDeleteRequest:
     return StructFieldDeleteRequest(
         struct_name=_require_name(params, key="struct_name", message="struct name is required"),
         field_name=_require_name(params, key="field_name", message="field name is required"),
     )
 
 
-def _parse_enum_member_set(params: dict[str, object]) -> EnumMemberSetRequest:
+def _parse_enum_member_set(params: Mapping[str, Any]) -> EnumMemberSetRequest:
     return EnumMemberSetRequest(
         enum_name=_require_name(params, key="enum_name", message="enum name is required"),
         member_name=_require_name(params, key="member_name", message="enum member name is required"),
@@ -134,7 +135,7 @@ def _parse_enum_member_set(params: dict[str, object]) -> EnumMemberSetRequest:
     )
 
 
-def _parse_enum_member_rename(params: dict[str, object]) -> EnumMemberRenameRequest:
+def _parse_enum_member_rename(params: Mapping[str, Any]) -> EnumMemberRenameRequest:
     return EnumMemberRenameRequest(
         enum_name=_require_name(params, key="enum_name", message="enum name is required"),
         member_name=_require_name(params, key="member_name", message="enum member name is required"),
@@ -142,7 +143,7 @@ def _parse_enum_member_rename(params: dict[str, object]) -> EnumMemberRenameRequ
     )
 
 
-def _parse_enum_member_delete(params: dict[str, object]) -> EnumMemberDeleteRequest:
+def _parse_enum_member_delete(params: Mapping[str, Any]) -> EnumMemberDeleteRequest:
     return EnumMemberDeleteRequest(
         enum_name=_require_name(params, key="enum_name", message="enum name is required"),
         member_name=_require_name(params, key="member_name", message="enum member name is required"),
@@ -246,8 +247,7 @@ def _parse_member_type(runtime: IdaRuntime, decl: str, field_name: str):
     raise IdaOperationError(f"failed to parse member type: {decl}")
 
 
-def _type_list(context: OperationContext, request: NamedTypeListRequest) -> list[dict[str, object]]:
-    runtime = context.runtime
+def _type_list(runtime: IdaRuntime, request: NamedTypeListRequest) -> list[dict[str, object]]:
     return _named_type_entry_rows(
         runtime.list_named_types(
             query=request.query,
@@ -259,12 +259,7 @@ def _type_list(context: OperationContext, request: NamedTypeListRequest) -> list
     )
 
 
-def op_type_list(runtime: IdaRuntime, params: dict[str, Any]) -> list[dict[str, object]]:
-    return _type_list(OperationContext(runtime=runtime), _parse_list(params))
-
-
-def _type_show(context: OperationContext, request: NamedTypeShowRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _type_show(runtime: IdaRuntime, request: NamedTypeShowRequest) -> dict[str, object]:
     tif = runtime.get_named_type(request.name)
     kind = runtime.classify_tinfo(tif)
     size = _normalize_tinfo_size(tif.get_size())
@@ -297,12 +292,7 @@ def _type_show(context: OperationContext, request: NamedTypeShowRequest) -> dict
     }
 
 
-def op_type_show(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
-    return _type_show(OperationContext(runtime=runtime), _parse_show(params))
-
-
-def _struct_list(context: OperationContext, request: NamedTypeListRequest) -> list[dict[str, object]]:
-    runtime = context.runtime
+def _struct_list(runtime: IdaRuntime, request: NamedTypeListRequest) -> list[dict[str, object]]:
     return _named_type_entry_rows(
         runtime.list_named_types(
             query=request.query,
@@ -315,12 +305,7 @@ def _struct_list(context: OperationContext, request: NamedTypeListRequest) -> li
     )
 
 
-def op_struct_list(runtime: IdaRuntime, params: dict[str, Any]) -> list[dict[str, object]]:
-    return _struct_list(OperationContext(runtime=runtime), _parse_list(params))
-
-
-def _struct_view(context: OperationContext, request: NamedTypeShowRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _struct_view(runtime: IdaRuntime, request: NamedTypeShowRequest) -> dict[str, object]:
     tif = runtime.get_struct_or_union(request.name)
     return {
         "name": request.name,
@@ -330,22 +315,17 @@ def _struct_view(context: OperationContext, request: NamedTypeShowRequest) -> di
     }
 
 
-def op_struct_show(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
-    return _struct_view(OperationContext(runtime=runtime), _parse_struct_show(params))
-
-
 def _persist_and_show_struct(runtime: IdaRuntime, tif, *, name: str) -> dict[str, object]:
     _persist_named_type(runtime, tif, name)
     try:
-        shown = _struct_view(OperationContext(runtime=runtime), NamedTypeShowRequest(name=name))
+        shown = _struct_view(runtime, NamedTypeShowRequest(name=name))
     except Exception as exc:
         detail = str(exc) or exc.__class__.__name__
         raise IdaOperationError(f"persisted named type `{name}` but failed to read it back: {detail}") from exc
     return {**shown, "changed": True}
 
 
-def _struct_field_set(context: OperationContext, request: StructFieldSetRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _struct_field_set(runtime: IdaRuntime, request: StructFieldSetRequest) -> dict[str, object]:
     tif = runtime.get_struct_or_union(request.struct_name)
     offset_bits = request.offset * 8
     member_tif = _parse_member_type(runtime, request.decl, request.field_name)
@@ -359,48 +339,21 @@ def _struct_field_set(context: OperationContext, request: StructFieldSetRequest)
     return _persist_and_show_struct(runtime, tif, name=request.struct_name)
 
 
-def op_struct_field_set(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
-    return _struct_field_set(OperationContext(runtime=runtime), _parse_struct_field_set(params))
-
-
-def _struct_field_rename(context: OperationContext, request: StructFieldRenameRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _struct_field_rename(runtime: IdaRuntime, request: StructFieldRenameRequest) -> dict[str, object]:
     tif = runtime.get_struct_or_union(request.struct_name)
     idx = _struct_member_index(tif, request.struct_name, request.field_name)
     _ensure_terr_ok(runtime, tif.rename_udm(idx, request.new_name), "failed to rename field")
     return _persist_and_show_struct(runtime, tif, name=request.struct_name)
 
 
-def op_struct_field_rename(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
-    return _struct_field_rename(OperationContext(runtime=runtime), _parse_struct_field_rename(params))
-
-
-def _struct_field_delete(context: OperationContext, request: StructFieldDeleteRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _struct_field_delete(runtime: IdaRuntime, request: StructFieldDeleteRequest) -> dict[str, object]:
     tif = runtime.get_struct_or_union(request.struct_name)
     idx = _struct_member_index(tif, request.struct_name, request.field_name)
     _ensure_terr_ok(runtime, tif.del_udm(idx), "failed to delete field")
     return _persist_and_show_struct(runtime, tif, name=request.struct_name)
 
 
-def op_struct_field_delete(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
-    return _struct_field_delete(OperationContext(runtime=runtime), _parse_struct_field_delete(params))
-
-
-def _struct_view_for_set(context: OperationContext, request: StructFieldSetRequest) -> dict[str, object]:
-    return _struct_view(context, NamedTypeShowRequest(name=request.struct_name))
-
-
-def _struct_view_for_rename(context: OperationContext, request: StructFieldRenameRequest) -> dict[str, object]:
-    return _struct_view(context, NamedTypeShowRequest(name=request.struct_name))
-
-
-def _struct_view_for_delete(context: OperationContext, request: StructFieldDeleteRequest) -> dict[str, object]:
-    return _struct_view(context, NamedTypeShowRequest(name=request.struct_name))
-
-
-def _enum_list(context: OperationContext, request: NamedTypeListRequest) -> list[dict[str, object]]:
-    runtime = context.runtime
+def _enum_list(runtime: IdaRuntime, request: NamedTypeListRequest) -> list[dict[str, object]]:
     return _named_type_entry_rows(
         runtime.list_named_types(
             query=request.query,
@@ -413,12 +366,7 @@ def _enum_list(context: OperationContext, request: NamedTypeListRequest) -> list
     )
 
 
-def op_enum_list(runtime: IdaRuntime, params: dict[str, Any]) -> list[dict[str, object]]:
-    return _enum_list(OperationContext(runtime=runtime), _parse_list(params))
-
-
-def _enum_view(context: OperationContext, request: NamedTypeShowRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _enum_view(runtime: IdaRuntime, request: NamedTypeShowRequest) -> dict[str, object]:
     tif = _enum_type(runtime, request.name)
     return {
         "name": request.name,
@@ -428,22 +376,17 @@ def _enum_view(context: OperationContext, request: NamedTypeShowRequest) -> dict
     }
 
 
-def op_enum_show(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
-    return _enum_view(OperationContext(runtime=runtime), _parse_enum_show(params))
-
-
 def _persist_and_show_enum(runtime: IdaRuntime, tif, *, name: str) -> dict[str, object]:
     _persist_named_type(runtime, tif, name)
     try:
-        shown = _enum_view(OperationContext(runtime=runtime), NamedTypeShowRequest(name=name))
+        shown = _enum_view(runtime, NamedTypeShowRequest(name=name))
     except Exception as exc:
         detail = str(exc) or exc.__class__.__name__
         raise IdaOperationError(f"persisted named type `{name}` but failed to read it back: {detail}") from exc
     return {**shown, "changed": True}
 
 
-def _enum_member_set(context: OperationContext, request: EnumMemberSetRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _enum_member_set(runtime: IdaRuntime, request: EnumMemberSetRequest) -> dict[str, object]:
     tif = _enum_type(runtime, request.enum_name)
     ida_typeinf = runtime.mod("ida_typeinf")
     mask = ida_typeinf.DEFMASK64 if request.mask is None else request.mask
@@ -455,123 +398,163 @@ def _enum_member_set(context: OperationContext, request: EnumMemberSetRequest) -
     return _persist_and_show_enum(runtime, tif, name=request.enum_name)
 
 
-def op_enum_member_set(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
-    return _enum_member_set(OperationContext(runtime=runtime), _parse_enum_member_set(params))
-
-
-def _enum_member_rename(context: OperationContext, request: EnumMemberRenameRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _enum_member_rename(runtime: IdaRuntime, request: EnumMemberRenameRequest) -> dict[str, object]:
     tif = _enum_type(runtime, request.enum_name)
     idx = _enum_member_index(tif, request.enum_name, request.member_name)
     _ensure_terr_ok(runtime, tif.rename_edm(idx, request.new_name), "failed to rename enum member")
     return _persist_and_show_enum(runtime, tif, name=request.enum_name)
 
 
-def op_enum_member_rename(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
-    return _enum_member_rename(OperationContext(runtime=runtime), _parse_enum_member_rename(params))
-
-
-def _enum_member_delete(context: OperationContext, request: EnumMemberDeleteRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _enum_member_delete(runtime: IdaRuntime, request: EnumMemberDeleteRequest) -> dict[str, object]:
     tif = _enum_type(runtime, request.enum_name)
     _ensure_terr_ok(runtime, tif.del_edm(request.member_name), "failed to delete enum member")
     return _persist_and_show_enum(runtime, tif, name=request.enum_name)
 
 
-def op_enum_member_delete(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
-    return _enum_member_delete(OperationContext(runtime=runtime), _parse_enum_member_delete(params))
+def _run_type_list(runtime: IdaRuntime, params: Mapping[str, Any]) -> list[dict[str, object]]:
+    return _type_list(runtime, _parse_list(params))
 
 
-def _enum_view_for_set(context: OperationContext, request: EnumMemberSetRequest) -> dict[str, object]:
-    return _enum_view(context, NamedTypeShowRequest(name=request.enum_name))
+def _run_type_show(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _type_show(runtime, _parse_show(params))
 
 
-def _enum_view_for_rename(context: OperationContext, request: EnumMemberRenameRequest) -> dict[str, object]:
-    return _enum_view(context, NamedTypeShowRequest(name=request.enum_name))
+def _run_struct_list(runtime: IdaRuntime, params: Mapping[str, Any]) -> list[dict[str, object]]:
+    return _struct_list(runtime, _parse_list(params))
 
 
-def _enum_view_for_delete(context: OperationContext, request: EnumMemberDeleteRequest) -> dict[str, object]:
-    return _enum_view(context, NamedTypeShowRequest(name=request.enum_name))
+def _run_struct_show(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _struct_view(runtime, _parse_struct_show(params))
 
 
-def named_type_operations() -> tuple[OperationSpec[object, object], ...]:
-    return (
-        OperationSpec(name="type_list", parse=_parse_list, run=_type_list),
-        OperationSpec(name="type_show", parse=_parse_show, run=_type_show),
-        OperationSpec(name="struct_list", parse=_parse_list, run=_struct_list),
-        OperationSpec(name="struct_show", parse=_parse_struct_show, run=_struct_view),
-        OperationSpec(
-            name="struct_field_set",
-            parse=_parse_struct_field_set,
-            run=_struct_field_set,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_struct_view_for_set,
-                capture_after=_struct_view_for_set,
-                use_undo=True,
-            ),
+def _run_struct_field_set(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _struct_field_set(runtime, _parse_struct_field_set(params))
+
+
+def _run_struct_field_rename(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _struct_field_rename(runtime, _parse_struct_field_rename(params))
+
+
+def _run_struct_field_delete(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _struct_field_delete(runtime, _parse_struct_field_delete(params))
+
+
+def _capture_struct_set(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    request = _parse_struct_field_set(params)
+    return _struct_view(runtime, NamedTypeShowRequest(name=request.struct_name))
+
+
+def _capture_struct_rename(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    request = _parse_struct_field_rename(params)
+    return _struct_view(runtime, NamedTypeShowRequest(name=request.struct_name))
+
+
+def _capture_struct_delete(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    request = _parse_struct_field_delete(params)
+    return _struct_view(runtime, NamedTypeShowRequest(name=request.struct_name))
+
+
+def _run_enum_list(runtime: IdaRuntime, params: Mapping[str, Any]) -> list[dict[str, object]]:
+    return _enum_list(runtime, _parse_list(params))
+
+
+def _run_enum_show(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _enum_view(runtime, _parse_enum_show(params))
+
+
+def _run_enum_member_set(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _enum_member_set(runtime, _parse_enum_member_set(params))
+
+
+def _run_enum_member_rename(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _enum_member_rename(runtime, _parse_enum_member_rename(params))
+
+
+def _run_enum_member_delete(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _enum_member_delete(runtime, _parse_enum_member_delete(params))
+
+
+def _capture_enum_set(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    request = _parse_enum_member_set(params)
+    return _enum_view(runtime, NamedTypeShowRequest(name=request.enum_name))
+
+
+def _capture_enum_rename(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    request = _parse_enum_member_rename(params)
+    return _enum_view(runtime, NamedTypeShowRequest(name=request.enum_name))
+
+
+def _capture_enum_delete(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    request = _parse_enum_member_delete(params)
+    return _enum_view(runtime, NamedTypeShowRequest(name=request.enum_name))
+
+
+NAMED_TYPE_OPS: dict[str, Op] = {
+    "type_list": Op(run=_run_type_list),
+    "type_show": Op(run=_run_type_show),
+    "struct_list": Op(run=_run_struct_list),
+    "struct_show": Op(run=_run_struct_show),
+    "struct_field_set": Op(
+        run=_run_struct_field_set,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_struct_set,
+            capture_after=_capture_struct_set,
+            use_undo=True,
         ),
-        OperationSpec(
-            name="struct_field_rename",
-            parse=_parse_struct_field_rename,
-            run=_struct_field_rename,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_struct_view_for_rename,
-                capture_after=_struct_view_for_rename,
-                use_undo=True,
-            ),
+    ),
+    "struct_field_rename": Op(
+        run=_run_struct_field_rename,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_struct_rename,
+            capture_after=_capture_struct_rename,
+            use_undo=True,
         ),
-        OperationSpec(
-            name="struct_field_delete",
-            parse=_parse_struct_field_delete,
-            run=_struct_field_delete,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_struct_view_for_delete,
-                capture_after=_struct_view_for_delete,
-                use_undo=True,
-            ),
+    ),
+    "struct_field_delete": Op(
+        run=_run_struct_field_delete,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_struct_delete,
+            capture_after=_capture_struct_delete,
+            use_undo=True,
         ),
-        OperationSpec(name="enum_list", parse=_parse_list, run=_enum_list),
-        OperationSpec(name="enum_show", parse=_parse_enum_show, run=_enum_view),
-        OperationSpec(
-            name="enum_member_set",
-            parse=_parse_enum_member_set,
-            run=_enum_member_set,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_enum_view_for_set,
-                capture_after=_enum_view_for_set,
-                use_undo=True,
-            ),
+    ),
+    "enum_list": Op(run=_run_enum_list),
+    "enum_show": Op(run=_run_enum_show),
+    "enum_member_set": Op(
+        run=_run_enum_member_set,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_enum_set,
+            capture_after=_capture_enum_set,
+            use_undo=True,
         ),
-        OperationSpec(
-            name="enum_member_rename",
-            parse=_parse_enum_member_rename,
-            run=_enum_member_rename,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_enum_view_for_rename,
-                capture_after=_enum_view_for_rename,
-                use_undo=True,
-            ),
+    ),
+    "enum_member_rename": Op(
+        run=_run_enum_member_rename,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_enum_rename,
+            capture_after=_capture_enum_rename,
+            use_undo=True,
         ),
-        OperationSpec(
-            name="enum_member_delete",
-            parse=_parse_enum_member_delete,
-            run=_enum_member_delete,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_enum_view_for_delete,
-                capture_after=_enum_view_for_delete,
-                use_undo=True,
-            ),
+    ),
+    "enum_member_delete": Op(
+        run=_run_enum_member_delete,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_enum_delete,
+            capture_after=_capture_enum_delete,
+            use_undo=True,
         ),
-    )
+    ),
+}
 
 
 __all__ = [
+    "NAMED_TYPE_OPS",
     "EnumMemberDeleteRequest",
     "EnumMemberRenameRequest",
     "EnumMemberSetRequest",
@@ -581,17 +564,4 @@ __all__ = [
     "StructFieldRenameRequest",
     "StructFieldSetRequest",
     "_parse_member_type",
-    "named_type_operations",
-    "op_enum_list",
-    "op_enum_member_delete",
-    "op_enum_member_rename",
-    "op_enum_member_set",
-    "op_enum_show",
-    "op_struct_field_delete",
-    "op_struct_field_rename",
-    "op_struct_field_set",
-    "op_struct_list",
-    "op_struct_show",
-    "op_type_list",
-    "op_type_show",
 ]

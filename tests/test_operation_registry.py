@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 
-from idac.ops import (
-    OperationContext,
-    OperationRegistry,
-    OperationSpec,
-    PreviewOutcome,
-    PreviewSpec,
-    PreviewUnsupportedError,
-)
+from idac.ops import Op, PreviewOutcome, PreviewSpec, PreviewUnsupportedError
+from idac.ops.preview import run_preview
+from idac.ops.runtime import IdaRuntime
+
+
+class _CounterRuntime(IdaRuntime):
+    def __init__(self) -> None:
+        super().__init__()
+        self.value = 0
 
 
 @dataclass(frozen=True)
@@ -19,118 +22,64 @@ class CounterRequest:
     amount: int
 
 
-@dataclass(frozen=True)
-class CounterResult:
-    value: int
-
-
-class _CounterRuntime:
-    def __init__(self) -> None:
-        self.value = 0
-
-
-def _parse_counter(params: dict[str, object]) -> CounterRequest:
+def _parse_counter(params: Mapping[str, Any]) -> CounterRequest:
     return CounterRequest(amount=int(params["amount"]))
 
 
-def _increment(context: OperationContext, request: CounterRequest) -> CounterResult:
-    runtime = context.runtime
+def _run_increment(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, int]:
+    request = _parse_counter(params)
     assert isinstance(runtime, _CounterRuntime)
     runtime.value += request.amount
-    return CounterResult(value=runtime.value)
+    return {"value": runtime.value}
 
 
-def _capture_value(context: OperationContext, request: CounterRequest) -> int:
-    del request
-    runtime = context.runtime
+def _capture_value(runtime: IdaRuntime, _params: Mapping[str, Any]) -> int:
     assert isinstance(runtime, _CounterRuntime)
     return runtime.value
 
 
 def _rollback_increment(
-    context: OperationContext,
-    request: CounterRequest,
+    runtime: IdaRuntime,
+    params: Mapping[str, Any],
     before: int,
-    result: CounterResult,
+    result: dict[str, int],
 ) -> None:
     del result, before
-    runtime = context.runtime
+    request = _parse_counter(params)
     assert isinstance(runtime, _CounterRuntime)
     runtime.value -= request.amount
 
 
-def test_operation_registry_executes_typed_operation() -> None:
-    registry = OperationRegistry(
-        [
-            OperationSpec(
-                name="counter.increment",
-                parse=_parse_counter,
-                run=_increment,
-                mutating=True,
-            )
-        ]
-    )
+def test_op_runs_typed_operation() -> None:
+    op = Op(run=_run_increment, mutating=True)
     runtime = _CounterRuntime()
 
-    result = registry.execute(
-        "counter.increment",
-        params={"amount": "3"},
-        context=OperationContext(runtime=runtime),
-    )
+    result = op.run(runtime, {"amount": "3"})
 
-    assert result == CounterResult(value=3)
+    assert result == {"value": 3}
     assert runtime.value == 3
 
 
-def test_operation_registry_runs_preview_and_rolls_back_state() -> None:
-    registry = OperationRegistry(
-        [
-            OperationSpec(
-                name="counter.increment",
-                parse=_parse_counter,
-                run=_increment,
-                mutating=True,
-                preview=PreviewSpec(
-                    capture_before=_capture_value,
-                    capture_after=_capture_value,
-                    rollback=_rollback_increment,
-                ),
-            )
-        ]
+def test_run_preview_rolls_back_state() -> None:
+    op = Op(
+        run=_run_increment,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_value,
+            capture_after=_capture_value,
+            rollback=_rollback_increment,
+        ),
     )
     runtime = _CounterRuntime()
 
-    result = registry.execute(
-        "counter.increment",
-        params={"amount": "5"},
-        context=OperationContext(runtime=runtime, preview=True),
-    )
+    outcome = run_preview(runtime, "counter.increment", {"amount": "5"}, op.run, op.preview)
 
-    assert result == PreviewOutcome(
-        result=CounterResult(value=5),
-        before=0,
-        after=5,
-    )
+    assert outcome == PreviewOutcome(result={"value": 5}, before=0, after=5)
     assert runtime.value == 0
 
 
 def test_preview_requires_preview_support() -> None:
-    registry = OperationRegistry(
-        [
-            OperationSpec(
-                name="counter.increment",
-                parse=_parse_counter,
-                run=_increment,
-                mutating=True,
-            )
-        ]
-    )
+    op = Op(run=_run_increment, mutating=True)
 
     with pytest.raises(PreviewUnsupportedError, match="preview is not supported"):
-        registry.execute(
-            "counter.increment",
-            params={"amount": "1"},
-            context=OperationContext(runtime=_CounterRuntime(), preview=True),
-        )
-
-
+        run_preview(_CounterRuntime(), "counter.increment", {"amount": "1"}, op.run, op.preview)

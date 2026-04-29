@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
-from ..base import OperationContext, OperationSpec
+from ..base import Op
 from ..helpers.params import require_str
 from ..preview import PreviewSpec
 from ..runtime import IdaOperationError, IdaRuntime
@@ -30,14 +31,14 @@ def _normalize_comment_text(text: str | None) -> str | None:
     return None if text in (None, "") else str(text)
 
 
-def _parse_scope(params: dict[str, object]) -> CommentScope:
+def _parse_scope(params: Mapping[str, Any]) -> CommentScope:
     scope = str(params.get("scope") or "line").strip().lower()
     if scope not in {"line", "function", "anterior", "posterior"}:
         raise IdaOperationError(f"unsupported comment scope: {scope}")
     return scope  # type: ignore[return-value]
 
 
-def _parse_repeatable(params: dict[str, object], *, scope: CommentScope) -> bool:
+def _parse_repeatable(params: Mapping[str, Any], *, scope: CommentScope) -> bool:
     repeatable = bool(params.get("repeatable"))
     if repeatable and scope in {"anterior", "posterior"}:
         raise IdaOperationError("repeatable comments are only supported for line or function scope")
@@ -179,17 +180,13 @@ def _write_comment(runtime: IdaRuntime, request: CommentChange, *, text: str) ->
     )
 
 
-def _comment_view(context: OperationContext, request: CommentLookup | CommentChange) -> dict[str, object]:
-    return _read_comment(context.runtime, request)
-
-
-def _parse_lookup(params: dict[str, object]) -> CommentLookup:
+def _parse_lookup(params: Mapping[str, Any]) -> CommentLookup:
     identifier = require_str(params.get("address"), field="address")
     scope = _parse_scope(params)
     return CommentLookup(identifier=identifier, scope=scope, repeatable=_parse_repeatable(params, scope=scope))
 
 
-def _parse_change(params: dict[str, object]) -> CommentChange:
+def _parse_change(params: Mapping[str, Any]) -> CommentChange:
     request = _parse_lookup(params)
     return CommentChange(
         identifier=request.identifier,
@@ -199,13 +196,13 @@ def _parse_change(params: dict[str, object]) -> CommentChange:
     )
 
 
-def _set_comment(context: OperationContext, request: CommentChange) -> dict[str, object]:
-    return _write_comment(context.runtime, request, text=request.text)
+def _set_comment(runtime: IdaRuntime, request: CommentChange) -> dict[str, object]:
+    return _write_comment(runtime, request, text=request.text)
 
 
-def _delete_comment(context: OperationContext, request: CommentLookup) -> dict[str, object]:
+def _delete_comment(runtime: IdaRuntime, request: CommentLookup) -> dict[str, object]:
     return _write_comment(
-        context.runtime,
+        runtime,
         CommentChange(
             identifier=request.identifier,
             text="",
@@ -216,17 +213,37 @@ def _delete_comment(context: OperationContext, request: CommentLookup) -> dict[s
     )
 
 
-def _restore_comment(
-    context: OperationContext,
-    request: CommentLookup | CommentChange,
+def _run_comment_get(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _read_comment(runtime, _parse_lookup(params))
+
+
+def _run_comment_set(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _set_comment(runtime, _parse_change(params))
+
+
+def _run_comment_delete(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _delete_comment(runtime, _parse_lookup(params))
+
+
+def _capture_comment_set(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _read_comment(runtime, _parse_change(params))
+
+
+def _capture_comment_delete(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _read_comment(runtime, _parse_lookup(params))
+
+
+def _restore_comment_change(
+    runtime: IdaRuntime,
+    params: Mapping[str, Any],
     before: dict[str, object],
-    result: dict[str, object],
+    result: Any,
 ) -> None:
-    del result
+    del params, result
     _write_comment(
-        context.runtime,
+        runtime,
         CommentChange(
-            identifier=request.identifier,
+            identifier=_address_from_before(before),
             text="" if before.get("comment") is None else str(before.get("comment")),
             scope=before["scope"],  # type: ignore[arg-type]
             repeatable=bool(before.get("repeatable")),
@@ -235,40 +252,38 @@ def _restore_comment(
     )
 
 
-def comment_operations() -> tuple[OperationSpec[object, object], ...]:
-    return (
-        OperationSpec(
-            name="comment_get",
-            parse=_parse_lookup,
-            run=_comment_view,
+def _address_from_before(before: dict[str, object]) -> str:
+    address = before.get("address")
+    if not isinstance(address, str) or not address:
+        raise IdaOperationError("internal error: comment preview missing address")
+    return address
+
+
+COMMENT_OPS: dict[str, Op] = {
+    "comment_get": Op(run=_run_comment_get),
+    "comment_set": Op(
+        run=_run_comment_set,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_comment_set,
+            capture_after=_capture_comment_set,
+            rollback=_restore_comment_change,
         ),
-        OperationSpec(
-            name="comment_set",
-            parse=_parse_change,
-            run=_set_comment,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_comment_view,
-                capture_after=_comment_view,
-                rollback=_restore_comment,
-            ),
+    ),
+    "comment_delete": Op(
+        run=_run_comment_delete,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_comment_delete,
+            capture_after=_capture_comment_delete,
+            rollback=_restore_comment_change,
         ),
-        OperationSpec(
-            name="comment_delete",
-            parse=_parse_lookup,
-            run=_delete_comment,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_comment_view,
-                capture_after=_comment_view,
-                rollback=_restore_comment,
-            ),
-        ),
-    )
+    ),
+}
 
 
 __all__ = [
+    "COMMENT_OPS",
     "CommentChange",
     "CommentLookup",
-    "comment_operations",
 ]

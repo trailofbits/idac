@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
-from ..base import OperationContext, OperationSpec
+from ..base import Op
 from ..helpers.matching import pattern_from_params, text_matches
-from ..runtime import IdaOperationError
+from ..runtime import IdaOperationError, IdaRuntime
 
 
 @dataclass(frozen=True)
@@ -16,7 +18,7 @@ class SegmentListRequest:
     ignore_case: bool
 
 
-def _parse_segment_list(params: dict[str, object]) -> SegmentListRequest:
+def _parse_segment_list(params: Mapping[str, Any]) -> SegmentListRequest:
     pattern, glob, regex, ignore_case = pattern_from_params(params)
     if regex and pattern:
         try:
@@ -26,12 +28,9 @@ def _parse_segment_list(params: dict[str, object]) -> SegmentListRequest:
     return SegmentListRequest(pattern=pattern, glob=glob, regex=regex, ignore_case=ignore_case)
 
 
-def _segment_list(
-    context: OperationContext,
-    request: SegmentListRequest,
-) -> list[dict[str, object]]:
+def _segment_list(runtime: IdaRuntime, request: SegmentListRequest) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    for segment in context.runtime.iter_segments():
+    for segment in runtime.iter_segments():
         if request.pattern and not text_matches(
             segment.name,
             pattern=request.pattern,
@@ -51,17 +50,16 @@ def _segment_list(
     return rows
 
 
-def segment_operations() -> tuple[OperationSpec[object, object], ...]:
-    return (
-        OperationSpec(
-            name="segment_list",
-            parse=_parse_segment_list,
-            run=_segment_list,
-        ),
-    )
+def _run_segment_list(runtime: IdaRuntime, params: Mapping[str, Any]) -> list[dict[str, object]]:
+    return _segment_list(runtime, _parse_segment_list(params))
+
+
+SEGMENT_OPS: dict[str, Op] = {
+    "segment_list": Op(run=_run_segment_list),
+}
 
 
 __all__ = [
+    "SEGMENT_OPS",
     "SegmentListRequest",
-    "segment_operations",
 ]

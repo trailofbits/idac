@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import contextlib
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..base import OperationContext, OperationSpec
+from ..base import Op
 from ..helpers.params import optional_param_int, require_str
 from ..preview import PreviewSpec
 from ..runtime import (
@@ -76,11 +77,11 @@ _LOCAL_SELECTOR_GUIDANCE = (
 )
 
 
-def _require_identifier(params: dict[str, object]) -> str:
+def _require_identifier(params: Mapping[str, Any]) -> str:
     return require_str(params.get("identifier"), field="address or identifier")
 
 
-def _parse_local_selector(params: dict[str, object], *, name_key: str) -> LocalSelector:
+def _parse_local_selector(params: Mapping[str, Any], *, name_key: str) -> LocalSelector:
     name = str(params.get(name_key) or "").strip() or None
     local_id = str(params.get("local_id") or "").strip() or None
     index = optional_param_int(params, "index", label="local index", minimum=0)
@@ -92,11 +93,11 @@ def _parse_local_selector(params: dict[str, object], *, name_key: str) -> LocalS
     return LocalSelector(name=name, local_id=local_id, index=index)
 
 
-def _parse_local_list(params: dict[str, object]) -> LocalListRequest:
+def _parse_local_list(params: Mapping[str, Any]) -> LocalListRequest:
     return LocalListRequest(identifier=_require_identifier(params))
 
 
-def _parse_local_rename(params: dict[str, object]) -> LocalRenameRequest:
+def _parse_local_rename(params: Mapping[str, Any]) -> LocalRenameRequest:
     new_name = str(params.get("new_name") or "")
     if not new_name:
         raise IdaOperationError("new local variable name is required")
@@ -107,7 +108,7 @@ def _parse_local_rename(params: dict[str, object]) -> LocalRenameRequest:
     )
 
 
-def _parse_local_retype(params: dict[str, object]) -> LocalRetypeRequest:
+def _parse_local_retype(params: Mapping[str, Any]) -> LocalRetypeRequest:
     decl = str(params.get("decl") or "")
     if not decl:
         raise IdaOperationError("local variable declaration is required")
@@ -118,7 +119,7 @@ def _parse_local_retype(params: dict[str, object]) -> LocalRetypeRequest:
     )
 
 
-def _parse_local_update(params: dict[str, object]) -> LocalUpdateRequest:
+def _parse_local_update(params: Mapping[str, Any]) -> LocalUpdateRequest:
     new_name = str(params.get("new_name") or "").strip() or None
     decl = str(params.get("decl") or "").strip() or None
     if new_name is None and decl is None:
@@ -349,7 +350,7 @@ def _available_locals_suffix(runtime: IdaRuntime, func_ea: int) -> str:
 def _resolve_lvar_selection(
     runtime: IdaRuntime,
     func_ea: int,
-    params: dict[str, object],
+    params: Mapping[str, Any],
     *,
     name_key: str,
 ) -> tuple[str, Any]:
@@ -409,34 +410,20 @@ def _apply_local_change(
     return _readback_local_change(runtime, func_ea, success_message=success_message)
 
 
-def _cleanup_local_preview(context: OperationContext, request: LocalRenameRequest | LocalRetypeRequest) -> None:
-    runtime = context.runtime
-    try:
-        func_ea = runtime.function_ea(request.identifier)
-        runtime.require_hexrays().mark_cfunc_dirty(func_ea, False)
-        runtime.require_hexrays().clear_cached_cfuncs()
-    except Exception as exc:
-        if not is_recoverable_ida_error(exc):
-            raise
-
-
-def _local_list(context: OperationContext, request: LocalListRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _local_list(runtime: IdaRuntime, request: LocalListRequest) -> dict[str, object]:
     func_ea = runtime.function_ea(request.identifier)
     return _local_list_result(runtime, func_ea)
 
 
 def _local_list_for_change(
-    context: OperationContext,
+    runtime: IdaRuntime,
     request: LocalRenameRequest | LocalRetypeRequest | LocalUpdateRequest,
 ) -> dict[str, object]:
-    runtime = context.runtime
     func_ea = runtime.function_ea(request.identifier)
     return _local_list_result(runtime, func_ea)
 
 
-def _local_rename(context: OperationContext, request: LocalRenameRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _local_rename(runtime: IdaRuntime, request: LocalRenameRequest) -> dict[str, object]:
     func_ea = runtime.function_ea(request.identifier)
     selected = _select_local(runtime, func_ea, request.selector)
     failure_message = f"failed to rename local variable: {selected.label()}"
@@ -464,8 +451,7 @@ def _local_rename(context: OperationContext, request: LocalRenameRequest) -> dic
     )
 
 
-def _local_retype(context: OperationContext, request: LocalRetypeRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _local_retype(runtime: IdaRuntime, request: LocalRetypeRequest) -> dict[str, object]:
     func_ea = runtime.function_ea(request.identifier)
     selected = _select_local(runtime, func_ea, request.selector)
     info = _local_saved_info(runtime, selected.locator)
@@ -485,8 +471,7 @@ def _local_retype(context: OperationContext, request: LocalRetypeRequest) -> dic
     )
 
 
-def _local_update(context: OperationContext, request: LocalUpdateRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _local_update(runtime: IdaRuntime, request: LocalUpdateRequest) -> dict[str, object]:
     func_ea = runtime.function_ea(request.identifier)
     selected = _select_local(runtime, func_ea, request.selector)
     info = _local_saved_info(runtime, selected.locator)
@@ -519,75 +504,85 @@ def _local_update(context: OperationContext, request: LocalUpdateRequest) -> dic
     )
 
 
-def local_operations() -> tuple[OperationSpec[object, object], ...]:
-    return (
-        OperationSpec(
-            name="local_list",
-            parse=_parse_local_list,
-            run=_local_list,
+def _run_local_list(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _local_list(runtime, _parse_local_list(params))
+
+
+def _run_local_rename(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _local_rename(runtime, _parse_local_rename(params))
+
+
+def _run_local_retype(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _local_retype(runtime, _parse_local_retype(params))
+
+
+def _run_local_update(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _local_update(runtime, _parse_local_update(params))
+
+
+def _capture_local_rename(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _local_list_for_change(runtime, _parse_local_rename(params))
+
+
+def _capture_local_retype(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _local_list_for_change(runtime, _parse_local_retype(params))
+
+
+def _capture_local_update(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _local_list_for_change(runtime, _parse_local_update(params))
+
+
+def _cleanup_local_preview(runtime: IdaRuntime, params: Mapping[str, Any]) -> None:
+    identifier = require_str(params.get("identifier"), field="address or identifier")
+    try:
+        func_ea = runtime.function_ea(identifier)
+        runtime.require_hexrays().mark_cfunc_dirty(func_ea, False)
+        runtime.require_hexrays().clear_cached_cfuncs()
+    except Exception as exc:
+        if not is_recoverable_ida_error(exc):
+            raise
+
+
+LOCAL_OPS: dict[str, Op] = {
+    "local_list": Op(run=_run_local_list),
+    "local_rename": Op(
+        run=_run_local_rename,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_local_rename,
+            capture_after=_capture_local_rename,
+            cleanup=_cleanup_local_preview,
+            use_undo=True,
         ),
-        OperationSpec(
-            name="local_rename",
-            parse=_parse_local_rename,
-            run=_local_rename,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_local_list_for_change,
-                capture_after=_local_list_for_change,
-                cleanup=_cleanup_local_preview,
-                use_undo=True,
-            ),
+    ),
+    "local_retype": Op(
+        run=_run_local_retype,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_local_retype,
+            capture_after=_capture_local_retype,
+            cleanup=_cleanup_local_preview,
+            use_undo=True,
         ),
-        OperationSpec(
-            name="local_retype",
-            parse=_parse_local_retype,
-            run=_local_retype,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_local_list_for_change,
-                capture_after=_local_list_for_change,
-                cleanup=_cleanup_local_preview,
-                use_undo=True,
-            ),
+    ),
+    "local_update": Op(
+        run=_run_local_update,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_local_update,
+            capture_after=_capture_local_update,
+            cleanup=_cleanup_local_preview,
+            use_undo=True,
         ),
-        OperationSpec(
-            name="local_update",
-            parse=_parse_local_update,
-            run=_local_update,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_local_list_for_change,
-                capture_after=_local_list_for_change,
-                cleanup=_cleanup_local_preview,
-                use_undo=True,
-            ),
-        ),
-    )
-
-
-def op_local_list(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_local_list(params)
-    return _local_list(OperationContext(runtime=runtime), request)
-
-
-def op_local_rename(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_local_rename(params)
-    return _local_rename(OperationContext(runtime=runtime), request)
-
-
-def op_local_update(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_local_update(params)
-    return _local_update(OperationContext(runtime=runtime), request)
+    ),
+}
 
 
 __all__ = [
+    "LOCAL_OPS",
     "LocalListRequest",
     "LocalRenameRequest",
     "LocalRetypeRequest",
     "LocalSelector",
     "LocalUpdateRequest",
-    "local_operations",
-    "op_local_list",
-    "op_local_rename",
-    "op_local_update",
 ]

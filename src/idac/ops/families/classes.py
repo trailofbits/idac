@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..base import OperationContext, OperationSpec
+from ..base import Op
 from ..helpers.params import optional_param_int, optional_str, require_str
 from ..runtime import (
     IdaOperationError,
@@ -55,7 +56,7 @@ class VtableDumpRequest:
     slot_limit: int
 
 
-def _parse_list(params: dict[str, object]) -> ClassListRequest:
+def _parse_list(params: Mapping[str, Any]) -> ClassListRequest:
     query = optional_str(params.get("query"))
     pattern = optional_str(params.get("pattern"))
     return ClassListRequest(
@@ -67,7 +68,7 @@ def _parse_list(params: dict[str, object]) -> ClassListRequest:
     )
 
 
-def _parse_candidates(params: dict[str, object]) -> ClassCandidatesRequest:
+def _parse_candidates(params: Mapping[str, Any]) -> ClassCandidatesRequest:
     query = str(params.get("pattern") or params.get("query") or "")
     kinds = tuple(str(item) for item in (params.get("kinds") or []) if str(item))
     return ClassCandidatesRequest(
@@ -79,25 +80,25 @@ def _parse_candidates(params: dict[str, object]) -> ClassCandidatesRequest:
     )
 
 
-def _parse_name(params: dict[str, object]) -> ClassNameRequest:
+def _parse_name(params: Mapping[str, Any]) -> ClassNameRequest:
     return ClassNameRequest(name=require_str(params.get("name"), field="class name"))
 
 
-def _parse_fields(params: dict[str, object]) -> ClassFieldsRequest:
+def _parse_fields(params: Mapping[str, Any]) -> ClassFieldsRequest:
     return ClassFieldsRequest(
         name=require_str(params.get("name"), field="class name"),
         derived_only=bool(params.get("derived_only")),
     )
 
 
-def _parse_class_vtable(params: dict[str, object]) -> ClassVtableRequest:
+def _parse_class_vtable(params: Mapping[str, Any]) -> ClassVtableRequest:
     return ClassVtableRequest(
         name=require_str(params.get("name"), field="class name"),
         runtime=bool(params.get("runtime")),
     )
 
 
-def _parse_vtable_dump(params: dict[str, object]) -> VtableDumpRequest:
+def _parse_vtable_dump(params: Mapping[str, Any]) -> VtableDumpRequest:
     identifier = require_str(params.get("identifier"), field="vtable identifier")
     slot_limit = optional_param_int(params, "slot_limit", label="vtable slot limit", minimum=1) or 64
     return VtableDumpRequest(identifier=identifier, slot_limit=slot_limit)
@@ -424,8 +425,8 @@ def _require_class_tinfo(runtime: IdaRuntime, name: str):
     return tif
 
 
-def _class_list(context: OperationContext, request: ClassListRequest) -> list[dict[str, Any]]:
-    return context.runtime.list_named_classes(
+def _class_list(runtime: IdaRuntime, request: ClassListRequest) -> list[dict[str, Any]]:
+    return runtime.list_named_classes(
         query=request.query,
         pattern=request.pattern,
         glob=request.glob,
@@ -434,12 +435,7 @@ def _class_list(context: OperationContext, request: ClassListRequest) -> list[di
     )
 
 
-def op_class_list(runtime: IdaRuntime, params: dict[str, Any]) -> list[dict[str, Any]]:
-    return _class_list(OperationContext(runtime=runtime), _parse_list(params))
-
-
-def _class_candidates(context: OperationContext, request: ClassCandidatesRequest) -> list[dict[str, Any]]:
-    runtime = context.runtime
+def _class_candidates(runtime: IdaRuntime, request: ClassCandidatesRequest) -> list[dict[str, Any]]:
     kind_filter = set(request.kinds)
     seen: set[tuple[str, str, str]] = set()
     rows = _local_type_candidate_rows(
@@ -466,24 +462,14 @@ def _class_candidates(context: OperationContext, request: ClassCandidatesRequest
     return rows
 
 
-def op_class_candidates(runtime: IdaRuntime, params: dict[str, Any]) -> list[dict[str, Any]]:
-    return _class_candidates(OperationContext(runtime=runtime), _parse_candidates(params))
-
-
-def _class_show(context: OperationContext, request: ClassNameRequest) -> dict[str, Any]:
-    runtime = context.runtime
+def _class_show(runtime: IdaRuntime, request: ClassNameRequest) -> dict[str, Any]:
     tif = _require_class_tinfo(runtime, request.name)
     payload = dict(runtime.class_summary(tif, name=request.name, decl_multi=True))
     payload["members"] = _flatten_class_fields(runtime, tif, derived_only=False)
     return payload
 
 
-def op_class_show(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, Any]:
-    return _class_show(OperationContext(runtime=runtime), _parse_name(params))
-
-
-def _class_hierarchy(context: OperationContext, request: ClassNameRequest) -> dict[str, Any]:
-    runtime = context.runtime
+def _class_hierarchy(runtime: IdaRuntime, request: ClassNameRequest) -> dict[str, Any]:
     name = request.name
     classes, children = _class_graph(runtime)
     if name not in classes:
@@ -504,12 +490,7 @@ def _class_hierarchy(context: OperationContext, request: ClassNameRequest) -> di
     }
 
 
-def op_class_hierarchy(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, Any]:
-    return _class_hierarchy(OperationContext(runtime=runtime), _parse_name(params))
-
-
-def _class_fields(context: OperationContext, request: ClassFieldsRequest) -> dict[str, Any]:
-    runtime = context.runtime
+def _class_fields(runtime: IdaRuntime, request: ClassFieldsRequest) -> dict[str, Any]:
     tif = _require_class_tinfo(runtime, request.name)
     return {
         "name": request.name,
@@ -519,12 +500,7 @@ def _class_fields(context: OperationContext, request: ClassFieldsRequest) -> dic
     }
 
 
-def op_class_fields(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, Any]:
-    return _class_fields(OperationContext(runtime=runtime), _parse_fields(params))
-
-
-def _class_vtable(context: OperationContext, request: ClassVtableRequest) -> dict[str, Any]:
-    runtime = context.runtime
+def _class_vtable(runtime: IdaRuntime, request: ClassVtableRequest) -> dict[str, Any]:
     tif = _require_class_tinfo(runtime, request.name)
     vtable_name = runtime.class_vtable_type_name(tif)
     if not vtable_name:
@@ -544,42 +520,54 @@ def _class_vtable(context: OperationContext, request: ClassVtableRequest) -> dic
     return payload
 
 
-def op_class_vtable(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, Any]:
-    return _class_vtable(OperationContext(runtime=runtime), _parse_class_vtable(params))
+def _vtable_dump(runtime: IdaRuntime, request: VtableDumpRequest) -> dict[str, Any]:
+    return _raw_vtable_dump(runtime, request.identifier, slot_limit=request.slot_limit)
 
 
-def _vtable_dump(context: OperationContext, request: VtableDumpRequest) -> dict[str, Any]:
-    return _raw_vtable_dump(context.runtime, request.identifier, slot_limit=request.slot_limit)
+def _run_class_list(runtime: IdaRuntime, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return _class_list(runtime, _parse_list(params))
 
 
-def op_vtable_dump(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, Any]:
-    return _vtable_dump(OperationContext(runtime=runtime), _parse_vtable_dump(params))
+def _run_class_candidates(runtime: IdaRuntime, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return _class_candidates(runtime, _parse_candidates(params))
 
 
-def class_operations() -> tuple[OperationSpec[object, object], ...]:
-    return (
-        OperationSpec(name="class_list", parse=_parse_list, run=_class_list),
-        OperationSpec(name="class_candidates", parse=_parse_candidates, run=_class_candidates),
-        OperationSpec(name="class_show", parse=_parse_name, run=_class_show),
-        OperationSpec(name="class_hierarchy", parse=_parse_name, run=_class_hierarchy),
-        OperationSpec(name="class_fields", parse=_parse_fields, run=_class_fields),
-        OperationSpec(name="class_vtable", parse=_parse_class_vtable, run=_class_vtable),
-        OperationSpec(name="vtable_dump", parse=_parse_vtable_dump, run=_vtable_dump),
-    )
+def _run_class_show(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, Any]:
+    return _class_show(runtime, _parse_name(params))
+
+
+def _run_class_hierarchy(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, Any]:
+    return _class_hierarchy(runtime, _parse_name(params))
+
+
+def _run_class_fields(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, Any]:
+    return _class_fields(runtime, _parse_fields(params))
+
+
+def _run_class_vtable(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, Any]:
+    return _class_vtable(runtime, _parse_class_vtable(params))
+
+
+def _run_vtable_dump(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, Any]:
+    return _vtable_dump(runtime, _parse_vtable_dump(params))
+
+
+CLASS_OPS: dict[str, Op] = {
+    "class_list": Op(run=_run_class_list),
+    "class_candidates": Op(run=_run_class_candidates),
+    "class_show": Op(run=_run_class_show),
+    "class_hierarchy": Op(run=_run_class_hierarchy),
+    "class_fields": Op(run=_run_class_fields),
+    "class_vtable": Op(run=_run_class_vtable),
+    "vtable_dump": Op(run=_run_vtable_dump),
+}
 
 
 __all__ = [
+    "CLASS_OPS",
     "_flatten_class_fields",
     "_raw_vtable_dump",
     "_require_class_tinfo",
     "_symbol_evidence",
     "_vtable_members",
-    "class_operations",
-    "op_class_candidates",
-    "op_class_fields",
-    "op_class_hierarchy",
-    "op_class_list",
-    "op_class_show",
-    "op_class_vtable",
-    "op_vtable_dump",
 ]

@@ -1,29 +1,22 @@
-from .base import OperationContext, OperationSpec
-from .dispatch import build_operation_registry
+from .base import Op
+from .dispatch import build_operation_registry, dispatch
 from .manifest import (
     MUTATING_OPERATIONS,
-    OPERATION_SPEC_MAP,
+    OPERATIONS,
     PREVIEW_UNSUPPORTED_OPERATIONS,
     SUPPORTED_OPERATIONS,
-    OperationName,
-    operation_specs,
 )
 from .preview import PreviewOutcome, PreviewSpec, PreviewUnsupportedError
-from .registry import OperationLookupError, OperationRegistry
 
 __all__ = [
     "MUTATING_OPERATIONS",
-    "OPERATION_SPEC_MAP",
+    "OPERATIONS",
     "PREVIEW_UNSUPPORTED_OPERATIONS",
     "SUPPORTED_OPERATIONS",
-    "OperationContext",
-    "OperationLookupError",
-    "OperationName",
-    "OperationRegistry",
-    "OperationSpec",
+    "Op",
     "PreviewOutcome",
     "PreviewSpec",
     "PreviewUnsupportedError",
     "build_operation_registry",
-    "operation_specs",
+    "dispatch",
 ]

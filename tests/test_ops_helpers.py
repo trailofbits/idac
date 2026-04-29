@@ -1,27 +1,26 @@
 from __future__ import annotations
 
-from typing import get_args
-
 import pytest
 
-from idac.ops import OperationContext
 from idac.ops.families import (
     bookmarks,
     classes,
     database,
     functions,
     locals,
-    names,
-    prototypes,
     search,
     segments,
     type_declare,
 )
 from idac.ops.families import named_types as types
-from idac.ops.families.named_types import op_struct_field_set
+from idac.ops.families.classes import CLASS_OPS
+from idac.ops.families.functions import FUNCTION_OPS
+from idac.ops.families.locals import LOCAL_OPS
+from idac.ops.families.named_types import NAMED_TYPE_OPS
+from idac.ops.families.prototypes import PROTOTYPE_OPS
 from idac.ops.families.type_declare import _split_declarations
 from idac.ops.helpers import matching
-from idac.ops.manifest import OPERATION_SPEC_MAP, SUPPORTED_OPERATIONS, OperationName
+from idac.ops.manifest import OPERATIONS, SUPPORTED_OPERATIONS
 from idac.ops.preview import PreviewSpec, run_preview
 from idac.ops.runtime import (
     IdaOperationError,
@@ -43,7 +42,7 @@ class _DummyRuntime:
 
 def test_struct_field_set_rejects_negative_offsets() -> None:
     with pytest.raises(IdaOperationError, match="greater than or equal to 0"):
-        op_struct_field_set(
+        NAMED_TYPE_OPS["struct_field_set"].run(
             _DummyRuntime(),
             {
                 "struct_name": "Player",
@@ -187,7 +186,7 @@ def test_op_decompile_passes_no_cache_flag_when_requested() -> None:
 
             return FakeIdaLines()
 
-    payload = functions.op_decompile(FakeRuntime(), {"identifier": "main", "no_cache": True})
+    payload = FUNCTION_OPS["decompile"].run(FakeRuntime(), {"identifier": "main", "no_cache": True})
 
     assert payload == {"text": "int main(void)"}
     assert calls == [(0x401000, 0x2)]
@@ -224,7 +223,7 @@ def test_disasm_uses_direct_ida_lines_api() -> None:
                 assert func_ea == 0x401000
                 return [0x401000, 0x401004]
 
-    rendered = functions._disasm(OperationContext(runtime=FakeRuntime()), functions.FunctionIdentifierRequest("main"))
+    rendered = functions._disasm(FakeRuntime(), functions.FunctionIdentifierRequest("main"))
 
     assert rendered["text"] == "0x401000: insn_401000\n0x401004: insn_401004"
     assert calls == [("generate", 0x401000), ("tag_remove", 0), ("generate", 0x401004), ("tag_remove", 0)]
@@ -264,7 +263,7 @@ def test_function_list_honors_limit() -> None:
             return {0x1000: "alpha", 0x2000: "beta", 0x3000: "gamma"}[ea]
 
     rows = functions._function_list(
-        OperationContext(runtime=FakeRuntime()),
+        FakeRuntime(),
         functions.FunctionListRequest(
             pattern="",
             glob=False,
@@ -350,7 +349,7 @@ def test_database_info_reports_start_ea_separately_from_first_entry() -> None:
             }
             return modules[name]
 
-    result = database._database_info(OperationContext(runtime=FakeRuntime()), database.DatabaseInfoRequest())
+    result = database._database_info(FakeRuntime(), database.DatabaseInfoRequest())
 
     assert result["start_ea"] == "0x401000"
     assert result["entry_ea"] == "0x402000"
@@ -367,7 +366,7 @@ def test_segment_list_filters_with_regex_pattern() -> None:
             )
 
     rows = segments._segment_list(
-        OperationContext(runtime=FakeRuntime()),
+        FakeRuntime(),
         segments.SegmentListRequest(pattern="__TEXT|__cstring", glob=False, regex=True, ignore_case=False),
     )
 
@@ -431,7 +430,7 @@ def test_xrefs_collect_code_and_data_references_explicitly() -> None:
                 )
             raise AssertionError(f"unexpected flags: {flags}")
 
-    rows = search._xrefs(OperationContext(runtime=FakeRuntime()), search.XrefsRequest(identifier="target"))
+    rows = search._xrefs(FakeRuntime(), search.XrefsRequest(identifier="target"))
 
     assert seen_flags == [0, 4, 2]
     assert rows == [
@@ -625,7 +624,7 @@ def test_op_function_frame_uses_get_func_frame_not_func_frame_object() -> None:
             assert multi is False
             return "int"
 
-    payload = functions.op_function_frame(FakeRuntime(), {"identifier": "main"})
+    payload = FUNCTION_OPS["function_frame"].run(FakeRuntime(), {"identifier": "main"})
 
     assert payload["frame_size"] == 24
     assert payload["members"] == [
@@ -674,7 +673,7 @@ def test_local_rename_uses_direct_hexrays_rename_for_name_selector(monkeypatch) 
         lambda runtime, func_ea: {"function": "main", "address": "0x401000", "locals": []},
     )
 
-    payload = locals.op_local_rename(
+    payload = LOCAL_OPS["local_rename"].run(
         FakeRuntime(),
         {"identifier": "main", "old_name": "v4", "new_name": "sum_value"},
     )
@@ -682,16 +681,12 @@ def test_local_rename_uses_direct_hexrays_rename_for_name_selector(monkeypatch) 
     assert payload["changed"] is True
 
 
-def test_operation_literal_matches_spec_keys() -> None:
-    assert set(get_args(OperationName)) == set(SUPPORTED_OPERATIONS)
-
-
 def test_only_list_targets_lacks_a_direct_operation_handler() -> None:
-    assert set(SUPPORTED_OPERATIONS) - set(OPERATION_SPEC_MAP) == {"list_targets"}
+    assert set(SUPPORTED_OPERATIONS) - set(OPERATIONS) == {"list_targets"}
 
 
 def test_python_exec_is_marked_mutating() -> None:
-    spec = OPERATION_SPEC_MAP["python_exec"]
+    spec = OPERATIONS["python_exec"]
 
     assert spec.mutating is True
 
@@ -765,7 +760,7 @@ def test_python_exec_scope_omits_ida_hexrays_when_unavailable() -> None:
 
 
 def test_name_set_preview_resolves_identifier_before_capture() -> None:
-    spec = OPERATION_SPEC_MAP["name_set"].preview
+    spec = OPERATIONS["name_set"].preview
     assert spec is not None
     assert spec.prepare is not None
 
@@ -787,16 +782,16 @@ def test_name_set_preview_resolves_identifier_before_capture() -> None:
             assert identifier in {"main", "0x401000"}
             return 0x401000
 
-    context = OperationContext(runtime=FakeRuntime())
-    request = names._parse_name_set({"identifier": "main", "new_name": "renamed"})
-    prepared = spec.prepare_request(context, request)
+    runtime = FakeRuntime()
+    prepared = spec.prepare_params(runtime, {"identifier": "main", "new_name": "renamed"})
 
-    assert prepared == names.NameSetRequest(identifier="0x401000", new_name="renamed")
-    assert spec.capture_before(context, prepared) == names.NameState(address="0x401000", name="")
+    assert prepared["identifier"] == "0x401000"
+    assert prepared["new_name"] == "renamed"
+    assert spec.capture_before(runtime, prepared) == {"address": "0x401000", "name": ""}
 
 
 def test_name_set_preview_prepare_preserves_mutation_params() -> None:
-    spec = OPERATION_SPEC_MAP["name_set"].preview
+    spec = OPERATIONS["name_set"].preview
     assert spec is not None
     assert spec.prepare is not None
 
@@ -806,22 +801,21 @@ def test_name_set_preview_prepare_preserves_mutation_params() -> None:
             assert identifier == "main"
             return 0x401000
 
-    context = OperationContext(runtime=FakeRuntime())
-    request = names._parse_name_set({"identifier": "main", "new_name": "add_numbers"})
-    prepared = spec.prepare_request(context, request)
+    prepared = spec.prepare_params(FakeRuntime(), {"identifier": "main", "new_name": "add_numbers"})
 
-    assert prepared == names.NameSetRequest(identifier="0x401000", new_name="add_numbers")
+    assert prepared["identifier"] == "0x401000"
+    assert prepared["new_name"] == "add_numbers"
 
 
 def test_local_rename_preview_registers_cleanup() -> None:
-    spec = OPERATION_SPEC_MAP["local_rename"].preview
+    spec = OPERATIONS["local_rename"].preview
 
     assert spec is not None
     assert spec.cleanup is not None
 
 
 def test_strings_manifest_marks_operation_read_only() -> None:
-    spec = OPERATION_SPEC_MAP["strings"]
+    spec = OPERATIONS["strings"]
 
     assert spec.mutating is False
     assert spec.preview is None
@@ -844,20 +838,20 @@ def test_preview_cleanup_runs_after_failed_mutation() -> None:
             assert name == "ida_undo"
             return FakeUndo()
 
-    def capture(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
+    def capture(_runtime: IdaRuntime, _params: dict[str, object]) -> dict[str, bool]:
         events.append("capture")
         return {"captured": True}
 
-    def cleanup(_context: OperationContext, _request: dict[str, object]) -> None:
+    def cleanup(_runtime: IdaRuntime, _params: dict[str, object]) -> None:
         events.append("cleanup")
 
-    def handler(_context: OperationContext, _request: dict[str, object]) -> object:
+    def handler(_runtime: IdaRuntime, _params: dict[str, object]) -> object:
         events.append("mutate")
         raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError, match="boom"):
         run_preview(
-            OperationContext(runtime=FakeRuntime(), preview=True),
+            FakeRuntime(),
             "test_preview",
             {},
             handler,
@@ -880,18 +874,18 @@ def test_preview_cleanup_does_not_mask_mutation_failure() -> None:
             assert name == "ida_undo"
             return FakeUndo()
 
-    def capture(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
+    def capture(_runtime: IdaRuntime, _params: dict[str, object]) -> dict[str, bool]:
         return {"captured": True}
 
-    def cleanup(_context: OperationContext, _request: dict[str, object]) -> None:
+    def cleanup(_runtime: IdaRuntime, _params: dict[str, object]) -> None:
         raise RuntimeError("cleanup failed")
 
-    def handler(_context: OperationContext, _request: dict[str, object]) -> object:
+    def handler(_runtime: IdaRuntime, _params: dict[str, object]) -> object:
         raise ValueError("mutation failed")
 
     with pytest.raises(ValueError, match="mutation failed"):
         run_preview(
-            OperationContext(runtime=FakeRuntime(), preview=True),
+            FakeRuntime(),
             "test_preview",
             {},
             handler,
@@ -902,29 +896,29 @@ def test_preview_cleanup_does_not_mask_mutation_failure() -> None:
 def test_manual_preview_rolls_back_when_after_capture_fails() -> None:
     events: list[str] = []
 
-    def capture_before(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
+    def capture_before(_runtime: IdaRuntime, _params: dict[str, object]) -> dict[str, bool]:
         events.append("before")
         return {"before": True}
 
-    def capture_after(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
+    def capture_after(_runtime: IdaRuntime, _params: dict[str, object]) -> dict[str, bool]:
         events.append("after")
         raise RuntimeError("after failed")
 
     def rollback(
-        _context: OperationContext,
-        _request: dict[str, object],
+        _runtime: IdaRuntime,
+        _params: dict[str, object],
         _before: dict[str, bool],
         _result: dict[str, bool],
     ) -> None:
         events.append("rollback")
 
-    def handler(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
+    def handler(_runtime: IdaRuntime, _params: dict[str, object]) -> dict[str, bool]:
         events.append("mutate")
         return {"changed": True}
 
     with pytest.raises(RuntimeError, match="after failed"):
         run_preview(
-            OperationContext(runtime=IdaRuntime(), preview=True),
+            IdaRuntime(),
             "test_preview",
             {},
             handler,
@@ -935,26 +929,26 @@ def test_manual_preview_rolls_back_when_after_capture_fails() -> None:
 
 
 def test_manual_preview_reports_rollback_failure_after_capture_failure() -> None:
-    def capture_before(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
+    def capture_before(_runtime: IdaRuntime, _params: dict[str, object]) -> dict[str, bool]:
         return {"before": True}
 
-    def capture_after(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
+    def capture_after(_runtime: IdaRuntime, _params: dict[str, object]) -> dict[str, bool]:
         raise RuntimeError("after failed")
 
     def rollback(
-        _context: OperationContext,
-        _request: dict[str, object],
+        _runtime: IdaRuntime,
+        _params: dict[str, object],
         _before: dict[str, bool],
         _result: dict[str, bool],
     ) -> None:
         raise RuntimeError("rollback failed")
 
-    def handler(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
+    def handler(_runtime: IdaRuntime, _params: dict[str, object]) -> dict[str, bool]:
         return {"changed": True}
 
     with pytest.raises(RuntimeError, match="rollback failed") as excinfo:
         run_preview(
-            OperationContext(runtime=IdaRuntime(), preview=True),
+            IdaRuntime(),
             "test_preview",
             {},
             handler,
@@ -1323,7 +1317,7 @@ def test_local_rename_reports_success_when_readback_fails(monkeypatch) -> None:
         IdaOperationError,
         match="failed to read back locals: decompiler refresh failed",
     ):
-        locals.op_local_rename(
+        LOCAL_OPS["local_rename"].run(
             FakeRuntime(),
             {"identifier": "main", "old_name": "v4", "new_name": "sum_value"},
         )
@@ -1525,7 +1519,7 @@ def test_local_update_allows_unnamed_local_selected_by_stable_selector(monkeypat
         lambda runtime, func_ea: {"function": "main", "address": "0x401000", "locals": []},
     )
 
-    payload = locals.op_local_update(
+    payload = LOCAL_OPS["local_update"].run(
         FakeRuntime(),
         {"identifier": "main", "index": 0, "new_name": "recovered_name"},
     )
@@ -1587,7 +1581,7 @@ def test_proto_set_parses_silently_and_applies_tinfo() -> None:
         def find_named_type(self, name: str):
             return object()
 
-    payload = prototypes.op_proto_set(
+    payload = PROTOTYPE_OPS["proto_set"].run(
         FakeRuntime(),
         {"identifier": "target", "decl": "void __fastcall target(void)", "propagate_callers": False},
     )
@@ -1661,7 +1655,7 @@ def test_proto_set_retries_with_relaxed_namespace_parse() -> None:
         def find_named_type(self, name: str):
             return object()
 
-    payload = prototypes.op_proto_set(
+    payload = PROTOTYPE_OPS["proto_set"].run(
         FakeRuntime(),
         {
             "identifier": "target",
@@ -1776,7 +1770,7 @@ def test_proto_set_optionally_propagates_to_callers() -> None:
         def find_named_type(self, name: str):
             return object()
 
-    payload = prototypes.op_proto_set(
+    payload = PROTOTYPE_OPS["proto_set"].run(
         FakeRuntime(),
         {
             "identifier": "target",
@@ -1835,7 +1829,7 @@ def test_proto_set_reports_unknown_type_name() -> None:
             return None if name == "eValueType" else object()
 
     with pytest.raises(IdaOperationError, match="unknown type\\(s\\): eValueType"):
-        prototypes.op_proto_set(
+        PROTOTYPE_OPS["proto_set"].run(
             FakeRuntime(),
             {"identifier": "target", "decl": "void __fastcall target(eValueType value_type)"},
         )
@@ -1887,7 +1881,7 @@ def test_proto_set_reports_generic_parse_failure() -> None:
             return object()
 
     with pytest.raises(IdaOperationError, match="parser limitations"):
-        prototypes.op_proto_set(
+        PROTOTYPE_OPS["proto_set"].run(
             FakeRuntime(),
             {"identifier": "target", "decl": "void __fastcall target(ValueType value)"},
         )
@@ -1950,7 +1944,7 @@ def test_proto_set_reports_apply_failure_after_successful_parse() -> None:
             return object()
 
     with pytest.raises(IdaOperationError, match="apply_tinfo failed"):
-        prototypes.op_proto_set(
+        PROTOTYPE_OPS["proto_set"].run(
             FakeRuntime(),
             {"identifier": "target", "decl": "void __fastcall target(int value)"},
         )
@@ -2006,7 +2000,7 @@ def test_class_hierarchy_explains_non_class_materialized_type() -> None:
             ]
 
     with pytest.raises(IdaOperationError) as excinfo:
-        classes.op_class_hierarchy(FakeRuntime(), {"name": "CMessaging"})
+        CLASS_OPS["class_hierarchy"].run(FakeRuntime(), {"name": "CMessaging"})
     message = str(excinfo.value)
     assert "exists as a struct, but is not class-materialized" in message
     assert "type class candidates --query CMessaging" in message
@@ -2094,7 +2088,7 @@ def test_class_vtable_runtime_fallback_uses_requested_alias_when_type_name_missi
         },
     )
 
-    payload = classes.op_class_vtable(runtime, {"name": "Alias", "runtime": True})
+    payload = CLASS_OPS["class_vtable"].run(runtime, {"name": "Alias", "runtime": True})
 
     assert looked_up_names == ["Alias"]
     assert payload["runtime_vtable"] == {"identifier": "0x402000", "slot_limit": 64}
@@ -2120,7 +2114,7 @@ def test_class_show_preserves_case_sensitive_name_lookup(monkeypatch) -> None:
 
     monkeypatch.setattr(classes, "_flatten_class_fields", lambda runtime, resolved_tif, derived_only: [])
 
-    payload = classes.op_class_show(FakeRuntime(), {"name": "MiXeDClass"})
+    payload = CLASS_OPS["class_show"].run(FakeRuntime(), {"name": "MiXeDClass"})
 
     assert payload["name"] == "MiXeDClass"
     assert payload["decl"] == "struct MiXeDClass;"
@@ -2149,7 +2143,7 @@ def test_type_show_normalizes_unknown_size_to_none() -> None:
         def tinfo_members(self, tif: object) -> list[dict[str, object]]:
             return []
 
-    payload = types.op_type_show(FakeRuntime(), {"name": "OpaqueThing"})
+    payload = NAMED_TYPE_OPS["type_show"].run(FakeRuntime(), {"name": "OpaqueThing"})
 
     assert payload["size"] is None
     assert payload["size_known"] is False
@@ -2199,7 +2193,7 @@ def test_enum_member_rename_reports_success_when_readback_fails(monkeypatch) -> 
         IdaOperationError,
         match="persisted named type `Color` but failed to read it back: enum refresh failed",
     ):
-        types.op_enum_member_rename(
+        NAMED_TYPE_OPS["enum_member_rename"].run(
             FakeRuntime(),
             {"enum_name": "Color", "member_name": "RED", "new_name": "CRIMSON"},
         )

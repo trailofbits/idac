@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from idac.ops.base import OperationContext
 from idac.ops.families.search import SearchBytesRequest, _search_bytes
 from idac.ops.runtime import IdaOperationError, IdaRuntime, SegmentRange
 
@@ -110,7 +109,7 @@ def test_search_bytes_compiles_pattern_once_and_uses_bin_search() -> None:
     runtime = _FakeRuntime(ida_bytes)
 
     result = _search_bytes(
-        OperationContext(runtime=runtime),
+        runtime,
         SearchBytesRequest(pattern="aa bb", segment="__TEXT", start="0x1000", end="0x1030", limit=2),
     )
 
@@ -133,7 +132,7 @@ def test_search_bytes_reports_invalid_pattern_as_user_error() -> None:
 
     with pytest.raises(IdaOperationError, match="invalid byte pattern: bad digit"):
         _search_bytes(
-            OperationContext(runtime=runtime),
+            runtime,
             SearchBytesRequest(pattern="zz", segment="__TEXT", start="0x1000", end="0x1030", limit=5),
         )
 
@@ -146,7 +145,7 @@ def test_search_bytes_returns_empty_results_when_no_matches_found() -> None:
     runtime = _FakeRuntime(ida_bytes)
 
     result = _search_bytes(
-        OperationContext(runtime=runtime),
+        runtime,
         SearchBytesRequest(pattern="aa bb", segment="__TEXT", start="0x1000", end="0x1030", limit=5),
     )
 
@@ -160,7 +159,7 @@ def test_search_bytes_marks_results_truncated_when_limit_is_hit() -> None:
     runtime = _FakeRuntime(ida_bytes)
 
     result = _search_bytes(
-        OperationContext(runtime=runtime),
+        runtime,
         SearchBytesRequest(pattern="aa bb", segment="__TEXT", start="0x1000", end="0x1030", limit=1),
     )
 
@@ -178,7 +177,7 @@ def test_search_bytes_walks_each_matching_segment_range() -> None:
     )
 
     result = _search_bytes(
-        OperationContext(runtime=runtime),
+        runtime,
         SearchBytesRequest(pattern="aa bb", segment="__TEXT", start=None, end=None, limit=10),
     )
 

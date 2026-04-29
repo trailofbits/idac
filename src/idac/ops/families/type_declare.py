@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Optional, TypedDict, Union
 
-from ..base import OperationContext, OperationSpec
+from ..base import Op
 from ..helpers.params import parse_aliases
 from ..preview import PreviewSpec
 from ..runtime import IdaOperationError, IdaRuntime, ida_undo_restore_point
@@ -957,12 +958,8 @@ def _type_declare_result(
     }
 
 
-def _preview_snapshot(
-    context: OperationContext,
-    request: TypeDeclareRequest,
-) -> dict[str, object]:
-    del request
-    runtime = context.runtime
+def _preview_snapshot(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    del params
     names = runtime.list_named_types()
     return {
         "type_count": len(names),
@@ -971,8 +968,7 @@ def _preview_snapshot(
     }
 
 
-def _type_declare(context: OperationContext, request: TypeDeclareRequest) -> TypeDeclareResult:
-    runtime = context.runtime
+def _type_declare(runtime: IdaRuntime, request: TypeDeclareRequest) -> TypeDeclareResult:
     decl, aliases_applied = _apply_type_aliases(request.decl, list(request.aliases))
     chunks, brace_balance = _parse_declaration_chunks(decl)
     errors, before, after, bisect = _apply_type_declarations_with_optional_bisect(
@@ -996,27 +992,25 @@ def _type_declare(context: OperationContext, request: TypeDeclareRequest) -> Typ
     )
 
 
-def op_type_declare(runtime: IdaRuntime, params: dict[str, Any]) -> TypeDeclareResult:
-    return _type_declare(OperationContext(runtime=runtime), _parse_request(params))
+def _run_type_declare(runtime: IdaRuntime, params: Mapping[str, Any]) -> TypeDeclareResult:
+    return _type_declare(runtime, _parse_request(params))
 
 
-def type_declare_operations() -> tuple[OperationSpec[object, object], ...]:
-    return (
-        OperationSpec(
-            name="type_declare",
-            parse=_parse_request,
-            run=_type_declare,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_preview_snapshot,
-                capture_after=_preview_snapshot,
-                use_undo=True,
-            ),
+TYPE_DECLARE_OPS: dict[str, Op] = {
+    "type_declare": Op(
+        run=_run_type_declare,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_preview_snapshot,
+            capture_after=_preview_snapshot,
+            use_undo=True,
         ),
-    )
+    ),
+}
 
 
 __all__ = [
+    "TYPE_DECLARE_OPS",
     "AppliedAlias",
     "BlockingMember",
     "DeclarationChunk",
@@ -1032,6 +1026,4 @@ __all__ = [
     "_opaque_by_value_members",
     "_split_declarations",
     "_type_declare_diagnostics",
-    "op_type_declare",
-    "type_declare_operations",
 ]

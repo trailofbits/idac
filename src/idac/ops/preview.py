@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Generic
+from typing import Any
 
-from .base import OperationContext, RequestT, ResultT, RunOperation
-from .runtime import ida_undo_restore_point
+from .base import Params, Runner
+from .runtime import IdaRuntime, ida_undo_restore_point
 
-PreviewPrepare = Callable[[OperationContext, RequestT], RequestT]
-PreviewCapture = Callable[[OperationContext, RequestT], Any]
-PreviewRollback = Callable[[OperationContext, RequestT, Any, ResultT], None]
-PreviewCleanup = Callable[[OperationContext, RequestT], None]
+PreviewPrepare = Callable[[IdaRuntime, Params], Mapping[str, Any]]
+PreviewCapture = Callable[[IdaRuntime, Params], Any]
+PreviewRollback = Callable[[IdaRuntime, Params, Any, Any], None]
+PreviewCleanup = Callable[[IdaRuntime, Params], None]
 
 
 class PreviewUnsupportedError(RuntimeError):
@@ -18,8 +18,8 @@ class PreviewUnsupportedError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class PreviewOutcome(Generic[ResultT]):
-    result: ResultT
+class PreviewOutcome:
+    result: Any
     before: Any
     after: Any
     persisted: bool = False
@@ -28,49 +28,49 @@ class PreviewOutcome(Generic[ResultT]):
 
 
 @dataclass(frozen=True)
-class PreviewSpec(Generic[RequestT, ResultT]):
+class PreviewSpec:
     capture_before: PreviewCapture
     capture_after: PreviewCapture
-    rollback: PreviewRollback[RequestT, ResultT] | None = None
-    prepare: PreviewPrepare[RequestT] | None = None
-    cleanup: PreviewCleanup[RequestT] | None = None
+    rollback: PreviewRollback | None = None
+    prepare: PreviewPrepare | None = None
+    cleanup: PreviewCleanup | None = None
     use_undo: bool = False
 
-    def prepare_request(self, context: OperationContext, request: RequestT) -> RequestT:
+    def prepare_params(self, runtime: IdaRuntime, params: Params) -> Params:
         if self.prepare is None:
-            return request
-        return self.prepare(context, request)
+            return params
+        return self.prepare(runtime, params)
 
 
 def run_preview(
-    context: OperationContext,
+    runtime: IdaRuntime,
     name: str,
-    request: RequestT,
-    runner: RunOperation[RequestT, ResultT],
-    spec: PreviewSpec[RequestT, ResultT] | None,
-) -> PreviewOutcome[ResultT]:
+    params: Params,
+    runner: Runner,
+    spec: PreviewSpec | None,
+) -> PreviewOutcome:
     if spec is None:
         raise PreviewUnsupportedError("preview is not supported for this operation")
 
-    prepared = spec.prepare_request(context, request)
+    prepared = spec.prepare_params(runtime, params)
     if spec.use_undo:
         cleanup_error: BaseException | None = None
         try:
             with ida_undo_restore_point(
-                context.runtime,
+                runtime,
                 action_name=f"idac_preview_{name}",
                 label=f"idac preview {name}",
                 unavailable_message="preview is unavailable because IDA undo is disabled",
                 restore_error_message=f"preview failed to restore changes via undo for {name}",
                 restore_failure_message=f"preview failed and IDA could not restore changes via undo for {name}",
             ):
-                before = spec.capture_before(context, prepared)
-                result = runner(context, prepared)
-                after = spec.capture_after(context, prepared)
+                before = spec.capture_before(runtime, prepared)
+                result = runner(runtime, prepared)
+                after = spec.capture_after(runtime, prepared)
         finally:
             if spec.cleanup is not None:
                 try:
-                    spec.cleanup(context, prepared)
+                    spec.cleanup(runtime, prepared)
                 except BaseException as exc:  # pragma: no cover - defensive cleanup branch.
                     cleanup_error = exc
         if cleanup_error is not None:
@@ -80,30 +80,30 @@ def run_preview(
     if spec.rollback is None:
         raise PreviewUnsupportedError(f"preview is not supported for this operation: {name}")
 
-    result: ResultT | None = None
+    result: Any = None
     after: Any = None
     mutation_succeeded = False
     primary_error: BaseException | None = None
     rollback_error: BaseException | None = None
     cleanup_error: BaseException | None = None
     try:
-        before = spec.capture_before(context, prepared)
+        before = spec.capture_before(runtime, prepared)
         try:
-            result = runner(context, prepared)
+            result = runner(runtime, prepared)
             mutation_succeeded = True
-            after = spec.capture_after(context, prepared)
+            after = spec.capture_after(runtime, prepared)
         except BaseException as exc:
             primary_error = exc
         finally:
             if mutation_succeeded:
                 try:
-                    spec.rollback(context, prepared, before, result)
+                    spec.rollback(runtime, prepared, before, result)
                 except BaseException as exc:
                     rollback_error = exc
     finally:
         if spec.cleanup is not None:
             try:
-                spec.cleanup(context, prepared)
+                spec.cleanup(runtime, prepared)
             except BaseException as exc:  # pragma: no cover - defensive cleanup branch.
                 cleanup_error = exc
     if rollback_error is not None:

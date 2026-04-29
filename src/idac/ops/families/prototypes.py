@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
-from ..base import OperationContext, OperationSpec
+from ..base import Op
 from ..helpers.params import require_str
 from ..preview import PreviewSpec
 from ..runtime import (
@@ -81,15 +83,15 @@ class PrototypeSetRequest:
     propagate_callers: bool = False
 
 
-def _require_identifier(params: dict[str, object]) -> str:
+def _require_identifier(params: Mapping[str, Any]) -> str:
     return require_str(params.get("identifier"), field="address or identifier")
 
 
-def _parse_proto_get(params: dict[str, object]) -> PrototypeGetRequest:
+def _parse_proto_get(params: Mapping[str, Any]) -> PrototypeGetRequest:
     return PrototypeGetRequest(identifier=_require_identifier(params))
 
 
-def _parse_proto_set(params: dict[str, object]) -> PrototypeSetRequest:
+def _parse_proto_set(params: Mapping[str, Any]) -> PrototypeSetRequest:
     decl = str(params.get("decl") or "")
     if not decl:
         raise IdaOperationError("prototype declaration is required")
@@ -102,10 +104,9 @@ def _parse_proto_set(params: dict[str, object]) -> PrototypeSetRequest:
 
 
 def _prototype_view(
-    context: OperationContext,
+    runtime: IdaRuntime,
     request: PrototypeGetRequest | PrototypeSetRequest,
 ) -> dict[str, object]:
-    runtime = context.runtime
     ea = runtime.function_ea(request.identifier)
     prototype = runtime.ida_typeinf.print_type(ea, runtime.ida_typeinf.PRTYPE_1LINE) or ""
     if not isinstance(request, PrototypeSetRequest) or not request.preview_decompile:
@@ -202,12 +203,11 @@ def _parse_prototype_decl(runtime: IdaRuntime, decl: str):
     return None
 
 
-def _proto_get(context: OperationContext, request: PrototypeGetRequest) -> dict[str, object]:
-    return _prototype_view(context, request)
+def _proto_get(runtime: IdaRuntime, request: PrototypeGetRequest) -> dict[str, object]:
+    return _prototype_view(runtime, request)
 
 
-def _proto_set(context: OperationContext, request: PrototypeSetRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _proto_set(runtime: IdaRuntime, request: PrototypeSetRequest) -> dict[str, object]:
     ea = runtime.function_ea(request.identifier)
     decl = request.decl
     original_name = runtime.ida_name.get_name(ea) or ""
@@ -250,35 +250,34 @@ def _proto_set(context: OperationContext, request: PrototypeSetRequest) -> dict[
     }
 
 
-def prototype_operations() -> tuple[OperationSpec[object, object], ...]:
-    return (
-        OperationSpec(
-            name="proto_get",
-            parse=_parse_proto_get,
-            run=_proto_get,
-        ),
-        OperationSpec(
-            name="proto_set",
-            parse=_parse_proto_set,
-            run=_proto_set,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_prototype_view,
-                capture_after=_prototype_view,
-                use_undo=True,
-            ),
-        ),
-    )
+def _run_proto_get(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _proto_get(runtime, _parse_proto_get(params))
 
 
-def op_proto_set(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_proto_set(params)
-    return _proto_set(OperationContext(runtime=runtime), request)
+def _run_proto_set(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _proto_set(runtime, _parse_proto_set(params))
+
+
+def _capture_proto_set(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _prototype_view(runtime, _parse_proto_set(params))
+
+
+PROTOTYPE_OPS: dict[str, Op] = {
+    "proto_get": Op(run=_run_proto_get),
+    "proto_set": Op(
+        run=_run_proto_set,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_proto_set,
+            capture_after=_capture_proto_set,
+            use_undo=True,
+        ),
+    ),
+}
 
 
 __all__ = [
+    "PROTOTYPE_OPS",
     "PrototypeGetRequest",
     "PrototypeSetRequest",
-    "op_proto_set",
-    "prototype_operations",
 ]

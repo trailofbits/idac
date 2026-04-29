@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
-from ..base import OperationContext, OperationSpec
-from ..runtime import IdaOperationError
+from ..base import Op
+from ..runtime import IdaOperationError, IdaRuntime
 
 
 @dataclass(frozen=True)
@@ -16,18 +18,17 @@ class DatabaseSaveRequest:
     path: str | None = None
 
 
-def _parse_info(_params: dict[str, object]) -> DatabaseInfoRequest:
+def _parse_info(_params: Mapping[str, Any]) -> DatabaseInfoRequest:
     return DatabaseInfoRequest()
 
 
-def _parse_save(params: dict[str, object]) -> DatabaseSaveRequest:
+def _parse_save(params: Mapping[str, Any]) -> DatabaseSaveRequest:
     path = str(params.get("path") or "").strip()
     return DatabaseSaveRequest(path=path or None)
 
 
-def _database_info(context: OperationContext, request: DatabaseInfoRequest) -> dict[str, object]:
+def _database_info(runtime: IdaRuntime, request: DatabaseInfoRequest) -> dict[str, object]:
     del request
-    runtime = context.runtime
     ida_entry = runtime.mod("ida_entry")
     ida_ida = runtime.mod("ida_ida")
     ida_loader = runtime.mod("ida_loader")
@@ -49,8 +50,7 @@ def _database_info(context: OperationContext, request: DatabaseInfoRequest) -> d
     }
 
 
-def _database_save(context: OperationContext, request: DatabaseSaveRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _database_save(runtime: IdaRuntime, request: DatabaseSaveRequest) -> dict[str, object]:
     ida_loader = runtime.mod("ida_loader")
     save_path = request.path or ida_loader.get_path(ida_loader.PATH_TYPE_IDB) or ""
     if not save_path:
@@ -60,24 +60,22 @@ def _database_save(context: OperationContext, request: DatabaseSaveRequest) -> d
     return {"saved": True, "path": save_path}
 
 
-def database_operations() -> tuple[OperationSpec[object, object], ...]:
-    return (
-        OperationSpec(
-            name="database_info",
-            parse=_parse_info,
-            run=_database_info,
-        ),
-        OperationSpec(
-            name="db_save",
-            parse=_parse_save,
-            run=_database_save,
-            mutating=True,
-        ),
-    )
+def _run_database_info(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _database_info(runtime, _parse_info(params))
+
+
+def _run_database_save(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _database_save(runtime, _parse_save(params))
+
+
+DATABASE_OPS: dict[str, Op] = {
+    "database_info": Op(run=_run_database_info),
+    "db_save": Op(run=_run_database_save, mutating=True),
+}
 
 
 __all__ = [
+    "DATABASE_OPS",
     "DatabaseInfoRequest",
     "DatabaseSaveRequest",
-    "database_operations",
 ]

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
-from ..base import OperationContext, OperationSpec
+from ..base import Op
 from ..helpers.params import require_str
 from ..preview import PreviewSpec
 from ..runtime import IdaOperationError, IdaRuntime
@@ -153,14 +155,14 @@ def _write_bookmark(runtime: IdaRuntime, *, slot: int, identifier: str, comment:
     )
 
 
-def _parse_get(params: dict[str, object]) -> BookmarkGetRequest:
+def _parse_get(params: Mapping[str, Any]) -> BookmarkGetRequest:
     slot_value = params.get("slot")
     if slot_value in (None, ""):
         return BookmarkGetRequest()
     return BookmarkGetRequest(slot=_parse_slot(slot_value))
 
 
-def _parse_set(params: dict[str, object]) -> BookmarkSetRequest:
+def _parse_set(params: Mapping[str, Any]) -> BookmarkSetRequest:
     return BookmarkSetRequest(
         slot=_parse_slot(params.get("slot")),
         identifier=_require_identifier(params.get("address"), label="address"),
@@ -168,38 +170,34 @@ def _parse_set(params: dict[str, object]) -> BookmarkSetRequest:
     )
 
 
-def _parse_add(params: dict[str, object]) -> BookmarkAddRequest:
+def _parse_add(params: Mapping[str, Any]) -> BookmarkAddRequest:
     return BookmarkAddRequest(
         identifier=_require_identifier(params.get("address"), label="address"),
         comment=str(params.get("comment") or ""),
     )
 
 
-def _parse_delete(params: dict[str, object]) -> BookmarkDeleteRequest:
+def _parse_delete(params: Mapping[str, Any]) -> BookmarkDeleteRequest:
     return BookmarkDeleteRequest(slot=_parse_slot(params.get("slot")))
 
 
-def _get_bookmark(context: OperationContext, request: BookmarkGetRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _get_bookmark(runtime: IdaRuntime, request: BookmarkGetRequest) -> dict[str, object]:
     if request.slot is None:
         return _bookmark_list(runtime)
     return _bookmark_state(runtime, _validate_slot(runtime, request.slot))
 
 
-def _set_bookmark(context: OperationContext, request: BookmarkSetRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _set_bookmark(runtime: IdaRuntime, request: BookmarkSetRequest) -> dict[str, object]:
     slot = _validate_slot(runtime, request.slot)
     return _write_bookmark(runtime, slot=slot, identifier=request.identifier, comment=request.comment)
 
 
-def _add_bookmark(context: OperationContext, request: BookmarkAddRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _add_bookmark(runtime: IdaRuntime, request: BookmarkAddRequest) -> dict[str, object]:
     slot = _first_free_slot(runtime)
     return _write_bookmark(runtime, slot=slot, identifier=request.identifier, comment=request.comment)
 
 
-def _delete_bookmark(context: OperationContext, request: BookmarkDeleteRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _delete_bookmark(runtime: IdaRuntime, request: BookmarkDeleteRequest) -> dict[str, object]:
     slot = _validate_slot(runtime, request.slot)
     before = _bookmark_state(runtime, slot)
     if not before["present"]:
@@ -221,27 +219,45 @@ def _delete_bookmark(context: OperationContext, request: BookmarkDeleteRequest) 
     )
 
 
-def _preview_single_slot(
-    context: OperationContext,
-    request: BookmarkSetRequest | BookmarkDeleteRequest,
-) -> dict[str, object]:
-    runtime = context.runtime
+def _run_bookmark_get(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _get_bookmark(runtime, _parse_get(params))
+
+
+def _run_bookmark_set(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _set_bookmark(runtime, _parse_set(params))
+
+
+def _run_bookmark_add(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _add_bookmark(runtime, _parse_add(params))
+
+
+def _run_bookmark_delete(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _delete_bookmark(runtime, _parse_delete(params))
+
+
+def _capture_set(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    request = _parse_set(params)
     return _bookmark_state(runtime, _validate_slot(runtime, request.slot))
 
 
-def _preview_bookmark_list(context: OperationContext, request: BookmarkAddRequest) -> dict[str, object]:
-    del request
-    return _bookmark_list(context.runtime)
+def _capture_delete(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    request = _parse_delete(params)
+    return _bookmark_state(runtime, _validate_slot(runtime, request.slot))
 
 
-def _restore_bookmark_state(
-    context: OperationContext,
-    request: BookmarkSetRequest | BookmarkDeleteRequest,
+def _capture_add(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    del params
+    return _bookmark_list(runtime)
+
+
+def _restore_set_or_delete(
+    runtime: IdaRuntime,
+    params: Mapping[str, Any],
     before: dict[str, object],
-    result: dict[str, object],
+    result: Any,
 ) -> None:
-    runtime = context.runtime
-    slot = _validate_slot(runtime, request.slot)
+    slot = int(before["slot"])
+    del params
     if before["present"]:
         if before["address"] is None:
             raise IdaOperationError(f"bookmark slot {slot} is present but has no saved address")
@@ -252,69 +268,58 @@ def _restore_bookmark_state(
             comment="" if before["comment"] is None else str(before["comment"]),
         )
         return
-    if result["present"]:
+    if isinstance(result, dict) and result.get("present"):
         _erase_bookmark(runtime, slot)
 
 
-def _restore_added_bookmark(
-    context: OperationContext,
-    request: BookmarkAddRequest,
+def _restore_added(
+    runtime: IdaRuntime,
+    params: Mapping[str, Any],
     before: dict[str, object],
-    result: dict[str, object],
+    result: Any,
 ) -> None:
-    del request, before
-    if result["present"]:
-        _erase_bookmark(context.runtime, int(result["slot"]))
+    del params, before
+    if isinstance(result, dict) and result.get("present"):
+        _erase_bookmark(runtime, int(result["slot"]))
 
 
-def bookmark_operations() -> tuple[OperationSpec[object, object], ...]:
-    return (
-        OperationSpec(
-            name="bookmark_get",
-            parse=_parse_get,
-            run=_get_bookmark,
+BOOKMARK_OPS: dict[str, Op] = {
+    "bookmark_get": Op(run=_run_bookmark_get),
+    "bookmark_set": Op(
+        run=_run_bookmark_set,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_set,
+            capture_after=_capture_set,
+            rollback=_restore_set_or_delete,
         ),
-        OperationSpec(
-            name="bookmark_set",
-            parse=_parse_set,
-            run=_set_bookmark,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_preview_single_slot,
-                capture_after=_preview_single_slot,
-                rollback=_restore_bookmark_state,
-            ),
+    ),
+    "bookmark_add": Op(
+        run=_run_bookmark_add,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_add,
+            capture_after=_capture_add,
+            rollback=_restore_added,
         ),
-        OperationSpec(
-            name="bookmark_add",
-            parse=_parse_add,
-            run=_add_bookmark,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_preview_bookmark_list,
-                capture_after=_preview_bookmark_list,
-                rollback=_restore_added_bookmark,
-            ),
+    ),
+    "bookmark_delete": Op(
+        run=_run_bookmark_delete,
+        mutating=True,
+        preview=PreviewSpec(
+            capture_before=_capture_delete,
+            capture_after=_capture_delete,
+            rollback=_restore_set_or_delete,
         ),
-        OperationSpec(
-            name="bookmark_delete",
-            parse=_parse_delete,
-            run=_delete_bookmark,
-            mutating=True,
-            preview=PreviewSpec(
-                capture_before=_preview_single_slot,
-                capture_after=_preview_single_slot,
-                rollback=_restore_bookmark_state,
-            ),
-        ),
-    )
+    ),
+}
 
 
 __all__ = [
+    "BOOKMARK_OPS",
     "BookmarkAddRequest",
     "BookmarkDeleteRequest",
     "BookmarkGetRequest",
     "BookmarkSetRequest",
     "_first_free_bookmark_slot",
-    "bookmark_operations",
 ]

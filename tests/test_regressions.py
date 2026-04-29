@@ -13,7 +13,7 @@ from idac import doctor
 from idac.cli import build_parser
 from idac.metadata import WIRE_PROTOCOL_VERSION, bridge_registry_payload
 from idac.ops.families import classes
-from idac.ops.families.classes import op_class_vtable
+from idac.ops.families.classes import CLASS_OPS
 from idac.ops.families.type_declare import _apply_type_aliases, _normalize_aliases, _split_declarations
 from idac.ops.runtime import IdaOperationError, IdaRuntime
 from idac.ops.runtime_classes import find_vtable_symbol
@@ -354,7 +354,7 @@ def test_class_vtable_runtime_prefers_ida_metadata_before_symbol_scan(monkeypatc
         },
     )
 
-    payload = op_class_vtable(runtime, {"name": "Handler_Stream", "runtime": True})
+    payload = CLASS_OPS["class_vtable"].run(runtime, {"name": "Handler_Stream", "runtime": True})
 
     assert payload["runtime_vtable"] == {"identifier": "0x401000", "slot_limit": 64}
 

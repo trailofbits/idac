@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import contextlib
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
-from ..base import OperationContext, OperationSpec
+from ..base import Op
 from ..helpers.matching import pattern_from_params, text_matches
 from ..helpers.params import optional_param_int, optional_str, require_str
 from ..runtime import IdaOperationError, IdaRuntime, SegmentRange
@@ -39,15 +41,15 @@ class StringsRequest:
     end: str | None
 
 
-def _require_identifier(params: dict[str, object], *, key: str = "identifier") -> str:
+def _require_identifier(params: Mapping[str, Any], *, key: str = "identifier") -> str:
     return require_str(params.get(key), field="address or identifier")
 
 
-def _require_segment_selector(params: dict[str, object]) -> str:
+def _require_segment_selector(params: Mapping[str, Any]) -> str:
     return require_str(params.get("segment"), field="segment selector")
 
 
-def _parse_search_bytes(params: dict[str, object]) -> SearchBytesRequest:
+def _parse_search_bytes(params: Mapping[str, Any]) -> SearchBytesRequest:
     pattern = require_str(params.get("pattern"), field="byte pattern")
     segment = _require_segment_selector(params)
     start = optional_str(params.get("start"))
@@ -93,8 +95,7 @@ def _has_more_search_bytes_matches(
     return False
 
 
-def _search_bytes(context: OperationContext, request: SearchBytesRequest) -> dict[str, object]:
-    runtime = context.runtime
+def _search_bytes(runtime: IdaRuntime, request: SearchBytesRequest) -> dict[str, object]:
     ida_bytes = runtime.mod("ida_bytes")
     idaapi = runtime.mod("idaapi")
     ranges = runtime.resolve_segment_ranges(
@@ -143,15 +144,11 @@ def _search_bytes(context: OperationContext, request: SearchBytesRequest) -> dic
     }
 
 
-def _parse_xrefs(params: dict[str, object]) -> XrefsRequest:
+def _parse_xrefs(params: Mapping[str, Any]) -> XrefsRequest:
     return XrefsRequest(identifier=_require_identifier(params))
 
 
-def _xrefs(
-    context: OperationContext,
-    request: XrefsRequest,
-) -> list[dict[str, object]]:
-    runtime = context.runtime
+def _xrefs(runtime: IdaRuntime, request: XrefsRequest) -> list[dict[str, object]]:
     ea = runtime.resolve_address(request.identifier)
     rows: list[dict[str, object]] = []
     seen: set[tuple[str, str, str, str, bool, str | None]] = set()
@@ -179,7 +176,7 @@ def _xrefs(
     return rows
 
 
-def _parse_strings(params: dict[str, object]) -> StringsRequest:
+def _parse_strings(params: Mapping[str, Any]) -> StringsRequest:
     pattern, glob, regex, ignore_case = pattern_from_params(params)
     segment = _require_segment_selector(params)
     start = optional_str(params.get("start"))
@@ -338,8 +335,7 @@ def _validate_dsc_string_scan_ranges(ranges: tuple[SegmentRange, ...]) -> None:
     )
 
 
-def _strings(context: OperationContext, request: StringsRequest) -> list[dict[str, object]]:
-    runtime = context.runtime
+def _strings(runtime: IdaRuntime, request: StringsRequest) -> list[dict[str, object]]:
     is_dsc = _is_current_file_dsc(runtime)
     ranges = runtime.resolve_segment_ranges(
         request.segment,
@@ -375,13 +371,12 @@ def _strings(context: OperationContext, request: StringsRequest) -> list[dict[st
     )
 
 
-def _parse_imports(_params: dict[str, object]) -> None:
+def _parse_imports(_params: Mapping[str, Any]) -> None:
     return None
 
 
-def _imports(context: OperationContext, request: None) -> list[dict[str, object]]:
+def _imports(runtime: IdaRuntime, request: None) -> list[dict[str, object]]:
     del request
-    runtime = context.runtime
     modules: list[dict[str, object]] = []
     for index in range(runtime.ida_nalt.get_import_module_qty()):
         module_name = runtime.ida_nalt.get_import_module_name(index) or "<unnamed>"
@@ -402,40 +397,33 @@ def _imports(context: OperationContext, request: None) -> list[dict[str, object]
     return modules
 
 
-def search_operations() -> tuple[OperationSpec[object, object], ...]:
-    return (
-        OperationSpec(
-            name="search_bytes",
-            parse=_parse_search_bytes,
-            run=_search_bytes,
-        ),
-        OperationSpec(
-            name="xrefs",
-            parse=_parse_xrefs,
-            run=_xrefs,
-        ),
-        OperationSpec(
-            name="strings",
-            parse=_parse_strings,
-            run=_strings,
-        ),
-        OperationSpec(
-            name="imports",
-            parse=_parse_imports,
-            run=_imports,
-        ),
-    )
+def _run_search_bytes(runtime: IdaRuntime, params: Mapping[str, Any]) -> dict[str, object]:
+    return _search_bytes(runtime, _parse_search_bytes(params))
 
 
-def op_strings(runtime: IdaRuntime, params: dict[str, object]) -> list[dict[str, object]]:
-    request = _parse_strings(params)
-    return _strings(OperationContext(runtime=runtime), request)
+def _run_xrefs(runtime: IdaRuntime, params: Mapping[str, Any]) -> list[dict[str, object]]:
+    return _xrefs(runtime, _parse_xrefs(params))
+
+
+def _run_strings(runtime: IdaRuntime, params: Mapping[str, Any]) -> list[dict[str, object]]:
+    return _strings(runtime, _parse_strings(params))
+
+
+def _run_imports(runtime: IdaRuntime, params: Mapping[str, Any]) -> list[dict[str, object]]:
+    return _imports(runtime, _parse_imports(params))
+
+
+SEARCH_OPS: dict[str, Op] = {
+    "search_bytes": Op(run=_run_search_bytes),
+    "xrefs": Op(run=_run_xrefs),
+    "strings": Op(run=_run_strings),
+    "imports": Op(run=_run_imports),
+}
 
 
 __all__ = [
+    "SEARCH_OPS",
     "SearchBytesRequest",
     "StringsRequest",
     "XrefsRequest",
-    "op_strings",
-    "search_operations",
 ]
