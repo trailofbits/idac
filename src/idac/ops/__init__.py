@@ -8,7 +8,6 @@ from .manifest import (
     OperationName,
     operation_specs,
 )
-from .models import payload_from_model
 from .preview import PreviewOutcome, PreviewSpec, PreviewUnsupportedError
 from .registry import OperationLookupError, OperationRegistry
 
@@ -27,5 +26,4 @@ __all__ = [
     "PreviewUnsupportedError",
     "build_operation_registry",
     "operation_specs",
-    "payload_from_model",
 ]

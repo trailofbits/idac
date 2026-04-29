@@ -5,10 +5,22 @@ from typing import Any
 
 from .base import OperationContext
 from .manifest import operation_specs
-from .models import payload_from_model
-from .preview import PreviewUnsupportedError
+from .preview import PreviewOutcome, PreviewUnsupportedError
 from .registry import OperationRegistry
 from .runtime import IdaOperationError, IdaRuntime
+
+
+def _finalize_result(result: Any) -> Any:
+    if isinstance(result, PreviewOutcome):
+        return {
+            "result": result.result,
+            "before": result.before,
+            "after": result.after,
+            "persisted": result.persisted,
+            "preview": result.preview,
+            "preview_mode": result.preview_mode,
+        }
+    return result
 
 
 def build_operation_registry(
@@ -27,7 +39,7 @@ def build_operation_registry(
                 result = registry.execute(name, params=payload, context=context)
             except PreviewUnsupportedError as exc:
                 raise IdaOperationError(str(exc)) from exc
-            return payload_from_model(result)
+            return _finalize_result(result)
 
         return handler
 

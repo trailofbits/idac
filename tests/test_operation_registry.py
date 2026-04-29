@@ -11,7 +11,6 @@ from idac.ops import (
     PreviewOutcome,
     PreviewSpec,
     PreviewUnsupportedError,
-    payload_from_model,
 )
 
 
@@ -135,20 +134,3 @@ def test_preview_requires_preview_support() -> None:
         )
 
 
-def test_payload_from_model_serializes_nested_dataclasses() -> None:
-    payload = payload_from_model(
-        PreviewOutcome(
-            result=CounterResult(value=9),
-            before=4,
-            after=9,
-        )
-    )
-
-    assert payload == {
-        "result": {"value": 9},
-        "before": 4,
-        "after": 9,
-        "persisted": False,
-        "preview": True,
-        "preview_mode": "undo",
-    }
