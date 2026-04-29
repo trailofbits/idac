@@ -45,11 +45,9 @@ def send_op(
     preview: bool | None = None,
 ) -> CommandResult:
     invocation = getattr(args, "_invocation", None)
-    if isinstance(invocation, Invocation):
-        return send_invocation_op(invocation, op=op, params=params, render_op=render_op, preview=preview)
-
-    preview_requested = bool(args._preview_wrapper and args._mutating_command) if preview is None else preview
-    return _send_backend_op(args, op=op, params=params, render_op=render_op, preview=preview_requested)
+    if not isinstance(invocation, Invocation):
+        raise CliUserError("internal error: command was not parsed through parse_invocation")
+    return send_invocation_op(invocation, op=op, params=params, render_op=render_op, preview=preview)
 
 
 def send_invocation_op(

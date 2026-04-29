@@ -106,7 +106,8 @@ def _prototype_set_params(args: argparse.Namespace) -> dict[str, object]:
     }
     if args.propagate_callers:
         params["propagate_callers"] = True
-    if args._preview_wrapper:
+    invocation = getattr(args, "_invocation", None)
+    if invocation is not None and getattr(invocation, "preview", False):
         params["preview_decompile"] = True
     return params
 
