@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import re
 import zlib
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,32 +18,11 @@ _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _MAX_FILENAME_NAME = 50
 
 
-@dataclass(frozen=True)
-class DecompileManyRequest:
-    pattern: str | None
-    extra_patterns: tuple[str, ...]
-    file: Path | None
-    out_file: Path | None
-    out_dir: Path | None
-    regex: bool
-    ignore_case: bool
-    no_cache: bool
-
-
-def _decompilemany_request(args: argparse.Namespace) -> DecompileManyRequest:
-    patterns = tuple(item for item in args.patterns if item)
-    pattern = patterns[0] if patterns else None
-    extra_patterns = patterns[1:]
-    return DecompileManyRequest(
-        pattern=pattern,
-        extra_patterns=extra_patterns,
-        file=args.file,
-        out_file=args.out_file,
-        out_dir=args.out_dir,
-        regex=args.regex,
-        ignore_case=args.ignore_case,
-        no_cache=args.no_cache,
-    )
+def _split_patterns(patterns: list[str] | tuple[str, ...]) -> tuple[str | None, tuple[str, ...]]:
+    cleaned = tuple(item for item in patterns if item)
+    if not cleaned:
+        return None, ()
+    return cleaned[0], cleaned[1:]
 
 
 def _safe_filename_name(name: str) -> str:
@@ -65,22 +43,24 @@ def _stem_for_text(name: str, address: str, text: str) -> str:
 
 
 def _decompilemany_targets(invocation: Invocation) -> list[dict[str, Any]]:
-    request = _decompilemany_request(invocation.args)
-    if request.extra_patterns:
-        examples = " ".join((request.pattern or "", *request.extra_patterns[:3])).strip()
+    args = invocation.args
+    pattern, extra_patterns = _split_patterns(args.patterns)
+    file_path: Path | None = args.file
+    if extra_patterns:
+        examples = " ".join((pattern or "", *extra_patterns[:3])).strip()
         suffix = f": {examples}" if examples else ""
         raise CliUserError(
             "decompilemany accepts one FUNCTION_FILTER, not multiple exact function names"
             f"{suffix}. For multiple exact functions, write one function name or address per line "
             "and pass --functions-file/--file <path>."
         )
-    if request.pattern not in (None, "") and request.file is not None:
+    if pattern not in (None, "") and file_path is not None:
         raise CliUserError("decompilemany accepts either FUNCTION_FILTER or --functions-file/--file, not both")
-    if request.pattern in (None, "") and request.file is None:
+    if pattern in (None, "") and file_path is None:
         raise CliUserError("decompilemany requires either FUNCTION_FILTER or --functions-file/--file")
-    if request.file is not None:
+    if file_path is not None:
         rows: list[str] = []
-        for raw_line in request.file.read_text(encoding="utf-8").splitlines():
+        for raw_line in file_path.read_text(encoding="utf-8").splitlines():
             stripped = raw_line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
@@ -114,9 +94,9 @@ def _decompilemany_targets(invocation: Invocation) -> list[dict[str, Any]]:
         invocation,
         op="function_list",
         params={
-            "pattern": request.pattern,
-            "regex": request.regex,
-            "ignore_case": request.ignore_case,
+            "pattern": pattern,
+            "regex": args.regex,
+            "ignore_case": args.ignore_case,
         },
         render_op="function_list",
     )
@@ -139,11 +119,10 @@ def _run_single_decompile(
     *,
     identifier: str,
 ) -> dict[str, Any]:
-    request = _decompilemany_request(invocation.args)
     result = send_op(
         invocation,
         op="decompile",
-        params={"identifier": identifier, "no_cache": request.no_cache},
+        params={"identifier": identifier, "no_cache": bool(invocation.args.no_cache)},
         render_op="decompile",
         preview=False,
     )
@@ -187,7 +166,10 @@ def run_imports(invocation: Invocation) -> CommandResult:
 
 def run_decompilemany(invocation: Invocation) -> CommandResult:
     args = invocation.args
-    request = _decompilemany_request(args)
+    pattern, _ = _split_patterns(args.patterns)
+    file_path: Path | None = args.file
+    out_file: Path | None = args.out_file
+    out_dir: Path | None = args.out_dir
     targets = _decompilemany_targets(invocation)
     if not targets:
         raise CliUserError("no functions matched")
@@ -197,9 +179,7 @@ def run_decompilemany(invocation: Invocation) -> CommandResult:
     succeeded = 0
     failed = 0
     combined_sections: list[str] = []
-    out_dir = None
-    if request.out_dir is not None:
-        out_dir = request.out_dir
+    if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
     for item in targets:
         identifier = str(item["identifier"])
@@ -239,14 +219,13 @@ def run_decompilemany(invocation: Invocation) -> CommandResult:
         entries.append(entry)
 
     if out_dir is None:
-        artifact_path = request.out_file
-        if artifact_path is None:
+        if out_file is None:
             raise CliUserError("decompilemany requires --out-file or --out-dir")
         combined = "\n\n\n".join(combined_sections)
         output = write_output_result(
             combined,
             fmt="text",
-            out_path=artifact_path,
+            out_path=out_file,
             stem="decompile_bulk",
             force_fmt=True,
         )
@@ -255,9 +234,9 @@ def run_decompilemany(invocation: Invocation) -> CommandResult:
         artifacts.append(artifact)
         summary = {
             "ok": failed == 0,
-            "pattern": request.pattern,
-            "file": None if request.file is None else str(request.file),
-            "out_file": str(artifact_path),
+            "pattern": pattern,
+            "file": None if file_path is None else str(file_path),
+            "out_file": str(out_file),
             "functions_total": len(targets),
             "functions_succeeded": succeeded,
             "functions_failed": failed,
@@ -274,8 +253,8 @@ def run_decompilemany(invocation: Invocation) -> CommandResult:
 
     manifest = {
         "ok": failed == 0,
-        "pattern": request.pattern,
-        "file": None if request.file is None else str(request.file),
+        "pattern": pattern,
+        "file": None if file_path is None else str(file_path),
         "out_dir": str(out_dir),
         "functions_total": len(targets),
         "functions_succeeded": succeeded,

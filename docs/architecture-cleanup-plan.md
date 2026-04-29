@@ -131,12 +131,11 @@ Completed:
 - Collapsed `send_op(args, ...)` and `send_invocation_op(invocation, ...)` into a single `send_op(invocation, ...)` entry point in `cli2/commands/common.py`.
 - Dropped `_preview_wrapper` and `_batch_mode` namespace flags entirely. State now lives only on `Invocation.preview` / `Invocation.batch_mode`. `cli2/preview.py` and `cli2/batch.py` read state from the invocation; `parse_invocation()` no longer writes legacy flags onto the namespace; `argparse_utils.py` no longer seeds them as defaults.
 - Promoted batch-relative path resolution out of a hidden namespace attribute: `Invocation` gained a `base_dir: Path | None` field and `cli2/preview.py` reads `invocation.base_dir` instead of `args._relative_path_base_dir`.
+- Finished the Phase 10 sweep that earlier rounds missed: deleted the remaining mirror-style CLI request dataclasses (`BookmarkShowRequest`/`AddRequest`/`SetRequest`/`DeleteRequest`, `CommentLookupRequest`/`CommentChangeRequest`, `DatabaseOpenRequest`/`SaveRequest`/`CloseRequest`, `BytesRequest`/`StringsRequest`, `SegmentListRequest`, `PythonExecRequest`, `DecompileManyRequest`) and replaced them with plain `_*_params(args) -> dict` helpers. `top_level.py` keeps a small `_split_patterns()` helper for the one piece of real arg-shape logic; tests in `test_cli2_request_builders.py` were rewritten to call the helpers directly.
 
 Current next step:
 
-- Phase 11 is now substantively complete for the dispatch surface (no command handler reads namespace flags for batch/preview state, every handler takes `Invocation`, and `send_op` is unified). Two transitional pieces remain before `Invocation.args` can be deleted entirely:
-  - Replace per-handler `args = invocation.args` reads with a typed `params: dict[str, Any]` on `Invocation` populated by a `CommandSpec.params` builder, so generic dispatch can run `op + params + render` without touching argparse. This is interleaved with Phase 12.
-  - Introduce an `OutputSpec` (format, out, out_dir) on `Invocation` so `main.py`, `batch.py`, and `preview.py` can stop reading `args.format` / `args.out` directly. This is also a Phase 12 concern.
+- Phase 12 was reassessed: table-driving the boring commands and adding a `CommandSpec.params` / `OutputSpec` surface would replace one-line named handlers with opaque registry kwargs, so it has been intentionally skipped. The remaining work in this plan is the Phase 13 rename of `cli2` to `cli`.
 
 ## Phase 0: Characterization Tests
 

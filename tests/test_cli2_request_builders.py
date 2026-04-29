@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import io
-from pathlib import Path
 
 import pytest
 
@@ -194,50 +193,18 @@ def test_local_update_params_rejects_positional_selector_with_stable_selector() 
         common.local_update_params(args)
 
 
-def test_decompilemany_request_captures_modes(tmp_path: Path) -> None:
-    args = argparse.Namespace(
-        patterns=["demo"],
-        file=None,
-        out_file=None,
-        out_dir=tmp_path / "out",
-        regex=True,
-        ignore_case=False,
-        no_cache=True,
-    )
-
-    request = top_level._decompilemany_request(args)
-
-    assert request.pattern == "demo"
-    assert request.out_dir == tmp_path / "out"
-    assert request.regex is True
-    assert request.no_cache is True
+def test_split_patterns_returns_first_token_and_rest() -> None:
+    assert top_level._split_patterns(["demo"]) == ("demo", ())
+    assert top_level._split_patterns(["main", "add", "sub_1000"]) == ("main", ("add", "sub_1000"))
+    assert top_level._split_patterns(["", "add"]) == ("add", ())
+    assert top_level._split_patterns([]) == (None, ())
 
 
-def test_decompilemany_request_captures_extra_positionals(tmp_path: Path) -> None:
-    args = argparse.Namespace(
-        patterns=["main", "add", "sub_1000"],
-        file=None,
-        out_file=None,
-        out_dir=tmp_path / "out",
-        regex=False,
-        ignore_case=False,
-        no_cache=False,
-    )
-
-    request = top_level._decompilemany_request(args)
-
-    assert request.pattern == "main"
-    assert request.extra_patterns == ("add", "sub_1000")
-
-
-def test_python_exec_request_reads_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_python_exec_params_reads_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     args = argparse.Namespace(code=None, stdin=True, script=None, persist=True)
     monkeypatch.setattr("sys.stdin", io.StringIO("print('hi')\n"))
 
-    request = python_exec._python_exec_request(args)
-
-    assert request.script == "print('hi')\n"
-    assert request.to_params() == {"script": "print('hi')\n", "persist": True}
+    assert python_exec._python_exec_params(args) == {"script": "print('hi')\n", "persist": True}
 
 
 def test_strings_request_switches_between_scan_and_pattern_modes() -> None:
@@ -260,16 +227,13 @@ def test_strings_request_switches_between_scan_and_pattern_modes() -> None:
         scan=True,
     )
 
-    pattern_request = search._strings_request(pattern_args)
-    scan_request = search._strings_request(scan_args)
-
-    assert pattern_request.to_params() == {
+    assert search._strings_params(pattern_args) == {
         "pattern": "hello",
         "regex": False,
         "ignore_case": True,
         "segment": "__TEXT",
     }
-    assert scan_request.to_params() == {
+    assert search._strings_params(scan_args) == {
         "pattern": "needle",
         "regex": False,
         "ignore_case": False,
@@ -292,7 +256,7 @@ def test_strings_request_rejects_scan_bounds_without_scan_flag() -> None:
     )
 
     with pytest.raises(common.CliUserError, match="`--start` and `--end` are only valid with `search strings --scan`"):
-        search._strings_request(args)
+        search._strings_params(args)
 
 
 def test_search_bytes_request_includes_segment_scope() -> None:
@@ -304,7 +268,7 @@ def test_search_bytes_request_includes_segment_scope() -> None:
         end="0x2000",
     )
 
-    assert search._bytes_request(args).to_params() == {
+    assert search._bytes_params(args) == {
         "pattern": "74 69 6e 79",
         "segment": "__TEXT",
         "limit": 25,
@@ -356,7 +320,7 @@ def test_function_list_params_accept_query_alias() -> None:
 def test_segment_list_request_includes_pattern_flags() -> None:
     args = argparse.Namespace(pattern="__TEXT|__cstring", regex=True, ignore_case=True)
 
-    assert segment._list_request(args).to_params() == {
+    assert segment._list_params(args) == {
         "pattern": "__TEXT|__cstring",
         "regex": True,
         "ignore_case": True,
@@ -439,8 +403,8 @@ def test_bookmark_and_database_request_builders_omit_optional_fields() -> None:
     bookmark_args = argparse.Namespace(slot="3", identifier="main", comment=None)
     save_args = argparse.Namespace(path=None)
 
-    assert bookmark._bookmark_set_request(bookmark_args).to_params() == {"slot": 3, "address": "main"}
-    assert database._database_save_request(save_args).to_params() == {}
+    assert bookmark._set_params(bookmark_args) == {"slot": 3, "address": "main"}
+    assert database._save_params(save_args) == {}
 
 
 def test_comment_request_builders_capture_scope_and_repeatable() -> None:
@@ -448,16 +412,16 @@ def test_comment_request_builders_capture_scope_and_repeatable() -> None:
     anterior_args = argparse.Namespace(identifier="main", repeatable=False, scope="anterior")
     change_args = argparse.Namespace(identifier="main", text="entry", repeatable=False, scope="posterior")
 
-    assert comment._comment_lookup_request(lookup_args).to_params() == {
+    assert comment._lookup_params(lookup_args) == {
         "address": "main",
         "scope": "function",
         "repeatable": True,
     }
-    assert comment._comment_lookup_request(anterior_args).to_params() == {
+    assert comment._lookup_params(anterior_args) == {
         "address": "main",
         "scope": "anterior",
     }
-    assert comment._comment_change_request(change_args).to_params() == {
+    assert comment._change_params(change_args) == {
         "address": "main",
         "text": "entry",
         "scope": "posterior",
@@ -468,4 +432,4 @@ def test_comment_request_builders_reject_repeatable_extra_comments() -> None:
     args = argparse.Namespace(identifier="main", repeatable=True, scope="anterior")
 
     with pytest.raises(common.CliUserError, match="--repeatable is only valid for line or function comments"):
-        comment._comment_lookup_request(args)
+        comment._lookup_params(args)

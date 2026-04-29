@@ -1,40 +1,12 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 
 from ..argparse_utils import add_command, add_context_options, add_output_options
 from ..commands.common import send_op
 from ..errors import CliUserError
 from ..invocation import Invocation
 from ..result import CommandResult
-
-
-@dataclass(frozen=True)
-class CommentLookupRequest:
-    identifier: str
-    scope: str
-    repeatable: bool
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {"address": self.identifier, "scope": self.scope}
-        if self.repeatable:
-            params["repeatable"] = True
-        return params
-
-
-@dataclass(frozen=True)
-class CommentChangeRequest:
-    identifier: str
-    text: str
-    scope: str
-    repeatable: bool
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {"address": self.identifier, "text": self.text, "scope": self.scope}
-        if self.repeatable:
-            params["repeatable"] = True
-        return params
 
 
 def _comment_scope(args: argparse.Namespace) -> str:
@@ -44,21 +16,22 @@ def _comment_scope(args: argparse.Namespace) -> str:
     return scope
 
 
-def _comment_lookup_request(args: argparse.Namespace) -> CommentLookupRequest:
-    return CommentLookupRequest(
-        identifier=str(args.identifier),
-        scope=_comment_scope(args),
-        repeatable=bool(args.repeatable),
-    )
+def _lookup_params(args: argparse.Namespace) -> dict[str, object]:
+    params: dict[str, object] = {"address": str(args.identifier), "scope": _comment_scope(args)}
+    if args.repeatable:
+        params["repeatable"] = True
+    return params
 
 
-def _comment_change_request(args: argparse.Namespace) -> CommentChangeRequest:
-    return CommentChangeRequest(
-        identifier=str(args.identifier),
-        text=str(args.text),
-        scope=_comment_scope(args),
-        repeatable=bool(args.repeatable),
-    )
+def _change_params(args: argparse.Namespace) -> dict[str, object]:
+    params: dict[str, object] = {
+        "address": str(args.identifier),
+        "text": str(args.text),
+        "scope": _comment_scope(args),
+    }
+    if args.repeatable:
+        params["repeatable"] = True
+    return params
 
 
 def _add_comment_target_options(parser: argparse.ArgumentParser) -> None:
@@ -93,30 +66,15 @@ def _add_comment_target_options(parser: argparse.ArgumentParser) -> None:
 
 
 def _show(invocation: Invocation) -> CommandResult:
-    return send_op(
-        invocation,
-        op="comment_get",
-        params=_comment_lookup_request(invocation.args).to_params(),
-        render_op="comment_get",
-    )
+    return send_op(invocation, op="comment_get", params=_lookup_params(invocation.args), render_op="comment_get")
 
 
 def _set(invocation: Invocation) -> CommandResult:
-    return send_op(
-        invocation,
-        op="comment_set",
-        params=_comment_change_request(invocation.args).to_params(),
-        render_op="comment_set",
-    )
+    return send_op(invocation, op="comment_set", params=_change_params(invocation.args), render_op="comment_set")
 
 
 def _delete(invocation: Invocation) -> CommandResult:
-    return send_op(
-        invocation,
-        op="comment_delete",
-        params=_comment_lookup_request(invocation.args).to_params(),
-        render_op="comment_delete",
-    )
+    return send_op(invocation, op="comment_delete", params=_lookup_params(invocation.args), render_op="comment_delete")
 
 
 def register(

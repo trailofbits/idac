@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 
 from ..argparse_utils import add_command, add_context_options, add_output_options
 from ..commands.common import parse_bookmark_slot, send_op
@@ -9,61 +8,26 @@ from ..invocation import Invocation
 from ..result import CommandResult
 
 
-@dataclass(frozen=True)
-class BookmarkShowRequest:
-    slot: int
-
-    def to_params(self) -> dict[str, object]:
-        return {"slot": self.slot}
+def _show_params(args: argparse.Namespace) -> dict[str, object]:
+    return {"slot": parse_bookmark_slot(args.slot)}
 
 
-@dataclass(frozen=True)
-class BookmarkAddRequest:
-    address: str
-    comment: str | None
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {"address": self.address}
-        if self.comment is not None:
-            params["comment"] = self.comment
-        return params
+def _add_params(args: argparse.Namespace) -> dict[str, object]:
+    params: dict[str, object] = {"address": str(args.identifier)}
+    if args.comment is not None:
+        params["comment"] = args.comment
+    return params
 
 
-@dataclass(frozen=True)
-class BookmarkSetRequest:
-    slot: int
-    address: str
-    comment: str | None
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {"slot": self.slot, "address": self.address}
-        if self.comment is not None:
-            params["comment"] = self.comment
-        return params
+def _set_params(args: argparse.Namespace) -> dict[str, object]:
+    params: dict[str, object] = {"slot": parse_bookmark_slot(args.slot), "address": str(args.identifier)}
+    if args.comment is not None:
+        params["comment"] = args.comment
+    return params
 
 
-@dataclass(frozen=True)
-class BookmarkDeleteRequest:
-    slot: int
-
-    def to_params(self) -> dict[str, object]:
-        return {"slot": self.slot}
-
-
-def _bookmark_show_request(args: argparse.Namespace) -> BookmarkShowRequest:
-    return BookmarkShowRequest(slot=parse_bookmark_slot(args.slot))
-
-
-def _bookmark_add_request(args: argparse.Namespace) -> BookmarkAddRequest:
-    return BookmarkAddRequest(address=str(args.identifier), comment=args.comment)
-
-
-def _bookmark_set_request(args: argparse.Namespace) -> BookmarkSetRequest:
-    return BookmarkSetRequest(slot=parse_bookmark_slot(args.slot), address=str(args.identifier), comment=args.comment)
-
-
-def _bookmark_delete_request(args: argparse.Namespace) -> BookmarkDeleteRequest:
-    return BookmarkDeleteRequest(slot=parse_bookmark_slot(args.slot))
+def _delete_params(args: argparse.Namespace) -> dict[str, object]:
+    return {"slot": parse_bookmark_slot(args.slot)}
 
 
 def _list(invocation: Invocation) -> CommandResult:
@@ -71,37 +35,22 @@ def _list(invocation: Invocation) -> CommandResult:
 
 
 def _show(invocation: Invocation) -> CommandResult:
-    return send_op(
-        invocation,
-        op="bookmark_get",
-        params=_bookmark_show_request(invocation.args).to_params(),
-        render_op="bookmark_get",
-    )
+    return send_op(invocation, op="bookmark_get", params=_show_params(invocation.args), render_op="bookmark_get")
 
 
 def _add(invocation: Invocation) -> CommandResult:
-    return send_op(
-        invocation,
-        op="bookmark_add",
-        params=_bookmark_add_request(invocation.args).to_params(),
-        render_op="bookmark_add",
-    )
+    return send_op(invocation, op="bookmark_add", params=_add_params(invocation.args), render_op="bookmark_add")
 
 
 def _set(invocation: Invocation) -> CommandResult:
-    return send_op(
-        invocation,
-        op="bookmark_set",
-        params=_bookmark_set_request(invocation.args).to_params(),
-        render_op="bookmark_set",
-    )
+    return send_op(invocation, op="bookmark_set", params=_set_params(invocation.args), render_op="bookmark_set")
 
 
 def _delete(invocation: Invocation) -> CommandResult:
     return send_op(
         invocation,
         op="bookmark_delete",
-        params=_bookmark_delete_request(invocation.args).to_params(),
+        params=_delete_params(invocation.args),
         render_op="bookmark_delete",
     )
 

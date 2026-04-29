@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from ..argparse_utils import add_command, add_context_options, add_output_options
@@ -12,19 +11,7 @@ from ..invocation import Invocation
 from ..result import CommandResult
 
 
-@dataclass(frozen=True)
-class PythonExecRequest:
-    script: str
-    persist: bool
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {"script": self.script}
-        if self.persist:
-            params["persist"] = True
-        return params
-
-
-def _python_exec_request(args: argparse.Namespace) -> PythonExecRequest:
+def _python_exec_params(args: argparse.Namespace) -> dict[str, object]:
     if args.code:
         script = str(args.code)
     elif args.stdin:
@@ -33,12 +20,15 @@ def _python_exec_request(args: argparse.Namespace) -> PythonExecRequest:
         script = args.script.read_text(encoding="utf-8")
     else:
         raise CliUserError("missing Python input")
-    return PythonExecRequest(script=script, persist=bool(args.persist))
+    params: dict[str, object] = {"script": script}
+    if args.persist:
+        params["persist"] = True
+    return params
 
 
 def _exec(invocation: Invocation) -> CommandResult:
     return send_op(
-        invocation, op="python_exec", params=_python_exec_request(invocation.args).to_params(), render_op="python_exec"
+        invocation, op="python_exec", params=_python_exec_params(invocation.args), render_op="python_exec"
     )
 
 

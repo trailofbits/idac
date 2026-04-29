@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 
 from ..argparse_utils import (
     add_command,
@@ -17,87 +16,43 @@ from ..invocation import Invocation
 from ..result import CommandResult
 
 
-@dataclass(frozen=True)
-class BytesRequest:
-    pattern: str
-    segment: str
-    limit: int
-    start: str | None = None
-    end: str | None = None
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {
-            "pattern": self.pattern,
-            "segment": self.segment,
-            "limit": self.limit,
-        }
-        if self.start:
-            params["start"] = self.start
-        if self.end:
-            params["end"] = self.end
-        return params
+def _bytes_params(args: argparse.Namespace) -> dict[str, object]:
+    params: dict[str, object] = {
+        "pattern": args.pattern,
+        "segment": args.segment,
+        "limit": args.limit,
+    }
+    if args.start:
+        params["start"] = args.start
+    if args.end:
+        params["end"] = args.end
+    return params
 
 
-@dataclass(frozen=True)
-class StringsRequest:
-    pattern: str | None
-    regex: bool
-    ignore_case: bool
-    scan: bool
-    segment: str
-    start: str | None = None
-    end: str | None = None
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {
-            "pattern": self.pattern,
-            "regex": self.regex,
-            "ignore_case": self.ignore_case,
-            "segment": self.segment,
-        }
-        if self.start:
-            params["start"] = self.start
-        if self.end:
-            params["end"] = self.end
-        if self.scan:
-            params["scan"] = True
-        return params
-
-
-def _bytes_request(args: argparse.Namespace) -> BytesRequest:
-    return BytesRequest(
-        pattern=args.pattern,
-        segment=args.segment,
-        limit=args.limit,
-        start=args.start,
-        end=args.end,
-    )
+def _strings_params(args: argparse.Namespace) -> dict[str, object]:
+    if not args.scan and (args.start is not None or args.end is not None):
+        raise CliUserError("`--start` and `--end` are only valid with `search strings --scan`")
+    params: dict[str, object] = {
+        "pattern": args.pattern,
+        "regex": args.regex,
+        "ignore_case": args.ignore_case,
+        "segment": args.segment,
+    }
+    if args.start:
+        params["start"] = args.start
+    if args.end:
+        params["end"] = args.end
+    if args.scan:
+        params["scan"] = True
+    return params
 
 
 def _bytes(invocation: Invocation) -> CommandResult:
-    return send_op(
-        invocation, op="search_bytes", params=_bytes_request(invocation.args).to_params(), render_op="search_bytes"
-    )
-
-
-def _strings_request(args: argparse.Namespace) -> StringsRequest:
-    if not args.scan and (args.start is not None or args.end is not None):
-        raise CliUserError("`--start` and `--end` are only valid with `search strings --scan`")
-    return StringsRequest(
-        pattern=args.pattern,
-        regex=args.regex,
-        ignore_case=args.ignore_case,
-        scan=args.scan,
-        segment=args.segment,
-        start=args.start,
-        end=args.end,
-    )
+    return send_op(invocation, op="search_bytes", params=_bytes_params(invocation.args), render_op="search_bytes")
 
 
 def _strings(invocation: Invocation) -> CommandResult:
-    return send_op(
-        invocation, op="strings", params=_strings_request(invocation.args).to_params(), render_op="strings"
-    )
+    return send_op(invocation, op="strings", params=_strings_params(invocation.args), render_op="strings")
 
 
 def register(

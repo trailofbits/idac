@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 
 from ..argparse_utils import add_command, add_context_options, add_output_options, add_pattern_options
 from ..commands.common import send_op
@@ -9,29 +8,16 @@ from ..invocation import Invocation
 from ..result import CommandResult
 
 
-@dataclass(frozen=True)
-class SegmentListRequest:
-    pattern: str | None
-    regex: bool
-    ignore_case: bool
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {
-            "pattern": self.pattern,
-            "regex": self.regex,
-            "ignore_case": self.ignore_case,
-        }
-        return params
-
-
-def _list_request(args: argparse.Namespace) -> SegmentListRequest:
-    return SegmentListRequest(pattern=args.pattern, regex=args.regex, ignore_case=args.ignore_case)
+def _list_params(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "pattern": args.pattern,
+        "regex": args.regex,
+        "ignore_case": args.ignore_case,
+    }
 
 
 def _list(invocation: Invocation) -> CommandResult:
-    return send_op(
-        invocation, op="segment_list", params=_list_request(invocation.args).to_params(), render_op="segment_list"
-    )
+    return send_op(invocation, op="segment_list", params=_list_params(invocation.args), render_op="segment_list")
 
 
 def register(
