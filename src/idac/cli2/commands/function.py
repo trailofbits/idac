@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 from pathlib import Path
 
 from ..argparse_utils import (
@@ -40,44 +39,20 @@ LOCAL_SELECTOR_EPILOG = """examples:
 """
 
 
-@dataclass(frozen=True)
-class FunctionListRequest:
-    pattern: str | None
-    regex: bool
-    ignore_case: bool
-    segment: str | None
-    limit: int | None
-    demangle: bool
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {
-            "pattern": self.pattern,
-            "regex": self.regex,
-            "ignore_case": self.ignore_case,
-            "demangle": self.demangle,
-        }
-        if self.segment:
-            params["segment"] = self.segment
-        if self.limit is not None:
-            params["limit"] = self.limit
-        return params
-
-
-def _list_request(args: argparse.Namespace) -> FunctionListRequest:
+def _list_params(args: argparse.Namespace) -> dict[str, object]:
     if args.pattern and args.query:
         raise CliUserError("function list accepts either positional pattern or --query, not both")
-    return FunctionListRequest(
-        pattern=args.pattern if args.pattern is not None else args.query,
-        regex=args.regex,
-        ignore_case=args.ignore_case,
-        segment=args.segment,
-        limit=args.limit,
-        demangle=args.demangle,
-    )
-
-
-def _list_params(args: argparse.Namespace) -> dict[str, object]:
-    return _list_request(args).to_params()
+    params: dict[str, object] = {
+        "pattern": args.pattern if args.pattern is not None else args.query,
+        "regex": args.regex,
+        "ignore_case": args.ignore_case,
+        "demangle": args.demangle,
+    }
+    if args.segment:
+        params["segment"] = args.segment
+    if args.limit is not None:
+        params["limit"] = args.limit
+    return params
 
 
 def run_list(args: argparse.Namespace) -> CommandResult:

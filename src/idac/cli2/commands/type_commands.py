@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 from typing import Any
 
 from ..argparse_utils import (
@@ -17,234 +16,85 @@ from ..errors import CliUserError
 from ..result import CommandResult
 
 
-@dataclass(frozen=True)
-class PatternRequest:
-    pattern: str | None
-    regex: bool
-    ignore_case: bool
-
-    def to_params(self) -> dict[str, object]:
-        return {
-            "pattern": self.pattern,
-            "regex": self.regex,
-            "ignore_case": self.ignore_case,
-        }
-
-
-@dataclass(frozen=True)
-class NameRequest:
-    name: str
-
-    def to_params(self) -> dict[str, object]:
-        return {"name": self.name}
-
-
-@dataclass(frozen=True)
-class TypeDeclareRequest:
-    decl: str
-    replace: bool
-    aliases: list[dict[str, str]]
-    bisect: bool
-    clang: bool
-
-    def to_params(self) -> dict[str, object]:
-        return {
-            "decl": self.decl,
-            "replace": self.replace,
-            "aliases": self.aliases,
-            "bisect": self.bisect,
-            "clang": self.clang,
-        }
-
-
-@dataclass(frozen=True)
-class ClassCandidatesRequest:
-    pattern: str | None
-    regex: bool
-    ignore_case: bool
-    kinds: list[str] | None
-
-    def to_params(self) -> dict[str, object]:
-        params = PatternRequest(self.pattern, self.regex, self.ignore_case).to_params()
-        if self.kinds:
-            params["kinds"] = list(self.kinds)
-        return params
-
-
-@dataclass(frozen=True)
-class ClassFieldsRequest:
-    name: str
-    derived_only: bool
-
-    def to_params(self) -> dict[str, object]:
-        return {"name": self.name, "derived_only": self.derived_only}
-
-
-@dataclass(frozen=True)
-class ClassVtableRequest:
-    name: str
-    runtime: bool
-
-    def to_params(self) -> dict[str, object]:
-        return {"name": self.name, "runtime": self.runtime}
-
-
-@dataclass(frozen=True)
-class StructFieldSetRequest:
-    struct_name: str
-    field_name: str
-    offset: object
-    decl: str
-
-    def to_params(self) -> dict[str, object]:
-        return {
-            "struct_name": self.struct_name,
-            "field_name": self.field_name,
-            "offset": self.offset,
-            "decl": self.decl,
-        }
-
-
-@dataclass(frozen=True)
-class StructFieldRenameRequest:
-    struct_name: str
-    field_name: str
-    new_name: str
-
-    def to_params(self) -> dict[str, object]:
-        return {"struct_name": self.struct_name, "field_name": self.field_name, "new_name": self.new_name}
-
-
-@dataclass(frozen=True)
-class StructFieldDeleteRequest:
-    struct_name: str
-    field_name: str
-
-    def to_params(self) -> dict[str, object]:
-        return {"struct_name": self.struct_name, "field_name": self.field_name}
-
-
-@dataclass(frozen=True)
-class EnumMemberSetRequest:
-    enum_name: str
-    member_name: str
-    value: object
-    mask: object | None
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {
-            "enum_name": self.enum_name,
-            "member_name": self.member_name,
-            "value": self.value,
-        }
-        if self.mask is not None:
-            params["mask"] = self.mask
-        return params
-
-
-@dataclass(frozen=True)
-class EnumMemberRenameRequest:
-    enum_name: str
-    member_name: str
-    new_name: str
-
-    def to_params(self) -> dict[str, object]:
-        return {"enum_name": self.enum_name, "member_name": self.member_name, "new_name": self.new_name}
-
-
-@dataclass(frozen=True)
-class EnumMemberDeleteRequest:
-    enum_name: str
-    member_name: str
-
-    def to_params(self) -> dict[str, object]:
-        return {"enum_name": self.enum_name, "member_name": self.member_name}
-
-
-def _pattern_request(args: argparse.Namespace) -> PatternRequest:
-    return PatternRequest(
-        pattern=args.pattern,
-        regex=args.regex,
-        ignore_case=args.ignore_case,
-    )
-
-
-def _name_request(args: argparse.Namespace) -> NameRequest:
-    return NameRequest(name=str(args.name))
-
-
-def _type_declare_request(args: argparse.Namespace) -> TypeDeclareRequest:
-    return TypeDeclareRequest(
-        decl=read_decl_text(args),
-        replace=bool(args.replace),
-        aliases=parse_alias_list(args.alias),
-        bisect=bool(args.bisect),
-        clang=bool(args.clang),
-    )
-
-
-def _class_candidates_request(args: argparse.Namespace) -> ClassCandidatesRequest:
-    pattern = _pattern_request(args)
-    return ClassCandidatesRequest(
-        pattern=pattern.pattern,
-        regex=pattern.regex,
-        ignore_case=pattern.ignore_case,
-        kinds=None if not args.kind else list(args.kind),
-    )
-
-
-def _class_fields_request(args: argparse.Namespace) -> ClassFieldsRequest:
-    return ClassFieldsRequest(name=str(args.name), derived_only=bool(args.derived_only))
-
-
-def _class_vtable_request(args: argparse.Namespace) -> ClassVtableRequest:
-    return ClassVtableRequest(name=str(args.name), runtime=bool(args.runtime))
-
-
-def _struct_field_set_request(args: argparse.Namespace) -> StructFieldSetRequest:
-    return StructFieldSetRequest(
-        struct_name=str(args.struct_name),
-        field_name=str(args.field_name),
-        offset=args.offset,
-        decl=read_decl_text(args),
-    )
-
-
-def _struct_field_rename_request(args: argparse.Namespace) -> StructFieldRenameRequest:
-    return StructFieldRenameRequest(
-        struct_name=str(args.struct_name),
-        field_name=str(args.field_name),
-        new_name=str(args.new_name),
-    )
-
-
-def _struct_field_delete_request(args: argparse.Namespace) -> StructFieldDeleteRequest:
-    return StructFieldDeleteRequest(struct_name=str(args.struct_name), field_name=str(args.field_name))
-
-
-def _enum_member_set_request(args: argparse.Namespace) -> EnumMemberSetRequest:
-    return EnumMemberSetRequest(
-        enum_name=str(args.enum_name),
-        member_name=str(args.member_name),
-        value=args.value,
-        mask=args.mask,
-    )
-
-
-def _enum_member_rename_request(args: argparse.Namespace) -> EnumMemberRenameRequest:
-    return EnumMemberRenameRequest(
-        enum_name=str(args.enum_name),
-        member_name=str(args.member_name),
-        new_name=str(args.new_name),
-    )
-
-
-def _enum_member_delete_request(args: argparse.Namespace) -> EnumMemberDeleteRequest:
-    return EnumMemberDeleteRequest(enum_name=str(args.enum_name), member_name=str(args.member_name))
-
-
 def _pattern_params(args: argparse.Namespace) -> dict[str, object]:
-    return _pattern_request(args).to_params()
+    return {
+        "pattern": args.pattern,
+        "regex": args.regex,
+        "ignore_case": args.ignore_case,
+    }
+
+
+def _name_params(args: argparse.Namespace) -> dict[str, object]:
+    return {"name": str(args.name)}
+
+
+def _type_declare_params(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "decl": read_decl_text(args),
+        "replace": bool(args.replace),
+        "aliases": parse_alias_list(args.alias),
+        "bisect": bool(args.bisect),
+        "clang": bool(args.clang),
+    }
+
+
+def _class_candidates_params(args: argparse.Namespace) -> dict[str, object]:
+    params = _pattern_params(args)
+    if args.kind:
+        params["kinds"] = list(args.kind)
+    return params
+
+
+def _class_fields_params(args: argparse.Namespace) -> dict[str, object]:
+    return {"name": str(args.name), "derived_only": bool(args.derived_only)}
+
+
+def _class_vtable_params(args: argparse.Namespace) -> dict[str, object]:
+    return {"name": str(args.name), "runtime": bool(args.runtime)}
+
+
+def _struct_field_set_params(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "struct_name": str(args.struct_name),
+        "field_name": str(args.field_name),
+        "offset": args.offset,
+        "decl": read_decl_text(args),
+    }
+
+
+def _struct_field_rename_params(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "struct_name": str(args.struct_name),
+        "field_name": str(args.field_name),
+        "new_name": str(args.new_name),
+    }
+
+
+def _struct_field_delete_params(args: argparse.Namespace) -> dict[str, object]:
+    return {"struct_name": str(args.struct_name), "field_name": str(args.field_name)}
+
+
+def _enum_member_set_params(args: argparse.Namespace) -> dict[str, object]:
+    params: dict[str, object] = {
+        "enum_name": str(args.enum_name),
+        "member_name": str(args.member_name),
+        "value": args.value,
+    }
+    if args.mask is not None:
+        params["mask"] = args.mask
+    return params
+
+
+def _enum_member_rename_params(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "enum_name": str(args.enum_name),
+        "member_name": str(args.member_name),
+        "new_name": str(args.new_name),
+    }
+
+
+def _enum_member_delete_params(args: argparse.Namespace) -> dict[str, object]:
+    return {"enum_name": str(args.enum_name), "member_name": str(args.member_name)}
 
 
 def _type_list_guard(args: argparse.Namespace) -> None:
@@ -258,11 +108,11 @@ def run_type_list(args: argparse.Namespace) -> CommandResult:
 
 
 def run_type_show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="type_show", params=_name_request(args).to_params(), render_op="type_show")
+    return send_op(args, op="type_show", params=_name_params(args), render_op="type_show")
 
 
 def run_type_declare(args: argparse.Namespace) -> CommandResult:
-    result = send_op(args, op="type_declare", params=_type_declare_request(args).to_params(), render_op="type_declare")
+    result = send_op(args, op="type_declare", params=_type_declare_params(args), render_op="type_declare")
     exit_code = 0
     stderr_lines: list[str] = []
     if isinstance(result.value, dict) and (
@@ -337,25 +187,25 @@ def run_class_candidates(args: argparse.Namespace) -> CommandResult:
     return send_op(
         args,
         op="class_candidates",
-        params=_class_candidates_request(args).to_params(),
+        params=_class_candidates_params(args),
         render_op="class_candidates",
     )
 
 
 def run_class_show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="class_show", params=_name_request(args).to_params(), render_op="class_show")
+    return send_op(args, op="class_show", params=_name_params(args), render_op="class_show")
 
 
 def run_class_hierarchy(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="class_hierarchy", params=_name_request(args).to_params(), render_op="class_hierarchy")
+    return send_op(args, op="class_hierarchy", params=_name_params(args), render_op="class_hierarchy")
 
 
 def run_class_fields(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="class_fields", params=_class_fields_request(args).to_params(), render_op="class_fields")
+    return send_op(args, op="class_fields", params=_class_fields_params(args), render_op="class_fields")
 
 
 def run_class_vtable(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="class_vtable", params=_class_vtable_request(args).to_params(), render_op="class_vtable")
+    return send_op(args, op="class_vtable", params=_class_vtable_params(args), render_op="class_vtable")
 
 
 def run_struct_list(args: argparse.Namespace) -> CommandResult:
@@ -364,14 +214,14 @@ def run_struct_list(args: argparse.Namespace) -> CommandResult:
 
 
 def run_struct_show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="struct_show", params=_name_request(args).to_params(), render_op="struct_show")
+    return send_op(args, op="struct_show", params=_name_params(args), render_op="struct_show")
 
 
 def run_struct_field_set(args: argparse.Namespace) -> CommandResult:
     return send_op(
         args,
         op="struct_field_set",
-        params=_struct_field_set_request(args).to_params(),
+        params=_struct_field_set_params(args),
         render_op="struct_field_set",
     )
 
@@ -380,7 +230,7 @@ def run_struct_field_rename(args: argparse.Namespace) -> CommandResult:
     return send_op(
         args,
         op="struct_field_rename",
-        params=_struct_field_rename_request(args).to_params(),
+        params=_struct_field_rename_params(args),
         render_op="struct_field_rename",
     )
 
@@ -389,7 +239,7 @@ def run_struct_field_delete(args: argparse.Namespace) -> CommandResult:
     return send_op(
         args,
         op="struct_field_delete",
-        params=_struct_field_delete_request(args).to_params(),
+        params=_struct_field_delete_params(args),
         render_op="struct_field_delete",
     )
 
@@ -400,14 +250,14 @@ def run_enum_list(args: argparse.Namespace) -> CommandResult:
 
 
 def run_enum_show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="enum_show", params=_name_request(args).to_params(), render_op="enum_show")
+    return send_op(args, op="enum_show", params=_name_params(args), render_op="enum_show")
 
 
 def run_enum_member_set(args: argparse.Namespace) -> CommandResult:
     return send_op(
         args,
         op="enum_member_set",
-        params=_enum_member_set_request(args).to_params(),
+        params=_enum_member_set_params(args),
         render_op="enum_member_set",
     )
 
@@ -416,7 +266,7 @@ def run_enum_member_rename(args: argparse.Namespace) -> CommandResult:
     return send_op(
         args,
         op="enum_member_rename",
-        params=_enum_member_rename_request(args).to_params(),
+        params=_enum_member_rename_params(args),
         render_op="enum_member_rename",
     )
 
@@ -425,7 +275,7 @@ def run_enum_member_delete(args: argparse.Namespace) -> CommandResult:
     return send_op(
         args,
         op="enum_member_delete",
-        params=_enum_member_delete_request(args).to_params(),
+        params=_enum_member_delete_params(args),
         render_op="enum_member_delete",
     )
 

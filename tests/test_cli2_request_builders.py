@@ -362,7 +362,7 @@ def test_segment_list_request_includes_pattern_flags() -> None:
     }
 
 
-def test_type_declare_request_builds_aliases_and_flags() -> None:
+def test_type_declare_params_builds_aliases_and_flags() -> None:
     args = argparse.Namespace(
         decl="typedef int OLD;",
         decl_file=None,
@@ -372,9 +372,7 @@ def test_type_declare_request_builds_aliases_and_flags() -> None:
         clang=True,
     )
 
-    request = type_commands._type_declare_request(args)
-
-    assert request.to_params() == {
+    assert type_commands._type_declare_params(args) == {
         "decl": "typedef int OLD;",
         "replace": True,
         "aliases": [{"from": "OLD", "to": "NEW"}],
