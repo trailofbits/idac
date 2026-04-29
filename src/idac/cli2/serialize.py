@@ -11,20 +11,17 @@ from .result import CommandResult
 SUMMARY_CHAR_LIMIT = 1200
 _NO_INLINE_LIMIT = 10**9
 
-_LIST_COUNT_LABELS: dict[str, str] = {
-    "list_targets": "target",
-    "segment_list": "segment",
-    "function_list": "function",
-    "type_list": "type",
-    "struct_list": "struct",
-    "enum_list": "enum",
-    "class_list": "class",
-    "class_candidates": "candidate",
-    "strings": "string",
-    "imports": "import module",
-}
-
-_DICT_COUNT_FIELDS: dict[str, tuple[str, str]] = {
+_RESULT_COUNTS: dict[str, tuple[str | None, str]] = {
+    "list_targets": (None, "target"),
+    "segment_list": (None, "segment"),
+    "function_list": (None, "function"),
+    "type_list": (None, "type"),
+    "struct_list": (None, "struct"),
+    "enum_list": (None, "enum"),
+    "class_list": (None, "class"),
+    "class_candidates": (None, "candidate"),
+    "strings": (None, "string"),
+    "imports": (None, "import module"),
     "search_bytes": ("results", "match"),
     "local_list": ("locals", "local"),
     "local_rename": ("locals", "local"),
@@ -35,6 +32,23 @@ _DICT_COUNT_FIELDS: dict[str, tuple[str, str]] = {
     "function_callees": ("edges", "call edge"),
     "class_fields": ("fields", "field"),
     "bookmark_get": ("bookmarks", "bookmark"),
+}
+
+_TOTAL_COUNT_FIELDS: dict[str, tuple[str, str]] = {
+    "decompile_bulk": ("functions_total", "function"),
+    "batch": ("commands_total", "command"),
+}
+
+_ARTIFACT_LABELS: dict[str, str] = {
+    "preview": "preview data",
+    "decompile": "decompile text",
+    "disasm": "disassembly",
+    "ctree": "ctree output",
+}
+
+_ARTIFACT_TOTAL_LABELS: dict[str, str] = {
+    "decompile_bulk": "decompile summary for",
+    "batch": "batch log for",
 }
 
 
@@ -68,21 +82,20 @@ def _pluralize(noun: str, count: int) -> str:
 
 
 def _result_count_summary(result: CommandResult) -> tuple[int, str] | None:
-    if result.render_op in _LIST_COUNT_LABELS and isinstance(result.value, list):
-        return len(result.value), _LIST_COUNT_LABELS[result.render_op]
+    entry = _RESULT_COUNTS.get(result.render_op)
+    if entry is not None:
+        field, noun = entry
+        if field is None and isinstance(result.value, list):
+            return len(result.value), noun
+        if field is not None and isinstance(result.value, dict):
+            rows = result.value.get(field)
+            if isinstance(rows, list):
+                return len(rows), noun
 
-    dict_summary = _DICT_COUNT_FIELDS.get(result.render_op)
-    if dict_summary is not None and isinstance(result.value, dict):
-        field, noun = dict_summary
-        rows = result.value.get(field)
-        if isinstance(rows, list):
-            return len(rows), noun
-
-    if result.render_op == "decompile_bulk" and isinstance(result.value, dict):
-        return int(result.value.get("functions_total") or 0), "function"
-
-    if result.render_op == "batch" and isinstance(result.value, dict):
-        return int(result.value.get("commands_total") or 0), "command"
+    total = _TOTAL_COUNT_FIELDS.get(result.render_op)
+    if total is not None and isinstance(result.value, dict):
+        field, noun = total
+        return int(result.value.get(field) or 0), noun
 
     return None
 
@@ -91,35 +104,25 @@ def artifact_notice(result: CommandResult, artifact: dict[str, Any]) -> str | No
     path = artifact.get("artifact_path")
     if not isinstance(path, str) or not path:
         return None
+    suffix = f" to {path}; inspect that file for the full result"
 
-    if result.render_op == "preview":
-        return f"wrote preview data to {path}; inspect that file for the full result"
+    label = _ARTIFACT_LABELS.get(result.render_op)
+    if label is not None:
+        return f"wrote {label}{suffix}"
 
-    if result.render_op == "decompile":
-        return f"wrote decompile text to {path}; inspect that file for the full result"
-
-    if result.render_op == "disasm":
-        return f"wrote disassembly to {path}; inspect that file for the full result"
-
-    if result.render_op == "ctree":
-        return f"wrote ctree output to {path}; inspect that file for the full result"
-
-    if result.render_op == "decompile_bulk":
-        count = int(result.value.get("functions_total") or 0) if isinstance(result.value, dict) else 0
-        noun = _pluralize("function", count)
-        return f"wrote decompile summary for {count} {noun} to {path}; inspect that file for the full result"
-
-    if result.render_op == "batch":
-        count = int(result.value.get("commands_total") or 0) if isinstance(result.value, dict) else 0
-        noun = _pluralize("command", count)
-        return f"wrote batch log for {count} {noun} to {path}; inspect that file for the full result"
+    total_label = _ARTIFACT_TOTAL_LABELS.get(result.render_op)
+    if total_label is not None:
+        total = _TOTAL_COUNT_FIELDS[result.render_op]
+        field, noun = total
+        count = int(result.value.get(field) or 0) if isinstance(result.value, dict) else 0
+        return f"wrote {total_label} {count} {_pluralize(noun, count)}{suffix}"
 
     count_summary = _result_count_summary(result)
     if count_summary is not None:
         count, noun = count_summary
-        return f"wrote {count} {_pluralize(noun, count)} to {path}; inspect that file for the full result"
+        return f"wrote {count} {_pluralize(noun, count)}{suffix}"
 
-    return f"wrote result to {path}; inspect that file for the full result"
+    return f"wrote result{suffix}"
 
 
 def _inline_limit_hint(result: CommandResult, *, out_flag: str) -> str | None:
