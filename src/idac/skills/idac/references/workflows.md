@@ -5,6 +5,7 @@ This file documents the current public `idac` workflows.
 ## Contents
 
 - [Inspect an open GUI target](#inspect-an-open-gui-target)
+- [Open a binary](#open-a-binary)
 - [Work from an existing database file](#work-from-an-existing-database-file)
 - [Recover type information around a function](#recover-type-information-around-a-function)
 - [Recover C++ class information](#recover-c-class-information)
@@ -34,6 +35,16 @@ Live GUI notes:
 - for parsed-read and `--out` defaults, read [cli.md](cli.md)
 - when you want cross-references, use the top-level `xrefs` command rather than looking for a `function xrefs` subcommand
 - for a single large decompile, use `-o/--out` on `decompile`; reserve `--out-file` and `--out-dir` for `decompilemany`
+
+## Open a binary
+
+```bash
+idac --timeout 120 database open "/path/to/binary" --json
+idac database show -c "db:/path/to/binary" --json
+idac decompile "main" -c "db:/path/to/binary" --f5
+```
+
+Use a longer `--timeout` for large binaries or first-time autoanalysis. If the target has multiple architectures, provide the intended architecture slice so IDA does not need an interactive loader choice.
 
 ## Work from an existing database file
 
