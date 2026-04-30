@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+from idac.paths import ida_configured_install_dir
+
 IDAPRO_IMPORT_ERRORS = (ImportError, ModuleNotFoundError, OSError, RuntimeError, ValueError)
 
 
@@ -44,7 +46,9 @@ def candidate_ida_dirs() -> list[Path]:
     explicit = [
         Path(raw).expanduser() for raw in (os.environ.get("IDAC_IDA_INSTALL_DIR"), os.environ.get("IDADIR")) if raw
     ]
-    return _dedupe_paths([*explicit, *default_ida_install_dirs()])
+    configured = ida_configured_install_dir()
+    configured_candidates = [] if configured is None else [configured]
+    return _dedupe_paths([*explicit, *configured_candidates, *default_ida_install_dirs()])
 
 
 def normalize_database_path(path: str) -> str:

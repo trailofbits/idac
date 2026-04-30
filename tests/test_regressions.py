@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import importlib
+import json
 import os
 import sys
 from pathlib import Path
@@ -718,3 +719,21 @@ def test_bootstrap_idapro_retries_candidate_installs_on_runtime_import_errors(
     assert result is imported_module
     assert str(bad_python) in attempts
     assert str(good_python) in attempts
+
+
+def test_candidate_ida_dirs_reads_ida_config_after_explicit_env(monkeypatch, tmp_path: Path) -> None:
+    explicit_root = tmp_path / "explicit"
+    configured_root = tmp_path / "configured"
+    fallback_root = tmp_path / "fallback"
+    idausr = tmp_path / ".idapro"
+    idausr.mkdir()
+    (idausr / "ida-config.json").write_text(
+        json.dumps({"Paths": {"ida-install-dir": str(configured_root)}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("IDAUSR", str(idausr))
+    monkeypatch.setenv("IDAC_IDA_INSTALL_DIR", str(explicit_root))
+    monkeypatch.delenv("IDADIR", raising=False)
+    monkeypatch.setattr(idalib_common, "default_ida_install_dirs", lambda: [configured_root, fallback_root])
+
+    assert idalib_common.candidate_ida_dirs() == [explicit_root, configured_root, fallback_root]
