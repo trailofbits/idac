@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import socket
 from pathlib import Path
 
@@ -266,6 +267,44 @@ def test_idalib_existing_instance_probe_honors_blocking_mode(monkeypatch, tmp_pa
     assert seen == {"timeout": None, "purge_on_failure": True}
 
 
+def test_idalib_new_instance_startup_uses_request_timeout(monkeypatch, tmp_path: Path) -> None:
+    database_path = str(tmp_path / "fixture.i64")
+    instance = IdaLibInstance(
+        pid=1234,
+        socket_path=tmp_path / "idac-idalib-1234.sock",
+        registry_path=tmp_path / "idac-idalib-1234.json",
+        database_path=database_path,
+        started_at=None,
+        meta={},
+    )
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(idalib, "_find_instance_for_database", lambda database_path_arg: None)
+
+    def fake_start_daemon(database_path_arg, *, startup_timeout, run_auto_analysis):
+        seen["database_path"] = database_path_arg
+        seen["startup_timeout"] = startup_timeout
+        seen["run_auto_analysis"] = run_auto_analysis
+        return instance
+
+    monkeypatch.setattr(idalib, "_start_daemon_for_database", fake_start_daemon)
+
+    found, already_open = idalib._ensure_instance_for_database(
+        database_path,
+        timeout=120.0,
+        run_auto_analysis=False,
+        start_if_missing=True,
+    )
+
+    assert found is instance
+    assert already_open is False
+    assert seen == {
+        "database_path": database_path,
+        "startup_timeout": 120.0,
+        "run_auto_analysis": False,
+    }
+
+
 def test_idalib_probe_timeout_does_not_purge_instance_files(monkeypatch, tmp_path: Path) -> None:
     registry_path = tmp_path / "idac-idalib-1234.json"
     socket_path = tmp_path / "idac-idalib-1234.sock"
@@ -292,15 +331,114 @@ def test_idalib_probe_timeout_does_not_purge_instance_files(monkeypatch, tmp_pat
     assert socket_path.exists()
 
 
-def test_idalib_daemon_startup_uses_nonblocking_stderr_log(monkeypatch, tmp_path: Path) -> None:
+def test_idalib_daemon_startup_uses_readiness_pipe(monkeypatch, tmp_path: Path) -> None:
+    class FakeProc:
+        pid = 1234
+
+    database_path = str(tmp_path / "fixture.i64")
+    instance = IdaLibInstance(
+        pid=1234,
+        socket_path=tmp_path / "idac-idalib-1234.sock",
+        registry_path=tmp_path / "idac-idalib-1234.json",
+        database_path=database_path,
+        started_at=None,
+        meta={},
+    )
+    proc = FakeProc()
+    seen: dict[str, object] = {}
+
+    def fake_popen(cmd, **kwargs):
+        ready_fd = int(cmd[cmd.index("--ready-fd") + 1])
+        seen["cmd"] = cmd
+        seen["pass_fds"] = kwargs["pass_fds"]
+        seen["ready_fd"] = ready_fd
+        assert ready_fd in kwargs["pass_fds"]
+        return proc
+
+    def fake_read_ready_payload(read_fd, *, timeout):
+        seen["read_fd"] = read_fd
+        seen["timeout"] = timeout
+        with pytest.raises(OSError):
+            os.write(int(seen["ready_fd"]), b"parent closed this fd")
+        os.close(read_fd)
+        return {"ok": True}
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("startup readiness should not probe sockets")
+
+    monkeypatch.setattr(idalib, "ensure_user_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(idalib.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(idalib, "idalib_registry_path", lambda pid: tmp_path / f"idac-idalib-{pid}.json")
+    monkeypatch.setattr(idalib, "_read_ready_payload", fake_read_ready_payload)
+    monkeypatch.setattr(idalib, "_instance_from_registry", lambda path: instance)
+    monkeypatch.setattr(idalib, "_probe_instance", fail_if_called)
+
+    started = idalib._start_daemon_for_database(
+        database_path,
+        startup_timeout=120.0,
+        run_auto_analysis=True,
+    )
+
+    assert started is instance
+    assert seen["timeout"] == 120.0
+    assert "--ready-fd" in seen["cmd"]
+
+
+def test_idalib_daemon_startup_timeout_terminates_worker(monkeypatch, tmp_path: Path) -> None:
+    class FakeProc:
+        pid = 1234
+
+        def __init__(self) -> None:
+            self.terminated = False
+            self.killed = False
+            self.wait_timeouts: list[float] = []
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self, *, timeout):
+            self.wait_timeouts.append(timeout)
+            return 1
+
+    proc = FakeProc()
+    database_path = str(tmp_path / "fixture.i64")
+    seen: dict[str, object] = {}
+
+    def fake_read_ready_payload(read_fd, *, timeout):
+        seen["timeout"] = timeout
+        os.close(read_fd)
+        raise socket.timeout()
+
+    monkeypatch.setattr(idalib, "ensure_user_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(idalib.subprocess, "Popen", lambda *args, **kwargs: proc)
+    monkeypatch.setattr(idalib, "idalib_registry_path", lambda pid: tmp_path / f"idac-idalib-{pid}.json")
+    monkeypatch.setattr(idalib, "_read_ready_payload", fake_read_ready_payload)
+
+    with pytest.raises(RuntimeError, match="timed out after 120s waiting for idalib daemon"):
+        idalib._start_daemon_for_database(
+            database_path,
+            startup_timeout=120.0,
+            run_auto_analysis=True,
+        )
+
+    assert seen["timeout"] == 120.0
+    assert proc.terminated is True
+    assert proc.killed is False
+    assert proc.wait_timeouts == [5.0]
+
+
+def test_idalib_daemon_startup_reads_stderr_when_worker_exits_before_readiness(monkeypatch, tmp_path: Path) -> None:
     class FakeStderrLog:
         closed = False
 
         def seek(self, _offset):
-            raise AssertionError("startup log should not be read after successful startup")
+            pass
 
         def read(self):
-            raise AssertionError("startup log should not be read after successful startup")
+            return "startup failed"
 
         def close(self):
             self.closed = True
@@ -315,37 +453,25 @@ def test_idalib_daemon_startup_uses_nonblocking_stderr_log(monkeypatch, tmp_path
     class FakeProc:
         pid = 1234
 
-        def poll(self):
-            return None
-
     database_path = str(tmp_path / "fixture.i64")
-    instance = IdaLibInstance(
-        pid=1234,
-        socket_path=tmp_path / "idac-idalib-1234.sock",
-        registry_path=tmp_path / "idac-idalib-1234.json",
-        database_path=database_path,
-        started_at=None,
-        meta={},
-    )
     stderr_log = FakeStderrLog()
-    seen: dict[str, object] = {}
 
     def fake_popen(cmd, **kwargs):
-        seen["cmd"] = cmd
-        seen["stderr"] = kwargs["stderr"]
         return FakeProc()
+
+    def fake_read_ready_payload(read_fd, *, timeout):
+        os.close(read_fd)
+        raise EOFError("closed")
 
     monkeypatch.setattr(idalib, "ensure_user_runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(idalib.tempfile, "TemporaryFile", lambda *args, **kwargs: stderr_log)
     monkeypatch.setattr(idalib.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(idalib, "idalib_registry_path", lambda pid: tmp_path / f"idac-idalib-{pid}.json")
-    monkeypatch.setattr(idalib, "_instance_from_registry", lambda path: instance)
-    monkeypatch.setattr(idalib, "_probe_instance", lambda instance_arg, *, timeout, purge_on_failure: True)
+    monkeypatch.setattr(idalib, "_read_ready_payload", fake_read_ready_payload)
 
-    started = idalib._start_daemon_for_database(database_path, probe_timeout=0.25, run_auto_analysis=True)
+    with pytest.raises(RuntimeError, match="startup failed"):
+        idalib._start_daemon_for_database(database_path, startup_timeout=0.25, run_auto_analysis=True)
 
-    assert started is instance
-    assert seen["stderr"] is stderr_log
     assert stderr_log.closed is True
 
 
