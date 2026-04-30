@@ -1,6 +1,6 @@
 ---
 name: idac
-description: Use for reverse-engineering work through the local `idac` CLI against a live IDA GUI session or an existing `.i64` / `.idb` database. Trigger this skill when the task involves decompilation, disassembly, ctree or microcode inspection, functions, locals, types, xrefs, strings, imports, C++ class or vtable recovery, target or backend selection, prototype or local/type mutations, reanalysis, or IDAPython execution through IDA.
+description: Use for reverse-engineering work through the local `idac` CLI against a live IDA GUI session, an existing `.i64` / `.idb` database, or a binary that IDA can open. Trigger this skill when the task involves decompilation, disassembly, ctree or microcode inspection, functions, locals, types, xrefs, strings, imports, C++ class or vtable recovery, target or backend selection, prototype or local/type mutations, reanalysis, or IDAPython execution through IDA.
 ---
 
 # idac
@@ -71,6 +71,7 @@ What is the task?
 - You can place `-c/--context` and `--timeout` either before the subcommand or on the command itself. If both are present, the command-local value wins.
 - Use `-c pid:<pid>` or `-c <module>` to select one live GUI session explicitly.
 - Use `-c "db:/path/to/file.i64"` or `-c "db:/path/to/file.idb"` for headless access to an existing database file.
+- For a new binary, first run `idac --timeout 120 database open /path/to/binary --json`; then use `-c "db:/path/to/binary"` for read commands.
 
 2. Choose the target:
 
@@ -101,6 +102,7 @@ idac type list "example"
 idac type class candidates "ExampleClass" --json --out "/tmp/class_candidates.json"
 idac function prototype show "sub_08041337"
 idac misc reanalyze "sub_08041337"
+idac --timeout 120 database open "/path/to/binary" --json
 idac misc skill install
 ```
 

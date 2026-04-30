@@ -30,13 +30,17 @@ idac targets list
 idac decompile "sub_08041337" -c "pid:<pid>"
 ```
 
-## `idalib` requires a database
+## Open a binary with `idalib`
 
-The `idalib` backend expects an existing `.i64` / `.idb`:
+The `idalib` backend can open a binary that IDA recognizes. Try this before looking for a prebuilt database:
 
 ```bash
-idac database show -c "db:sample.i64"
+idac --timeout 120 database open "/path/to/binary" --json
+idac database show -c "db:/path/to/binary" --json
+idac decompile "main" -c "db:/path/to/binary" --f5
 ```
+
+For large binaries or first-time autoanalysis, use a longer `--timeout`. If the target has multiple architectures, provide the intended architecture slice so IDA does not need an interactive loader choice.
 
 ## `idalib` changes did not reach disk
 

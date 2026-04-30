@@ -5,7 +5,7 @@ This file documents the current public `idac` surface.
 `idac` has two execution contexts:
 
 - `gui`: use a live IDA desktop session through the `idac_bridge` plugin
-- `idalib`: use a headless per-database idalib process against an existing `.i64` / `.idb`
+- `idalib`: use a headless per-database idalib process against an existing `.i64` / `.idb`, or a binary that IDA can open
 
 Do not start every task with diagnostics or cleanup. Use the diagnostic commands in this file when context selection is unclear, target discovery fails, or bridge/runtime trouble is likely.
 
@@ -35,13 +35,17 @@ If the bridge plugin is missing from the current IDA session, run `idac misc plu
 
 ## Database context
 
-Use `-c "db:/path/to/file.i64"` or `-c "db:/path/to/file.idb"` when:
+Use `idac database open` when you have a binary or database file and want headless automation without depending on the UI.
 
-- you already have an `.i64` / `.idb`
-- you want headless automation
-- you want deterministic test coverage without depending on the UI
+For a binary:
 
-Example:
+```bash
+idac --timeout 120 database open "/path/to/binary" --json
+idac database show -c "db:/path/to/binary" --json
+idac decompile "main" -c "db:/path/to/binary" --f5
+```
+
+For an existing `.i64` / `.idb`:
 
 ```bash
 idac database open "sample.i64"
@@ -55,7 +59,7 @@ idac database save -c "db:sample.i64"
 ## Selection rules
 
 - If exactly one GUI instance is open, most commands can omit `-c`.
-- Explicit `db:` locators passed via `-c` resolve to `idalib`.
+- Explicit `db:` locators passed via `-c` resolve to `idalib`; the path can be a binary or database file that IDA can open.
 - GUI selectors passed via `-c` resolve to the live bridge.
 - If multiple GUI instances are open, `-c` is required.
 - `doctor` is the first command to run when backend state is unclear.
