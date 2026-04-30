@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -29,6 +30,14 @@ def _ensure_parent(path: Path) -> Path:
     return path
 
 
+def _default_ida_user_dir() -> Path:
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "Hex-Rays" / "IDA Pro"
+    return Path.home() / ".idapro"
+
+
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -53,7 +62,27 @@ def runtime_uid_token() -> str:
 
 
 def ida_user_dir() -> Path:
-    return _env_path("IDAUSR", Path.home() / ".idapro")
+    return _env_path("IDAUSR", _default_ida_user_dir())
+
+
+def ida_config_path() -> Path:
+    return ida_user_dir() / "ida-config.json"
+
+
+def ida_configured_install_dir() -> Path | None:
+    try:
+        payload = json.loads(ida_config_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    paths = payload.get("Paths")
+    if not isinstance(paths, dict):
+        return None
+    raw_install_dir = paths.get("ida-install-dir")
+    if not isinstance(raw_install_dir, str) or not raw_install_dir.strip():
+        return None
+    return Path(raw_install_dir).expanduser()
 
 
 def runtime_dir() -> Path:

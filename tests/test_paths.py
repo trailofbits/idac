@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import idac.paths as paths
@@ -10,6 +11,8 @@ from idac.paths import (
     ensure_claude_skills_dir,
     ensure_codex_skills_dir,
     ensure_user_runtime_dir,
+    ida_config_path,
+    ida_configured_install_dir,
     plugin_bootstrap_install_path,
     plugin_bootstrap_source_path,
     plugin_install_dir,
@@ -37,6 +40,8 @@ def test_read_only_path_getters_do_not_create_directories(monkeypatch, tmp_path:
 
     assert user_runtime_dir() == runtime
     assert bridge_registry_paths() == []
+    assert ida_config_path() == idausr / "ida-config.json"
+    assert ida_configured_install_dir() is None
     assert plugin_install_dir() == idausr / "plugins" / "idac_bridge"
     assert plugin_bootstrap_install_path() == idausr / "plugins" / "idac_bridge_plugin.py"
     assert plugin_runtime_package_install_dir() == idausr / "plugins" / "idac"
@@ -85,3 +90,16 @@ def test_source_paths_resolve_packaged_assets() -> None:
     assert (skill_reference_source_dir() / "cli.md").exists()
     assert workspace_template_source_dir().name == "default"
     assert (workspace_template_source_dir() / ".gitignore").exists()
+
+
+def test_ida_configured_install_dir_reads_user_config(monkeypatch, tmp_path: Path) -> None:
+    idausr = tmp_path / ".idapro"
+    install_dir = tmp_path / "IDA Professional.app" / "Contents" / "MacOS"
+    monkeypatch.setenv("IDAUSR", str(idausr))
+    idausr.mkdir()
+    ida_config_path().write_text(
+        json.dumps({"Paths": {"ida-install-dir": str(install_dir)}}),
+        encoding="utf-8",
+    )
+
+    assert ida_configured_install_dir() == install_dir
