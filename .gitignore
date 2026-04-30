@@ -41,3 +41,9 @@ Thumbs.db
 # Local scratch
 PLAN.md
 .idac/
+
+# IDA files
+*.id0
+*.id1
+*.nam
+*.til
