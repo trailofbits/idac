@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
+import selectors
 import socket
 import subprocess
 import sys
@@ -22,8 +24,7 @@ from .idalib_common import build_target_row, load_registry, normalize_database_p
 from .schema import RequestEnvelope, response_ok
 
 IDALIB_CONNECT_RETRIES = 3
-IDALIB_STARTUP_PROBE_TIMEOUT = 1.0
-IDALIB_STARTUP_TIMEOUT = 10.0
+IDALIB_READY_MAX_BYTES = 65_536
 
 
 @dataclass(frozen=True)
@@ -163,10 +164,45 @@ def _build_target_row(instance: IdaLibInstance) -> dict[str, Any]:
     )
 
 
+def _terminate_process(proc: subprocess.Popen[str]) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        proc.terminate()
+    try:
+        proc.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=5.0)
+
+
+def _read_ready_payload(read_fd: int, *, timeout: float | None) -> dict[str, Any]:
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(read_fd, selectors.EVENT_READ)
+            events = selector.select(timeout)
+            if not events:
+                raise socket.timeout()
+            raw = os.read(read_fd, IDALIB_READY_MAX_BYTES + 1)
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(read_fd)
+
+    if not raw:
+        raise EOFError("idalib daemon exited before reporting readiness")
+    if len(raw) > IDALIB_READY_MAX_BYTES:
+        raise RuntimeError("idalib daemon readiness payload is too large")
+    raw = raw.split(b"\n", 1)[0].strip()
+    payload = json.loads(raw.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError("idalib daemon returned a non-object readiness payload")
+    return payload
+
+
 def _start_daemon_for_database(
     database_path: str,
     *,
-    probe_timeout: float,
+    startup_timeout: float | None,
     run_auto_analysis: bool,
 ) -> IdaLibInstance:
     ensure_user_runtime_dir()
@@ -179,40 +215,53 @@ def _start_daemon_for_database(
     ]
     if not run_auto_analysis:
         cmd.append("--no-auto-analysis")
+    read_fd, write_fd = os.pipe()
+    os.set_inheritable(write_fd, True)
+    cmd.extend(["--ready-fd", str(write_fd)])
     with tempfile.TemporaryFile("w+", encoding="utf-8") as stderr_log:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=stderr_log,
-            text=True,
-            start_new_session=True,
-        )
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=stderr_log,
+                text=True,
+                start_new_session=True,
+                pass_fds=(write_fd,),
+            )
+        except Exception:
+            with contextlib.suppress(OSError):
+                os.close(read_fd)
+            raise
+        finally:
+            with contextlib.suppress(OSError):
+                os.close(write_fd)
 
         expected_registry = idalib_registry_path(proc.pid)
-        deadline = time.monotonic() + IDALIB_STARTUP_TIMEOUT
-        while time.monotonic() < deadline:
-            if proc.poll() is not None:
-                stderr_log.seek(0)
-                detail = stderr_log.read().strip()
-                if detail:
-                    raise RuntimeError(detail)
-                raise RuntimeError(f"idalib daemon failed to start for `{database_path}`")
+        try:
+            payload = _read_ready_payload(read_fd, timeout=startup_timeout)
+            if not bool(payload.get("ok")):
+                raise RuntimeError(str(payload.get("error") or "idalib daemon failed to start"))
             instance = _instance_from_registry(expected_registry)
-            if instance is not None and instance.database_path == database_path:
-                try:
-                    if _probe_instance(
-                        instance,
-                        timeout=probe_timeout,
-                        purge_on_failure=False,
-                    ):
-                        return instance
-                except socket.timeout:
-                    pass
-            time.sleep(0.05)
-        with contextlib.suppress(ProcessLookupError):
-            proc.terminate()
-        raise RuntimeError(f"timed out waiting for idalib daemon to start for `{database_path}`")
+            if instance is None:
+                raise RuntimeError("idalib daemon reported readiness but registry was unavailable")
+            if instance.database_path != database_path:
+                raise RuntimeError(
+                    f"idalib daemon opened `{instance.database_path}` while `{database_path}` was requested"
+                )
+            return instance
+        except socket.timeout as exc:
+            _terminate_process(proc)
+            raise RuntimeError(
+                f"timed out after {_timeout_text(startup_timeout)} waiting for idalib daemon "
+                f"to start for `{database_path}`"
+            ) from exc
+        except EOFError as exc:
+            stderr_log.seek(0)
+            detail = stderr_log.read().strip()
+            if detail:
+                raise RuntimeError(detail) from exc
+            raise RuntimeError(f"idalib daemon failed to start for `{database_path}`") from exc
 
 
 def _ensure_instance_for_database(
@@ -235,7 +284,7 @@ def _ensure_instance_for_database(
     return (
         _start_daemon_for_database(
             normalized,
-            probe_timeout=IDALIB_STARTUP_PROBE_TIMEOUT,
+            startup_timeout=timeout,
             run_auto_analysis=run_auto_analysis,
         ),
         False,

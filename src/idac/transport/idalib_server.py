@@ -50,6 +50,18 @@ def _format_open_error(path: str, rc: int) -> str:
     return f"failed to open database `{path}`: rc={rc}"
 
 
+def _write_ready(ready_fd: int | None, payload: dict[str, Any]) -> None:
+    if ready_fd is None:
+        return
+    try:
+        os.write(ready_fd, (json.dumps(payload) + "\n").encode("utf-8"))
+    except OSError:
+        pass
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(ready_fd)
+
+
 def _other_live_instance_for_database(database_path: str) -> dict[str, Any] | None:
     normalized = normalize_database_path(database_path)
     for registry_path in idalib_registry_paths():
@@ -245,35 +257,48 @@ class _UnixIdaLibServer(socketserver.UnixStreamServer):
     request_queue_size = 64
 
 
-def serve(*, database_path: str, run_auto_analysis: bool) -> int:
+def serve(*, database_path: str, run_auto_analysis: bool, ready_fd: int | None = None) -> int:
     ensure_user_runtime_dir()
     socket_path = idalib_socket_path(os.getpid())
     registry_path = idalib_registry_path(os.getpid())
     with contextlib.suppress(FileNotFoundError):
         socket_path.unlink()
-    service = IdaLibService(
-        database_path=database_path,
-        run_auto_analysis=run_auto_analysis,
-    )
-    server = _UnixIdaLibServer(str(socket_path), _IdaLibRequestHandler)
-    server.service = service  # type: ignore[attr-defined]
-    service._write_registry()
+    service: IdaLibService | None = None
+    server: _UnixIdaLibServer | None = None
     try:
+        service = IdaLibService(
+            database_path=database_path,
+            run_auto_analysis=run_auto_analysis,
+        )
+        server = _UnixIdaLibServer(str(socket_path), _IdaLibRequestHandler)
+        server.service = service  # type: ignore[attr-defined]
+        service._write_registry()
+        _write_ready(ready_fd, {"ok": True})
+        ready_fd = None
         server.serve_forever()
+    except Exception as exc:
+        _write_ready(ready_fd, {"ok": False, "error": str(exc)})
+        raise
     finally:
-        server.server_close()
+        if server is not None:
+            server.server_close()
         with contextlib.suppress(FileNotFoundError):
             socket_path.unlink()
         with contextlib.suppress(FileNotFoundError):
             registry_path.unlink()
-        with contextlib.suppress(Exception):
-            service.close_runtime(save=False)
+        if service is not None:
+            with contextlib.suppress(Exception):
+                service.close_runtime(save=False)
+        with contextlib.suppress(OSError):
+            if ready_fd is not None:
+                os.close(ready_fd)
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m idac.transport.idalib_server")
     parser.add_argument("--database", required=True, help="Database or input path to open")
+    parser.add_argument("--ready-fd", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--no-auto-analysis",
         dest="run_auto_analysis",
@@ -291,6 +316,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return serve(
             database_path=args.database,
             run_auto_analysis=bool(args.run_auto_analysis),
+            ready_fd=args.ready_fd,
         )
     except WorkerError as exc:
         print(str(exc), file=sys.stderr)
