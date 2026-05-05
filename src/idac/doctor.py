@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import filecmp
 import json
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -24,6 +26,8 @@ from .transport.idalib_common import bootstrap_idapro as _bootstrap_idapro
 from .transport.idalib_common import candidate_ida_dirs as _candidate_ida_dirs
 from .transport.schema import RequestEnvelope
 from .version import VERSION
+
+IDA_LICENSE_PROBE_TIMEOUT_SECONDS = 20.0
 
 
 def _check(status: str, component: str, name: str, summary: str, **details: Any) -> dict[str, Any]:
@@ -111,7 +115,15 @@ def _plugin_check(component: str, name: str, install_path: Path, source_path: Pa
     )
 
 
-def _doctor_gui(*, timeout: Optional[float]) -> list[dict[str, Any]]:
+def _downgrade_gui_optional_errors(checks: list[dict[str, Any]]) -> None:
+    for item in checks:
+        if item.get("component") != "gui" or item.get("status") != "error":
+            continue
+        item["status"] = "warn"
+        item["summary"] = f"{item.get('summary', '')}; GUI bridge support is optional for headless idalib use".strip()
+
+
+def _doctor_gui(*, timeout: Optional[float], require_gui: bool = True) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     checks.append(
         _plugin_check(
@@ -156,15 +168,21 @@ def _doctor_gui(*, timeout: Optional[float]) -> list[dict[str, Any]]:
         targets = gui.list_targets(timeout=timeout, warnings=discovery_warnings)
         instances = gui.list_instances()
     except (OSError, RuntimeError, ValueError) as exc:
+        status = "error" if require_gui else "warn"
+        summary = f"failed to enumerate running GUI bridge targets: {exc}"
+        if not require_gui:
+            summary = f"{summary}; GUI bridge support is optional for headless idalib use"
         checks.append(
             _check(
-                "error",
+                status,
                 "gui",
                 "bridge_targets",
-                f"failed to enumerate running GUI bridge targets: {exc}",
+                summary,
                 timeout=timeout,
             )
         )
+        if not require_gui:
+            _downgrade_gui_optional_errors(checks)
         return checks
 
     if discovery_warnings:
@@ -179,6 +197,8 @@ def _doctor_gui(*, timeout: Optional[float]) -> list[dict[str, Any]]:
         )
 
     if not instances:
+        if not require_gui:
+            _downgrade_gui_optional_errors(checks)
         checks.append(
             _check(
                 "warn",
@@ -272,6 +292,84 @@ def _idalib_install_dirs_check() -> dict[str, Any]:
         "install_dirs",
         summary,
         candidates=candidate_rows,
+    )
+
+
+def _ida_text_executable_candidates() -> list[Path]:
+    names = ["idat.exe"] if sys.platform == "win32" else ["idat"]
+    return [candidate / name for candidate in _candidate_ida_dirs() for name in names]
+
+
+def _ida_license_probe(executable: Path) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory(prefix="idac-ida-license-") as tmp:
+        tmpdir = Path(tmp)
+        script = tmpdir / "exit.idc"
+        log = tmpdir / "ida.log"
+        script.write_text("static main() { qexit(0); }\n", encoding="utf-8")
+        probe = subprocess.run(
+            [str(executable), "-A", f"-L{log}", f"-S{script}", "-t"],
+            cwd=tmpdir,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=IDA_LICENSE_PROBE_TIMEOUT_SECONDS,
+        )
+        log_text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
+        stderr = "\n".join(part for part in (probe.stderr, log_text) if part)
+        return subprocess.CompletedProcess(
+            args=probe.args,
+            returncode=probe.returncode,
+            stdout=probe.stdout,
+            stderr=stderr,
+        )
+
+
+def _ida_license_check() -> dict[str, Any]:
+    candidates = _ida_text_executable_candidates()
+    executable = next((path for path in candidates if path.exists()), None)
+    if executable is None:
+        return _check(
+            "error",
+            "idalib",
+            "license",
+            "unable to check IDA license because the headless IDA executable was not found",
+            candidates=[str(path) for path in candidates],
+        )
+
+    try:
+        probe = _ida_license_probe(executable)
+    except subprocess.TimeoutExpired as exc:
+        return _check(
+            "error",
+            "idalib",
+            "license",
+            "timed out while checking IDA license",
+            executable=str(executable),
+            timeout=exc.timeout,
+        )
+
+    output = "\n".join(part.strip() for part in (probe.stdout, probe.stderr) if part and part.strip())
+    if probe.returncode == 0:
+        return _check(
+            "ok",
+            "idalib",
+            "license",
+            "IDA license check passed",
+            executable=str(executable),
+        )
+
+    if "Cannot continue without a valid license" in output:
+        summary = "IDA could not find a valid license"
+    else:
+        summary = "IDA license check failed"
+    return _check(
+        "error",
+        "idalib",
+        "license",
+        summary,
+        executable=str(executable),
+        returncode=probe.returncode,
+        output=output[:4000],
     )
 
 
@@ -382,25 +480,52 @@ def _idalib_database_path_check(database: str) -> dict[str, Any]:
 
 def _doctor_idalib(*, database: Optional[str]) -> list[dict[str, Any]]:
     checks = [_idalib_install_dirs_check()]
+    checks.append(_ida_license_check())
     checks.extend(_idalib_import_checks(database))
     if database:
         checks.append(_idalib_database_path_check(database))
     return checks
 
 
+def _check_statuses(checks: list[dict[str, Any]], *, component: str) -> dict[str, str]:
+    return {
+        str(item.get("name")): str(item.get("status"))
+        for item in checks
+        if item.get("component") == component and item.get("name") not in (None, "")
+    }
+
+
+def _available_backends(checks: list[dict[str, Any]]) -> list[str]:
+    available: list[str] = []
+
+    gui_statuses = _check_statuses(checks, component="gui")
+    if gui_statuses.get("bridge_targets") == "ok" and gui_statuses.get("bridge_version") == "ok":
+        available.append("gui")
+
+    idalib_statuses = _check_statuses(checks, component="idalib")
+    if (
+        idalib_statuses.get("install_dirs") == "ok"
+        and idalib_statuses.get("license") == "ok"
+        and idalib_statuses.get("idapro_import") == "ok"
+    ):
+        available.append("idalib")
+
+    return available
+
+
 def run_doctor(
     *,
-    backend: str = "all",
+    scope: str = "all",
     timeout: Optional[float] = None,
     database: Optional[str] = None,
 ) -> dict[str, Any]:
-    selected = backend.strip().lower() if backend else "all"
+    selected = scope.strip().lower() if scope else "all"
     if selected not in {"all", "gui", "idalib"}:
-        raise ValueError(f"unsupported doctor backend: {backend}")
+        raise ValueError(f"unsupported doctor scope: {scope}")
 
     checks: list[dict[str, Any]] = []
     if selected in {"all", "gui"}:
-        checks.extend(_doctor_gui(timeout=timeout))
+        checks.extend(_doctor_gui(timeout=timeout, require_gui=selected == "gui"))
     if selected in {"all", "idalib"}:
         checks.extend(_doctor_idalib(database=database))
 
@@ -410,7 +535,7 @@ def run_doctor(
         overall_status = max(checks, key=lambda item: status_order.get(str(item.get("status")), 99)).get("status", "ok")
     return {
         "healthy": overall_status != "error",
-        "backend": selected,
+        "backend": _available_backends(checks),
         "status": overall_status,
         "check_count": len(checks),
         "checks": checks,

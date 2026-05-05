@@ -344,7 +344,7 @@ def test_doctor_accepts_root_timeout(capsys, monkeypatch) -> None:
     def fake_run_doctor(**kwargs):
         captured.update(kwargs)
         return {
-            "backend": "all",
+            "backend": ["idalib"],
             "healthy": True,
             "status": "ok",
             "checks": [],
@@ -355,7 +355,7 @@ def test_doctor_accepts_root_timeout(capsys, monkeypatch) -> None:
     exit_code = main(["--timeout", "2.5", "doctor"])
 
     assert exit_code == 0
-    assert captured == {"backend": "all", "timeout": 2.5}
+    assert captured == {"scope": "all", "timeout": 2.5}
     assert "status: ok" in capsys.readouterr().out
 
 
@@ -1201,7 +1201,7 @@ def test_doctor_with_out_prints_error_summary(tmp_path: Path, capsys, monkeypatc
     def fake_run_doctor(**kwargs):
         captured.update(kwargs)
         return {
-            "backend": kwargs.get("backend", "all"),
+            "backend": [],
             "healthy": False,
             "status": "error",
             "checks": [
@@ -1222,11 +1222,11 @@ def test_doctor_with_out_prints_error_summary(tmp_path: Path, capsys, monkeypatc
     exit_code = main(["doctor", "--out", str(out_path)])
 
     assert exit_code == 1
-    assert captured["backend"] == "all"
+    assert captured["scope"] == "all"
     assert "database" not in captured
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "doctor failed: backend=all status=error" in captured.err
+    assert "doctor failed: status=error" in captured.err
     assert "gui.bridge_targets: no running GUI bridge instances found" in captured.err
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert payload["healthy"] is False

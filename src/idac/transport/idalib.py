@@ -25,6 +25,11 @@ from .schema import RequestEnvelope, response_ok
 
 IDALIB_CONNECT_RETRIES = 3
 IDALIB_READY_MAX_BYTES = 65_536
+IDALIB_STARTUP_ATTEMPTS = 2
+IDALIB_STARTUP_HINT = (
+    "idalib exited before reporting readiness; this usually means IDA failed during startup, "
+    "license validation, or Python initialization. Run `idac doctor` to check the local IDA/idalib runtime."
+)
 
 
 @dataclass(frozen=True)
@@ -176,6 +181,14 @@ def _terminate_process(proc: subprocess.Popen[str]) -> None:
             proc.wait(timeout=5.0)
 
 
+def _format_startup_failure(database_path: str, detail: str | None = None) -> str:
+    prefix = f"idalib daemon failed to start for `{database_path}`"
+    clean_detail = "" if detail is None else detail.strip()
+    if clean_detail:
+        return f"{prefix}: {clean_detail}"
+    return f"{prefix}: {IDALIB_STARTUP_HINT}"
+
+
 def _read_ready_payload(read_fd: int, *, timeout: float | None) -> dict[str, Any]:
     try:
         with selectors.DefaultSelector() as selector:
@@ -206,7 +219,7 @@ def _start_daemon_for_database(
     run_auto_analysis: bool,
 ) -> IdaLibInstance:
     ensure_user_runtime_dir()
-    cmd = [
+    base_cmd = [
         sys.executable,
         "-m",
         "idac.transport.idalib_server",
@@ -214,54 +227,64 @@ def _start_daemon_for_database(
         database_path,
     ]
     if not run_auto_analysis:
-        cmd.append("--no-auto-analysis")
-    read_fd, write_fd = os.pipe()
-    os.set_inheritable(write_fd, True)
-    cmd.extend(["--ready-fd", str(write_fd)])
-    with tempfile.TemporaryFile("w+", encoding="utf-8") as stderr_log:
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=stderr_log,
-                text=True,
-                start_new_session=True,
-                pass_fds=(write_fd,),
-            )
-        except Exception:
-            with contextlib.suppress(OSError):
-                os.close(read_fd)
-            raise
-        finally:
-            with contextlib.suppress(OSError):
-                os.close(write_fd)
+        base_cmd.append("--no-auto-analysis")
 
-        expected_registry = idalib_registry_path(proc.pid)
-        try:
-            payload = _read_ready_payload(read_fd, timeout=startup_timeout)
-            if not bool(payload.get("ok")):
-                raise RuntimeError(str(payload.get("error") or "idalib daemon failed to start"))
-            instance = _instance_from_registry(expected_registry)
-            if instance is None:
-                raise RuntimeError("idalib daemon reported readiness but registry was unavailable")
-            if instance.database_path != database_path:
-                raise RuntimeError(
-                    f"idalib daemon opened `{instance.database_path}` while `{database_path}` was requested"
+    for attempt in range(IDALIB_STARTUP_ATTEMPTS):
+        read_fd, write_fd = os.pipe()
+        os.set_inheritable(write_fd, True)
+        cmd = [*base_cmd, "--ready-fd", str(write_fd)]
+        with tempfile.TemporaryFile("w+", encoding="utf-8") as stderr_log:
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=stderr_log,
+                    text=True,
+                    start_new_session=True,
+                    pass_fds=(write_fd,),
                 )
-            return instance
-        except socket.timeout as exc:
-            _terminate_process(proc)
-            raise RuntimeError(
-                f"timed out after {_timeout_text(startup_timeout)} waiting for idalib daemon "
-                f"to start for `{database_path}`"
-            ) from exc
-        except EOFError as exc:
-            stderr_log.seek(0)
-            detail = stderr_log.read().strip()
-            if detail:
-                raise RuntimeError(detail) from exc
-            raise RuntimeError(f"idalib daemon failed to start for `{database_path}`") from exc
+            except Exception:
+                with contextlib.suppress(OSError):
+                    os.close(read_fd)
+                raise
+            finally:
+                with contextlib.suppress(OSError):
+                    os.close(write_fd)
+
+            expected_registry = idalib_registry_path(proc.pid)
+            try:
+                payload = _read_ready_payload(read_fd, timeout=startup_timeout)
+                if not bool(payload.get("ok")):
+                    raise RuntimeError(_format_startup_failure(database_path, str(payload.get("error") or "")))
+                instance = _instance_from_registry(expected_registry)
+                if instance is None:
+                    raise RuntimeError("idalib daemon reported readiness but registry was unavailable")
+                if instance.database_path != database_path:
+                    raise RuntimeError(
+                        f"idalib daemon opened `{instance.database_path}` while `{database_path}` was requested"
+                    )
+                return instance
+            except socket.timeout as exc:
+                _terminate_process(proc)
+                raise RuntimeError(
+                    f"timed out after {_timeout_text(startup_timeout)} waiting for idalib daemon "
+                    f"to start for `{database_path}`"
+                ) from exc
+            except EOFError as exc:
+                try:
+                    proc.wait(timeout=0.5)
+                except subprocess.TimeoutExpired:
+                    _terminate_process(proc)
+                stderr_log.seek(0)
+                detail = stderr_log.read().strip()
+                if detail:
+                    raise RuntimeError(_format_startup_failure(database_path, detail)) from exc
+                if attempt + 1 < IDALIB_STARTUP_ATTEMPTS:
+                    continue
+                raise RuntimeError(_format_startup_failure(database_path)) from exc
+
+    raise RuntimeError(_format_startup_failure(database_path))
 
 
 def _ensure_instance_for_database(
