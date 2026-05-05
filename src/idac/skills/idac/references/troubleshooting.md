@@ -15,6 +15,8 @@ idac targets cleanup
 
 If no targets appear, either the IDA plugin bridge is not loaded in the current GUI session or stale bridge runtime files are masking the live session. Run `idac targets cleanup --out <path>` when you need the full cleanup result, then rerun `targets list`.
 
+This section is only about GUI rows. Headless targets opened through `database open` appear in `targets list --json` with `backend: "idalib"` and should be used with `-c "db:/path"`.
+
 ## Agent sandbox cannot reach the bridge socket
 
 Both backends use Unix sockets (default runtime dir: `/tmp/idac`, controlled by `IDAC_RUNTIME_DIR`). If your environment blocks Unix socket connections, *every* live GUI command will fail with errors like "Failed to contact IDA GUI bridge".
@@ -35,12 +37,13 @@ idac decompile "sub_08041337" -c "pid:<pid>"
 The `idalib` backend can open a binary that IDA recognizes. Try this before looking for a prebuilt database:
 
 ```bash
-idac --timeout 120 database open "/path/to/binary" --json
+idac database open "/path/to/binary" --json
+idac targets list --json
 idac database show -c "db:/path/to/binary" --json
 idac decompile "main" -c "db:/path/to/binary" --f5
 ```
 
-For large binaries or first-time autoanalysis, use a longer `--timeout`. If the target has multiple architectures, provide the intended architecture slice so IDA does not need an interactive loader choice.
+For large binaries or first-time autoanalysis, omit `--timeout` so the import can block indefinitely unless the user asked for a deadline. Do not wrap this import in a shell-level timeout or a tool-call timeout; let the command keep running and poll the session if your tool supports incremental output. If `main` is not named after a raw import, use `start_ea` / `entry_ea` from `database show --json` or an address from `function list --json`. If the target has multiple architectures, provide the intended architecture slice so IDA does not need an interactive loader choice.
 
 ## `idalib` changes did not reach disk
 

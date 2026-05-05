@@ -59,9 +59,9 @@ For `idalib`, `idapro` must already be installed. This repo assumes the standard
 
 Most commands can run with no context at all when exactly one live IDA GUI session is open. For explicit selection, use `-c/--context` with either a GUI selector or a database locator such as `db:sample.i64`.
 
-**Drive your live IDA session** — idac connects to a running IDA desktop over a Unix socket bridge. Use `idac targets list --json` to discover instances. If only one is open, most commands can omit `-c` entirely. Use `-c pid:<pid>` or `-c <module>` when multiple GUI sessions are open.
+**Drive your live IDA session** — idac connects to a running IDA desktop over a Unix socket bridge. Use `idac targets list --json` to discover GUI and open headless targets. If only one GUI is open, most commands can omit `-c` entirely. Use `-c pid:<pid>` or `-c <module>` when multiple GUI sessions are open.
 
-**Spin up headless databases on demand** — passing `-c "db:<database.i64|idb>"` starts or reuses a headless per-database `idalib` process automatically. No daemon to manage, no port to allocate. Use `idac database save -c "db:<database>"` to checkpoint and `idac database close -c "db:<database>"` to tear down.
+**Spin up headless databases on demand** — passing `-c "db:<database.i64|idb|binary>"` starts or reuses a headless per-database `idalib` process automatically. Open headless rows show `backend: "idalib"` in `targets list --json`. Use `idac database save -c "db:<database>"` to checkpoint and `idac database close -c "db:<database>"` to tear down.
 
 ## Agent sandbox setup
 
@@ -171,7 +171,7 @@ Pass `--f5` (alias for `--no-cache`) when running readback after type or prototy
 
 Function-targeting commands (`decompile`, `disasm`, `ctree`, and the `function` family) accept demangled C++ names when they resolve uniquely, for example `idac decompile "ExampleClass::method_1"`. On non-unique matches, use a mangled name, full signature, or address. Other identifier-taking commands (`name`, `comment`, `bookmark`, `search`, `xref`, vtable lookups) take only addresses or mangled names.
 
-`function metadata` and `function list --json` include a `display_name` field with the demangled symbol name when available. `function list --demangle` changes text output to use that display name while keeping JSON `name` stable.
+`function metadata` and `function list --json` include a `display_name` field with the demangled symbol name when available. `function list --json` rows also include `type` as `real`, `thunk`, or `import`; text output shows that type column by default. `function list --demangle` changes text output to use the display name while keeping JSON `name` stable.
 
 ### Batch
 

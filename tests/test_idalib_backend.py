@@ -78,6 +78,8 @@ def test_idalib_function_list_json(
     names = {item["name"] for item in payload}
     assert {"main", "add"} <= names
     assert all("display_name" in item for item in payload)
+    assert all(item["type"] in {"real", "thunk", "import"} for item in payload)
+    assert {item["type"] for item in payload if item["name"] in {"main", "add"}} == {"real"}
 
 
 def test_idalib_function_list_json_accepts_query_and_limit(

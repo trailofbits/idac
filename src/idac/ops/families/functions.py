@@ -45,6 +45,7 @@ class FunctionListEntry:
     render_name: str
     address: str
     size: int
+    type: str
 
 
 @dataclass(frozen=True)
@@ -181,9 +182,39 @@ def _parse_function_list(params: dict[str, object]) -> FunctionListRequest:
     )
 
 
+def _import_addresses(runtime: IdaRuntime) -> set[int]:
+    ida_nalt = runtime.ida_nalt
+    addresses: set[int] = set()
+    for index in range(ida_nalt.get_import_module_qty()):
+
+        def imp_cb(ea: int, _name: str | None, _ordinal: int) -> bool:
+            addresses.add(int(ea))
+            return True
+
+        ida_nalt.enum_import_names(index, imp_cb)
+    return addresses
+
+
+def _is_external_segment(runtime: IdaRuntime, ea: int) -> bool:
+    ida_segment = runtime.ida_segment
+    segment = ida_segment.getseg(ea)
+    return bool(segment is not None and getattr(segment, "type", None) == getattr(ida_segment, "SEG_XTRN", None))
+
+
+def _function_type(runtime: IdaRuntime, ea: int, func, import_eas: set[int]) -> str:
+    if ea in import_eas or _is_external_segment(runtime, ea):
+        return "import"
+    thunk_flag = int(getattr(runtime.ida_funcs, "FUNC_THUNK", 0) or 0)
+    flags = int(getattr(func, "flags", 0) or 0)
+    if thunk_flag and flags & thunk_flag:
+        return "thunk"
+    return "real"
+
+
 def _function_list(context: OperationContext, request: FunctionListRequest) -> tuple[FunctionListEntry, ...]:
     runtime = context.runtime
     ranges = () if request.segment is None else runtime.resolve_segment_ranges(request.segment)
+    import_eas = _import_addresses(runtime)
     rows: list[FunctionListEntry] = []
     for ea in runtime.idautils.Functions():
         if ranges and not runtime.ea_in_ranges(ea, ranges):
@@ -206,6 +237,7 @@ def _function_list(context: OperationContext, request: FunctionListRequest) -> t
                 render_name=display_name if request.demangle else name,
                 address=hex(ea),
                 size=0 if func is None else func.end_ea - func.start_ea,
+                type=_function_type(runtime, ea, func, import_eas),
             )
         )
         if request.limit is not None and len(rows) >= request.limit:

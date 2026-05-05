@@ -204,7 +204,11 @@ def render_targets_cleanup(value: Any) -> str:
 def render_function_list(value: Any) -> str:
     return _render_list_rows(
         value,
-        lambda item: f"{item.get('address', '<unknown>')}  {item.get('render_name') or item.get('name', '<unknown>')}",
+        lambda item: (
+            f"{item.get('address', '<unknown>')}  "
+            f"{item.get('type', 'real'):<6}  "
+            f"{item.get('render_name') or item.get('name', '<unknown>')}"
+        ),
     )
 
 
