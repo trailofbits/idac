@@ -73,10 +73,13 @@ def _function_header(value: dict[str, Any], *, key: str = "function") -> str:
 def render_target_list(value: Any) -> str:
     def render_row(item: Any) -> str:
         selector = _get_first_present(item, "selector", "target_id")
+        backend = item.get("backend")
         module = item.get("module")
         pid = item.get("instance_pid")
         suffix = " [active]" if item.get("active") else ""
         details: list[str] = []
+        if backend:
+            details.append(str(backend))
         if module:
             details.append(str(module))
         if pid not in (None, ""):

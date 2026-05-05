@@ -89,7 +89,9 @@ def _instance_from_registry(path: Path) -> IdaLibInstance | None:
     )
 
 
-def _list_instances() -> list[IdaLibInstance]:
+def list_instances() -> list[IdaLibInstance]:
+    """List live idalib daemon instances with stale registry files purged."""
+
     ensure_user_runtime_dir()
     rows: list[IdaLibInstance] = []
     for registry_path in idalib_registry_paths():
@@ -101,7 +103,7 @@ def _list_instances() -> list[IdaLibInstance]:
 
 def _find_instance_for_database(database_path: str) -> IdaLibInstance | None:
     requested = normalize_database_path(database_path)
-    for instance in _list_instances():
+    for instance in list_instances():
         if instance.database_path == requested:
             return instance
     return None
@@ -336,7 +338,7 @@ class IdaLibBackend:
         require_timeout_for_operation(request.op, timeout)
         if request.op == "list_targets":
             return response_ok(
-                [_build_target_row(instance) for instance in _list_instances()],
+                [_build_target_row(instance) for instance in list_instances()],
                 backend="idalib",
             )
 

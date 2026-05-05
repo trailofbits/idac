@@ -66,6 +66,7 @@ def load_registry(path: Path) -> dict[str, Any] | None:
 def build_target_row(*, pid: int, database_path: str, socket_path: str | Path) -> dict[str, Any]:
     db = Path(database_path)
     return {
+        "backend": "idalib",
         "target_id": str(pid),
         "selector": db.name,
         "filename": database_path,

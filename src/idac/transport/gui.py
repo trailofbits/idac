@@ -429,6 +429,7 @@ def _normalize_target_row(instance: BridgeInstance, item: dict[str, Any]) -> dic
     instance_selector = _instance_selector(instance)
     return {
         **item,
+        "backend": "gui",
         "local_target_id": local_target_id,
         "local_selector": local_selector,
         "target_id": f"{instance.pid}:{local_target_id}",

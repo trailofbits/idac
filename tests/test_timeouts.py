@@ -79,6 +79,7 @@ def test_required_timeout_commands_forward_timeout_to_gui_autodiscovery(monkeypa
 
     monkeypatch.setattr("idac.cli2.context.list_gui_discovered_instances", fake_list_gui_discovered_instances)
     monkeypatch.setattr("idac.cli2.context.list_gui_instances", fake_list_gui_instances)
+    monkeypatch.setattr("idac.cli2.context.list_idalib_instances", lambda: [])
     monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
 
     exit_code = main(["search", "bytes", "74 69 6e 79", "--segment", "__TEXT", "--timeout", "2.5", "--format", "json"])
@@ -98,6 +99,7 @@ def test_required_timeout_commands_report_gui_autodiscovery_timeout(monkeypatch,
     from idac.cli import main
 
     monkeypatch.setattr("idac.cli2.context.list_gui_discovered_instances", lambda warnings=None: [object()])
+    monkeypatch.setattr("idac.cli2.context.list_idalib_instances", lambda: [])
 
     def fake_list_gui_instances(*, timeout=None, warnings=None):
         assert timeout == 2.5
@@ -120,6 +122,7 @@ def test_required_timeout_commands_do_not_auto_select_after_timeout_pruned_disco
     from idac.cli import main
 
     monkeypatch.setattr("idac.cli2.context.list_gui_discovered_instances", lambda warnings=None: [object(), object()])
+    monkeypatch.setattr("idac.cli2.context.list_idalib_instances", lambda: [])
 
     def fake_list_gui_instances(*, timeout=None, warnings=None):
         assert timeout == 2.5
