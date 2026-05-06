@@ -206,7 +206,7 @@ def render_function_list(value: Any) -> str:
         value,
         lambda item: (
             f"{item.get('address', '<unknown>')}  "
-            f"{item.get('type', 'real'):<6}  "
+            f"{item.get('section') or item.get('segment') or '<unknown>':<10}  "
             f"{item.get('render_name') or item.get('name', '<unknown>')}"
         ),
     )

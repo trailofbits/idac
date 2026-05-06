@@ -44,8 +44,8 @@ class FunctionListEntry:
     display_name: str
     render_name: str
     address: str
+    section: str
     size: int
-    type: str
 
 
 @dataclass(frozen=True)
@@ -182,47 +182,18 @@ def _parse_function_list(params: dict[str, object]) -> FunctionListRequest:
     )
 
 
-def _import_addresses(runtime: IdaRuntime) -> set[int]:
-    ida_nalt = runtime.ida_nalt
-    addresses: set[int] = set()
-    for index in range(ida_nalt.get_import_module_qty()):
-
-        def imp_cb(ea: int, _name: str | None, _ordinal: int) -> bool:
-            addresses.add(int(ea))
-            return True
-
-        ida_nalt.enum_import_names(index, imp_cb)
-    return addresses
-
-
-def _is_external_segment(runtime: IdaRuntime, ea: int) -> bool:
-    ida_segment = runtime.ida_segment
-    segment = ida_segment.getseg(ea)
-    return bool(segment is not None and getattr(segment, "type", None) == getattr(ida_segment, "SEG_XTRN", None))
-
-
-def _function_type(runtime: IdaRuntime, ea: int, func, import_eas: set[int]) -> str:
-    if ea in import_eas or _is_external_segment(runtime, ea):
-        return "import"
-    thunk_flag = int(getattr(runtime.ida_funcs, "FUNC_THUNK", 0) or 0)
-    flags = int(getattr(func, "flags", 0) or 0)
-    if thunk_flag and flags & thunk_flag:
-        return "thunk"
-    return "real"
-
-
 def _function_list(context: OperationContext, request: FunctionListRequest) -> tuple[FunctionListEntry, ...]:
     runtime = context.runtime
     ranges = () if request.segment is None else runtime.resolve_segment_ranges(request.segment)
-    import_eas = _import_addresses(runtime)
     rows: list[FunctionListEntry] = []
     for ea in runtime.idautils.Functions():
         if ranges and not runtime.ea_in_ranges(ea, ranges):
             continue
         name = runtime.function_name(ea)
         display_name = runtime.display_function_name(ea, demangle=True)
+        match_name = display_name if request.demangle else name
         if request.pattern and not text_matches(
-            name,
+            match_name,
             pattern=request.pattern,
             glob=request.glob,
             regex=request.regex,
@@ -230,14 +201,15 @@ def _function_list(context: OperationContext, request: FunctionListRequest) -> t
         ):
             continue
         func = runtime.ida_funcs.get_func(ea)
+        segment = runtime.ida_segment.getseg(ea)
         rows.append(
             FunctionListEntry(
                 name=name,
                 display_name=display_name,
                 render_name=display_name if request.demangle else name,
                 address=hex(ea),
+                section="" if segment is None else runtime._segment_name(segment),
                 size=0 if func is None else func.end_ea - func.start_ea,
-                type=_function_type(runtime, ea, func, import_eas),
             )
         )
         if request.limit is not None and len(rows) >= request.limit:

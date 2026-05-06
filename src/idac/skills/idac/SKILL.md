@@ -119,10 +119,10 @@ For strings, always pass both `--timeout` and `--segment`; unlike `database open
 For dyld shared caches, do not use defined-string listing. Use `search strings --scan --segment ... --start ... --end ... --timeout 30` with a range no larger than 16 MiB.
 In binary-only analysis mode, bias toward strings, RTTI, vtables, demangled symbols, local types, and call behavior rather than any external lookup.
 For freshly imported binaries, symbol names can be thinner than in a prepared `.i64`; if `main` or an expected name is missing, use `database show --json` for `start_ea` / `entry_ea` and `function list --json` for candidate function addresses.
-For broad symbol discovery, prefer IDA-side filtering with `function list "name1|name2" --regex -i` over piping an unfiltered function list through shell tools. Add `--out <path>` when the filtered result may still be large.
+For broad symbol discovery, prefer IDA-side filtering with `function list "name1|name2" --regex -i` over piping an unfiltered function list through shell tools. Add `--demangle` when the filter should match demangled display names. Add `--out <path>` when the filtered result may still be large.
 If decompile output looks stale after nearby mutations or reanalysis, rerun `decompile` with `--f5` or `--no-cache` to force a fresh Hex-Rays pass. `--f5` is an alias for `--no-cache`.
 Function-taking commands can also resolve a unique demangled C++ function name directly. If a short demangled name is overloaded, switch to a mangled name, fuller signature, or address.
-`function metadata` and JSON `function list` rows include `display_name` when a demangled symbol name is available. JSON `function list` rows also include `type` as `real`, `thunk`, or `import`, and text output shows that type column by default. Use `function list --demangle` when text output should render the display name.
+`function metadata` and JSON `function list` rows include `display_name` when a demangled symbol name is available. JSON `function list` rows also include `section`; text output shows the section column by default. Use `function list --demangle` when filtering and text output should use the display name.
 
 ## Mutation workflow
 

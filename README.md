@@ -142,7 +142,7 @@ Prefer `function locals update` when a recovered local needs both a better name 
 
 ### Output
 
-Most read commands default to `--format text`. Use `--format json` (or the `-j` shortcut) or `--format jsonl` when parsing output, and `-o/--out <path>` for large results. When `--out` is set, `stdout` stays empty and the CLI prints a short `stderr` summary with the artifact path; broad discovery commands also include result counts there. Matching is case-sensitive by default, broad list commands use one positional name filter, `--regex` treats that filter as a regular expression, `function list --demangle` renders demangled display names in text output, and `type list` / `type struct list` / `type enum list` require `--out` when no filter is given.
+Most read commands default to `--format text`. Use `--format json` (or the `-j` shortcut) or `--format jsonl` when parsing output, and `-o/--out <path>` for large results. When `--out` is set, `stdout` stays empty and the CLI prints a short `stderr` summary with the artifact path; broad discovery commands also include result counts there. Matching is case-sensitive by default, broad list commands use one positional name filter, `--regex` treats that filter as a regular expression, `function list --demangle` matches and renders demangled display names, and `type list` / `type struct list` / `type enum list` require `--out` when no filter is given.
 
 ### Fresh Decompile
 
@@ -171,7 +171,7 @@ Pass `--f5` (alias for `--no-cache`) when running readback after type or prototy
 
 Function-targeting commands (`decompile`, `disasm`, `ctree`, and the `function` family) accept demangled C++ names when they resolve uniquely, for example `idac decompile "ExampleClass::method_1"`. On non-unique matches, use a mangled name, full signature, or address. Other identifier-taking commands (`name`, `comment`, `bookmark`, `search`, `xref`, vtable lookups) take only addresses or mangled names.
 
-`function metadata` and `function list --json` include a `display_name` field with the demangled symbol name when available. `function list --json` rows also include `type` as `real`, `thunk`, or `import`; text output shows that type column by default. `function list --demangle` changes text output to use the display name while keeping JSON `name` stable.
+`function metadata` and `function list --json` include a `display_name` field with the demangled symbol name when available. `function list --json` rows also include `section`; text output shows that section column by default. `function list --demangle` changes filtering and text output to use the display name while keeping JSON `name` stable.
 
 ### Batch
 

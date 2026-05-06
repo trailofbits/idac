@@ -189,7 +189,7 @@ Maintenance `misc` commands such as `misc reanalyze` are intentionally rejected 
 
 - Use `--json --out <path>` by default for `type class candidates`
 - If you only want functions, vtables, or RTTI from `type class candidates`, add `--kind` instead of post-filtering a broad mixed list
-- Prefer IDA-side filters for broad function discovery: `function list "name1|name2" --regex -i --json --out <path>`
+- Prefer IDA-side filters for broad function discovery: `function list "name1|name2" --regex -i --json --out <path>`, adding `--demangle` when matching display names
 - Avoid piping a full unfiltered `function list --demangle` through shell tools unless you genuinely need the whole list locally
 - For large `function locals list` runs, prefer `--json --out <path>` so the canonical `local_id` data stays readable after reanalysis drift
 - For rename previews on large functions, write the preview to disk with `preview -o ...`, then inspect the JSON with `jq` instead of trusting the inline summary alone

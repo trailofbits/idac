@@ -125,12 +125,12 @@ def test_render_function_list_uses_render_name_when_present() -> None:
                 "name": "__ZN3Foo3barEv",
                 "display_name": "Foo::bar()",
                 "render_name": "Foo::bar()",
-                "type": "thunk",
+                "section": ".text",
             }
         ]
     )
 
-    assert rendered == "0x401000  thunk   Foo::bar()"
+    assert rendered == "0x401000  .text       Foo::bar()"
 
 
 def test_render_function_show_includes_display_name() -> None:

@@ -332,6 +332,29 @@ def test_resolve_function_rejects_ambiguous_short_demangled_name() -> None:
         runtime.resolve_function("Foo::bar")
 
 
+def test_display_function_name_uses_demangled_short_name_flags() -> None:
+    calls: list[tuple[int, int]] = []
+
+    def get_short_name(ea: int, flags: int = 0) -> str:
+        calls.append((ea, flags))
+        return "Foo::bar()" if flags == 0xB else "__ZN3Foo3barEv"
+
+    runtime = _runtime_with_modules(
+        {
+            "ida_funcs": SimpleNamespace(get_func_name=lambda ea: "__ZN3Foo3barEv"),
+            "ida_name": SimpleNamespace(
+                GN_DEMANGLED=0x1,
+                GN_SHORT=0x2,
+                GN_VISIBLE=0x8,
+                get_short_name=get_short_name,
+            ),
+        }
+    )
+
+    assert runtime.display_function_name(0x1000, demangle=True) == "Foo::bar()"
+    assert calls == [(0x1000, 0xB)]
+
+
 def test_vtable_ea_prefers_ida_metadata() -> None:
     runtime = _runtime_with_modules(
         {

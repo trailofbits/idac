@@ -324,12 +324,8 @@ class IdaRuntime:
         name = self.function_name(ea)
         if not demangle:
             return name
-        try:
-            return self.demangle_name(name) or name
-        except Exception as exc:
-            if not isinstance(exc, ImportError) and not is_recoverable_ida_error(exc):
-                raise
-            return name
+        flags = self.ida_name.GN_VISIBLE | self.ida_name.GN_DEMANGLED | self.ida_name.GN_SHORT
+        return self.ida_name.get_short_name(ea, flags) or name
 
     def function_identity(self, func) -> tuple[str, str]:
         ea = int(func.start_ea)
@@ -342,7 +338,7 @@ class IdaRuntime:
         return self.ida_ida.inf_get_min_ea(), self.ida_ida.inf_get_max_ea()
 
     def _segment_name(self, segment) -> str:
-        ida_segment = self.mod("ida_segment")
+        ida_segment = self.ida_segment
         for attr in ("get_visible_segm_name", "get_segm_name"):
             getter = getattr(ida_segment, attr, None)
             if not callable(getter):
