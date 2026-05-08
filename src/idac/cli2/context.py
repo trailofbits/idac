@@ -6,6 +6,7 @@ from typing import Optional
 
 from ..transport.gui import list_discovered_instances as list_gui_discovered_instances
 from ..transport.gui import list_instances as list_gui_instances
+from ..transport.idalib import list_instances as list_idalib_instances
 from .errors import CliUserError
 
 DATABASE_CONTEXT_PREFIX = "db:"
@@ -61,10 +62,13 @@ def resolve_context(parser: argparse.ArgumentParser, args: argparse.Namespace) -
         return ResolvedContext("idalib", None, None, timeout)
 
     if policy == "targets_list":
-        target = None
-        if context and database_path_from_context(str(context)) is None:
-            target = str(context).strip()
-        return ResolvedContext("gui", target, None, timeout)
+        if context:
+            locator = str(context).strip()
+            database = database_path_from_context(locator)
+            if database is not None:
+                return ResolvedContext("idalib", None, database, timeout)
+            return ResolvedContext("gui", locator, None, timeout)
+        return ResolvedContext(None, None, None, timeout)
 
     if context:
         locator = str(context).strip()
@@ -75,26 +79,30 @@ def resolve_context(parser: argparse.ArgumentParser, args: argparse.Namespace) -
 
     discovered_instances = list_gui_discovered_instances(warnings=[])
     warnings: list[str] = []
-    instances = list_gui_instances(timeout=timeout, warnings=warnings)
+    gui_instances = list_gui_instances(timeout=timeout, warnings=warnings)
+    idalib_instances = list_idalib_instances()
     timeout_warnings = [warning for warning in warnings if "timed out" in warning.lower()]
-    if len(instances) == 1 and timeout_warnings and len(discovered_instances) > len(instances):
+    candidate_count = len(gui_instances) + len(idalib_instances)
+    if candidate_count == 1 and timeout_warnings and len(discovered_instances) > len(gui_instances):
         raise CliUserError(
-            "IDA GUI autodiscovery is ambiguous because at least one other GUI session timed out during "
+            "IDA target autodiscovery is ambiguous because at least one GUI session timed out during "
             "discovery; increase --timeout or pass an explicit context with "
             "`-c pid:<pid>`, `-c <module>`, or `-c db:<database.i64>`. "
             f"Details: {timeout_warnings[0]}"
         )
-    if len(instances) == 1:
+    if candidate_count == 1 and gui_instances:
         return ResolvedContext("gui", None, None, timeout)
-    if not instances:
+    if candidate_count == 1:
+        return ResolvedContext("idalib", None, idalib_instances[0].database_path, timeout)
+    if candidate_count == 0:
         if timeout_warnings:
             raise CliUserError(
                 "IDA GUI autodiscovery timed out; increase --timeout or pass an explicit context with "
                 "`-c pid:<pid>`, `-c <module>`, or `-c db:<database.i64>`. "
                 f"Details: {timeout_warnings[0]}"
             )
-        parser.error("no live IDA GUI context found; start IDA or pass -c db:<database.i64>")
-    parser.error("multiple live IDA GUI contexts found; pass -c pid:<pid> or -c <module>")
+        parser.error("no live IDA context found; start IDA, open an idalib database, or pass -c db:<database.i64>")
+    parser.error("multiple live IDA contexts found; pass -c pid:<pid>, -c <module>, or -c db:<database.i64>")
 
 
 def apply_context(args: argparse.Namespace, resolved: ResolvedContext) -> None:

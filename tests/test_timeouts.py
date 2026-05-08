@@ -79,6 +79,7 @@ def test_required_timeout_commands_forward_timeout_to_gui_autodiscovery(monkeypa
 
     monkeypatch.setattr("idac.cli2.context.list_gui_discovered_instances", fake_list_gui_discovered_instances)
     monkeypatch.setattr("idac.cli2.context.list_gui_instances", fake_list_gui_instances)
+    monkeypatch.setattr("idac.cli2.context.list_idalib_instances", lambda: [])
     monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
 
     exit_code = main(["search", "bytes", "74 69 6e 79", "--segment", "__TEXT", "--timeout", "2.5", "--format", "json"])
@@ -98,6 +99,7 @@ def test_required_timeout_commands_report_gui_autodiscovery_timeout(monkeypatch,
     from idac.cli import main
 
     monkeypatch.setattr("idac.cli2.context.list_gui_discovered_instances", lambda warnings=None: [object()])
+    monkeypatch.setattr("idac.cli2.context.list_idalib_instances", lambda: [])
 
     def fake_list_gui_instances(*, timeout=None, warnings=None):
         assert timeout == 2.5
@@ -120,6 +122,7 @@ def test_required_timeout_commands_do_not_auto_select_after_timeout_pruned_disco
     from idac.cli import main
 
     monkeypatch.setattr("idac.cli2.context.list_gui_discovered_instances", lambda warnings=None: [object(), object()])
+    monkeypatch.setattr("idac.cli2.context.list_idalib_instances", lambda: [])
 
     def fake_list_gui_instances(*, timeout=None, warnings=None):
         assert timeout == 2.5
@@ -384,6 +387,59 @@ def test_idalib_daemon_startup_uses_readiness_pipe(monkeypatch, tmp_path: Path) 
     assert "--ready-fd" in seen["cmd"]
 
 
+def test_idalib_daemon_startup_retries_silent_first_import_exit(monkeypatch, tmp_path: Path) -> None:
+    class FakeProc:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+            self.wait_timeouts: list[float] = []
+
+        def wait(self, *, timeout):
+            self.wait_timeouts.append(timeout)
+            return 1
+
+    database_path = str(tmp_path / "tiny")
+    instance = IdaLibInstance(
+        pid=2346,
+        socket_path=tmp_path / "idac-idalib-2346.sock",
+        registry_path=tmp_path / "idac-idalib-2346.json",
+        database_path=database_path,
+        started_at=None,
+        meta={},
+    )
+    procs: list[FakeProc] = []
+    read_attempts = 0
+
+    def fake_popen(cmd, **kwargs):
+        proc = FakeProc(2345 + len(procs))
+        procs.append(proc)
+        return proc
+
+    def fake_read_ready_payload(read_fd, *, timeout):
+        nonlocal read_attempts
+        read_attempts += 1
+        os.close(read_fd)
+        if read_attempts == 1:
+            raise EOFError("idalib daemon exited before reporting readiness")
+        return {"ok": True}
+
+    monkeypatch.setattr(idalib, "ensure_user_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(idalib.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(idalib, "idalib_registry_path", lambda pid: tmp_path / f"idac-idalib-{pid}.json")
+    monkeypatch.setattr(idalib, "_read_ready_payload", fake_read_ready_payload)
+    monkeypatch.setattr(idalib, "_instance_from_registry", lambda path: instance)
+
+    started = idalib._start_daemon_for_database(
+        database_path,
+        startup_timeout=120.0,
+        run_auto_analysis=True,
+    )
+
+    assert started is instance
+    assert read_attempts == 2
+    assert [proc.pid for proc in procs] == [2345, 2346]
+    assert procs[0].wait_timeouts == [0.5]
+
+
 def test_idalib_daemon_startup_timeout_terminates_worker(monkeypatch, tmp_path: Path) -> None:
     class FakeProc:
         pid = 1234
@@ -452,6 +508,9 @@ def test_idalib_daemon_startup_reads_stderr_when_worker_exits_before_readiness(m
 
     class FakeProc:
         pid = 1234
+
+        def wait(self, *, timeout):
+            return 1
 
     database_path = str(tmp_path / "fixture.i64")
     stderr_log = FakeStderrLog()

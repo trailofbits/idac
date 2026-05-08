@@ -44,6 +44,7 @@ class FunctionListEntry:
     display_name: str
     render_name: str
     address: str
+    section: str
     size: int
 
 
@@ -190,8 +191,9 @@ def _function_list(context: OperationContext, request: FunctionListRequest) -> t
             continue
         name = runtime.function_name(ea)
         display_name = runtime.display_function_name(ea, demangle=True)
+        match_name = display_name if request.demangle else name
         if request.pattern and not text_matches(
-            name,
+            match_name,
             pattern=request.pattern,
             glob=request.glob,
             regex=request.regex,
@@ -199,12 +201,14 @@ def _function_list(context: OperationContext, request: FunctionListRequest) -> t
         ):
             continue
         func = runtime.ida_funcs.get_func(ea)
+        segment = runtime.ida_segment.getseg(ea)
         rows.append(
             FunctionListEntry(
                 name=name,
                 display_name=display_name,
                 render_name=display_name if request.demangle else name,
                 address=hex(ea),
+                section="" if segment is None else runtime._segment_name(segment),
                 size=0 if func is None else func.end_ea - func.start_ea,
             )
         )

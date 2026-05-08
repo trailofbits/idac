@@ -18,7 +18,7 @@ from idac.ops.families.classes import op_class_vtable
 from idac.ops.families.type_declare import _apply_type_aliases, _normalize_aliases, _split_declarations
 from idac.ops.runtime import IdaOperationError, IdaRuntime
 from idac.ops.runtime_classes import find_vtable_symbol
-from idac.transport import idalib_common, idalib_server
+from idac.transport import idalib, idalib_common, idalib_server
 from idac.transport.idalib import IdaLibBackend, IdaLibInstance
 from idac.transport.schema import RequestEnvelope
 from idac.version import VERSION
@@ -81,6 +81,20 @@ def test_idalib_backend_reports_malformed_json(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="idalib daemon returned a non-object JSON payload"):
         IdaLibBackend().send(RequestEnvelope(op="database_info", backend="idalib", database="fixture.i64"))
+
+
+def test_idalib_startup_failure_includes_startup_hint_without_detail() -> None:
+    message = idalib._format_startup_failure("/tmp/sample.i64")
+
+    assert "idalib daemon failed to start for `/tmp/sample.i64`" in message
+    assert "license validation" in message
+    assert "Run `idac doctor`" in message
+
+
+def test_idalib_startup_failure_preserves_child_detail() -> None:
+    message = idalib._format_startup_failure("/tmp/sample.i64", "Cannot continue without a valid license")
+
+    assert message.endswith("Cannot continue without a valid license")
 
 
 def test_idalib_server_rejects_empty_operation() -> None:
@@ -316,6 +330,29 @@ def test_resolve_function_rejects_ambiguous_short_demangled_name() -> None:
 
     with pytest.raises(IdaOperationError, match="multiple functions matched demangled name"):
         runtime.resolve_function("Foo::bar")
+
+
+def test_display_function_name_uses_demangled_short_name_flags() -> None:
+    calls: list[tuple[int, int]] = []
+
+    def get_short_name(ea: int, flags: int = 0) -> str:
+        calls.append((ea, flags))
+        return "Foo::bar()" if flags == 0xB else "__ZN3Foo3barEv"
+
+    runtime = _runtime_with_modules(
+        {
+            "ida_funcs": SimpleNamespace(get_func_name=lambda ea: "__ZN3Foo3barEv"),
+            "ida_name": SimpleNamespace(
+                GN_DEMANGLED=0x1,
+                GN_SHORT=0x2,
+                GN_VISIBLE=0x8,
+                get_short_name=get_short_name,
+            ),
+        }
+    )
+
+    assert runtime.display_function_name(0x1000, demangle=True) == "Foo::bar()"
+    assert calls == [(0x1000, 0xB)]
 
 
 def test_vtable_ea_prefers_ida_metadata() -> None:
@@ -565,7 +602,7 @@ def test_doctor_reports_broken_plugin_symlink(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr(doctor.gui, "list_instances", lambda: [])
     monkeypatch.setattr(doctor.gui, "list_targets", lambda timeout=None, warnings=None: [])
 
-    result = doctor.run_doctor(backend="gui", timeout=1.0)
+    result = doctor.run_doctor(scope="gui", timeout=1.0)
 
     plugin_package = next(item for item in result["checks"] if item["name"] == "plugin_package")
     assert plugin_package["status"] == "error"

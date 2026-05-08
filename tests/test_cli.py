@@ -4,6 +4,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -344,7 +345,7 @@ def test_doctor_accepts_root_timeout(capsys, monkeypatch) -> None:
     def fake_run_doctor(**kwargs):
         captured.update(kwargs)
         return {
-            "backend": "all",
+            "backend": ["idalib"],
             "healthy": True,
             "status": "ok",
             "checks": [],
@@ -355,11 +356,11 @@ def test_doctor_accepts_root_timeout(capsys, monkeypatch) -> None:
     exit_code = main(["--timeout", "2.5", "doctor"])
 
     assert exit_code == 0
-    assert captured == {"backend": "all", "timeout": 2.5}
+    assert captured == {"scope": "all", "timeout": 2.5}
     assert "status: ok" in capsys.readouterr().out
 
 
-def test_targets_list_sends_list_targets_request(capsys, monkeypatch) -> None:
+def test_targets_list_sends_contextual_gui_list_targets_request(capsys, monkeypatch) -> None:
     captured = {}
 
     def fake_send_request(request):
@@ -376,7 +377,7 @@ def test_targets_list_sends_list_targets_request(capsys, monkeypatch) -> None:
             ],
         }
 
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
+    monkeypatch.setattr("idac.cli2.commands.targets.send_request", fake_send_request)
 
     exit_code = main(["targets", "list", "-c", "pid:1234"])
 
@@ -384,7 +385,120 @@ def test_targets_list_sends_list_targets_request(capsys, monkeypatch) -> None:
     assert captured["request"].op == "list_targets"
     assert captured["request"].backend == "gui"
     assert captured["request"].target == "pid:1234"
-    assert "pid:1234 (tiny)" in capsys.readouterr().out
+    assert "pid:1234 (gui, tiny)" in capsys.readouterr().out
+
+
+def test_targets_list_aggregates_gui_and_idalib_targets(capsys, monkeypatch) -> None:
+    captured = []
+
+    def fake_send_request(request):
+        captured.append(request)
+        if request.backend == "gui":
+            return {
+                "ok": True,
+                "result": [
+                    {
+                        "selector": "pid:1234",
+                        "module": "tiny-gui",
+                        "instance_pid": 1234,
+                        "active": True,
+                    }
+                ],
+                "warnings": [],
+            }
+        return {
+            "ok": True,
+            "result": [
+                {
+                    "selector": "tiny.i64",
+                    "filename": "/tmp/tiny.i64",
+                    "module": "tiny",
+                    "instance_pid": 5678,
+                    "active": True,
+                }
+            ],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("idac.cli2.commands.targets.send_request", fake_send_request)
+
+    exit_code = main(["targets", "list"])
+
+    assert exit_code == 0
+    assert [request.backend for request in captured] == ["gui", "idalib"]
+    assert captured[0].timeout == 2.0
+    assert captured[1].timeout is None
+    output = capsys.readouterr().out
+    assert "pid:1234 [active] (gui, tiny-gui, pid=1234)" in output
+    assert "tiny.i64 [active] (idalib, tiny, pid=5678)" in output
+
+
+def test_targets_list_db_context_queries_and_filters_idalib(capsys, monkeypatch) -> None:
+    captured = {}
+
+    def fake_send_request(request):
+        captured["request"] = request
+        return {
+            "ok": True,
+            "result": [
+                {
+                    "selector": "tiny.i64",
+                    "filename": "/tmp/tiny.i64",
+                    "module": "tiny",
+                    "instance_pid": 5678,
+                    "active": True,
+                },
+                {
+                    "selector": "other.i64",
+                    "filename": "/tmp/other.i64",
+                    "module": "other",
+                    "instance_pid": 8765,
+                    "active": True,
+                },
+            ],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("idac.cli2.commands.targets.send_request", fake_send_request)
+
+    exit_code = main(["targets", "list", "-c", "db:/tmp/tiny.i64"])
+
+    assert exit_code == 0
+    assert captured["request"].backend == "idalib"
+    assert captured["request"].database == "/tmp/tiny.i64"
+    output = capsys.readouterr().out
+    assert "tiny.i64 [active] (idalib, tiny, pid=5678)" in output
+    assert "other.i64" not in output
+
+
+def test_targets_list_keeps_idalib_rows_when_gui_listing_fails(capsys, monkeypatch) -> None:
+    from idac.transport import BackendError
+
+    def fake_send_request(request):
+        if request.backend == "gui":
+            raise BackendError("GUI bridge timed out")
+        return {
+            "ok": True,
+            "result": [
+                {
+                    "selector": "tiny.i64",
+                    "filename": "/tmp/tiny.i64",
+                    "module": "tiny",
+                    "instance_pid": 5678,
+                    "active": True,
+                }
+            ],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("idac.cli2.commands.targets.send_request", fake_send_request)
+
+    exit_code = main(["targets", "list"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "tiny.i64 [active] (idalib, tiny, pid=5678)" in captured.out
+    assert "warning: failed to list gui: GUI bridge timed out" in captured.err
 
 
 def test_targets_cleanup_uses_cleanup_runner(capsys, monkeypatch) -> None:
@@ -616,6 +730,33 @@ def test_root_context_forwards_to_nested_command(monkeypatch, capsys) -> None:
     assert exit_code == 0
     assert captured["request"].backend == "gui"
     assert captured["request"].target == "pid:84428"
+    assert json.loads(capsys.readouterr().out)["name"] == "main"
+
+
+def test_single_idalib_target_is_auto_selected(monkeypatch, capsys) -> None:
+    captured = {}
+
+    def fake_send_request(request):
+        captured["request"] = request
+        return {
+            "ok": True,
+            "result": {"address": "0x1000", "name": "main", "prototype": "int main(void)"},
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("idac.cli2.context.list_gui_discovered_instances", lambda warnings=None: [])
+    monkeypatch.setattr("idac.cli2.context.list_gui_instances", lambda *, timeout=None, warnings=None: [])
+    monkeypatch.setattr(
+        "idac.cli2.context.list_idalib_instances",
+        lambda: [SimpleNamespace(database_path="/tmp/only-open.i64")],
+    )
+    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
+
+    exit_code = main(["function", "metadata", "main", "--format", "json"])
+
+    assert exit_code == 0
+    assert captured["request"].backend == "idalib"
+    assert captured["request"].database == "/tmp/only-open.i64"
     assert json.loads(capsys.readouterr().out)["name"] == "main"
 
 
@@ -1201,7 +1342,7 @@ def test_doctor_with_out_prints_error_summary(tmp_path: Path, capsys, monkeypatc
     def fake_run_doctor(**kwargs):
         captured.update(kwargs)
         return {
-            "backend": kwargs.get("backend", "all"),
+            "backend": [],
             "healthy": False,
             "status": "error",
             "checks": [
@@ -1222,11 +1363,11 @@ def test_doctor_with_out_prints_error_summary(tmp_path: Path, capsys, monkeypatc
     exit_code = main(["doctor", "--out", str(out_path)])
 
     assert exit_code == 1
-    assert captured["backend"] == "all"
+    assert captured["scope"] == "all"
     assert "database" not in captured
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "doctor failed: backend=all status=error" in captured.err
+    assert "doctor failed: status=error" in captured.err
     assert "gui.bridge_targets: no running GUI bridge instances found" in captured.err
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert payload["healthy"] is False

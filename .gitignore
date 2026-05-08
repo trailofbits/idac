@@ -43,7 +43,6 @@ PLAN.md
 .idac/
 
 # IDA files
-*.id0
-*.id1
+*.id[0-9]
 *.nam
 *.til

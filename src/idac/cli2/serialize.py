@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
 from ..output import DEFAULT_INLINE_CHAR_LIMIT, OutputTooLargeError, resolve_output_format, write_output_result
-from .renderers import TEXT_RENDERERS
+from .renderers import TEXT_RENDERERS, render_doctor
 from .result import CommandResult
 
 SUMMARY_CHAR_LIMIT = 1200
@@ -38,9 +39,22 @@ _DICT_COUNT_FIELDS: dict[str, tuple[str, str]] = {
 }
 
 
-def _render_value(render_op: str, value: Any, fmt: str) -> Any:
+def _terminal_color_enabled(*, fmt: str, out_path: Path | None) -> bool:
+    setting = os.environ.get("IDAC_COLOR", "").strip().lower()
+    if setting in {"0", "false", "never", "no", "off"}:
+        return False
+    if setting in {"1", "true", "always", "yes", "on"}:
+        return fmt == "text" and out_path is None
+    if "NO_COLOR" in os.environ:
+        return False
+    return fmt == "text" and out_path is None and sys.stdout.isatty()
+
+
+def _render_value(render_op: str, value: Any, fmt: str, *, color: bool = False) -> Any:
     if fmt != "text":
         return value
+    if render_op == "doctor":
+        return render_doctor(value, color=color)
     renderer = TEXT_RENDERERS.get(render_op)
     if renderer is None:
         return value
@@ -149,7 +163,12 @@ def emit_result(
     inline_limit: int = DEFAULT_INLINE_CHAR_LIMIT,
 ) -> list[dict[str, Any]]:
     effective_fmt = resolve_output_format(fmt, out_path)
-    rendered_value = _render_value(result.render_op, result.value, effective_fmt)
+    rendered_value = _render_value(
+        result.render_op,
+        result.value,
+        effective_fmt,
+        color=_terminal_color_enabled(fmt=effective_fmt, out_path=out_path),
+    )
     output = write_output_result(
         rendered_value,
         fmt=effective_fmt,

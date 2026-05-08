@@ -241,9 +241,10 @@ def test_text_matches_supports_regex_alternation() -> None:
 
 def test_function_list_honors_limit() -> None:
     class FakeFunc:
-        def __init__(self, ea: int) -> None:
+        def __init__(self, ea: int, flags: int = 0) -> None:
             self.start_ea = ea
             self.end_ea = ea + 0x10
+            self.flags = flags
 
     class FakeIdaUtils:
         @staticmethod
@@ -251,17 +252,30 @@ def test_function_list_honors_limit() -> None:
             return [0x1000, 0x2000, 0x3000]
 
     class FakeIdaFuncs:
+        FUNC_THUNK = 0x8000
+
         @staticmethod
         def get_func(ea: int) -> FakeFunc:
-            return FakeFunc(ea)
+            flags = FakeIdaFuncs.FUNC_THUNK if ea == 0x2000 else 0
+            return FakeFunc(ea, flags=flags)
+
+    class FakeIdaSegment:
+        @staticmethod
+        def getseg(_ea: int):
+            return None
 
     class FakeRuntime(IdaRuntime):
         idautils = FakeIdaUtils()
         ida_funcs = FakeIdaFuncs()
+        ida_segment = FakeIdaSegment()
 
         @staticmethod
         def function_name(ea: int) -> str:
             return {0x1000: "alpha", 0x2000: "beta", 0x3000: "gamma"}[ea]
+
+        @staticmethod
+        def display_function_name(ea: int, *, demangle: bool = False) -> str:
+            return FakeRuntime.function_name(ea)
 
     rows = functions._function_list(
         OperationContext(runtime=FakeRuntime()),
@@ -277,6 +291,163 @@ def test_function_list_honors_limit() -> None:
     )
 
     assert [row.name for row in rows] == ["alpha", "beta"]
+
+
+def test_function_list_reports_section_name() -> None:
+    class FakeFunc:
+        start_ea = 0x401000
+        end_ea = 0x401010
+        flags = 0
+
+    class FakeSegment:
+        start_ea = 0x401000
+
+    class FakeIdaUtils:
+        @staticmethod
+        def Functions():
+            return [0x401000]
+
+    class FakeIdaFuncs:
+        FUNC_THUNK = 0x8000
+
+        @staticmethod
+        def get_func(_ea: int) -> FakeFunc:
+            return FakeFunc()
+
+    class FakeIdaSegment:
+        @staticmethod
+        def getseg(_ea: int) -> FakeSegment:
+            return FakeSegment()
+
+        @staticmethod
+        def get_segm_name(_segment: FakeSegment) -> str:
+            return ".text"
+
+    class FakeRuntime(IdaRuntime):
+        idautils = FakeIdaUtils()
+        ida_funcs = FakeIdaFuncs()
+        ida_segment = FakeIdaSegment()
+
+        @staticmethod
+        def function_name(_ea: int) -> str:
+            return "main"
+
+        @staticmethod
+        def display_function_name(ea: int, *, demangle: bool = False) -> str:
+            return FakeRuntime.function_name(ea)
+
+    rows = functions._function_list(
+        OperationContext(runtime=FakeRuntime()),
+        functions.FunctionListRequest(
+            pattern="",
+            glob=False,
+            regex=False,
+            ignore_case=False,
+            segment=None,
+            limit=None,
+            demangle=False,
+        ),
+    )
+
+    assert [(row.name, row.section) for row in rows] == [("main", ".text")]
+
+
+def test_function_list_filter_uses_raw_name_without_demangle() -> None:
+    class FakeFunc:
+        start_ea = 0x401000
+        end_ea = 0x401010
+
+    class FakeIdaUtils:
+        @staticmethod
+        def Functions():
+            return [0x401000]
+
+    class FakeIdaFuncs:
+        @staticmethod
+        def get_func(_ea: int) -> FakeFunc:
+            return FakeFunc()
+
+    class FakeIdaSegment:
+        @staticmethod
+        def getseg(_ea: int):
+            return None
+
+    class FakeRuntime(IdaRuntime):
+        idautils = FakeIdaUtils()
+        ida_funcs = FakeIdaFuncs()
+        ida_segment = FakeIdaSegment()
+
+        @staticmethod
+        def function_name(_ea: int) -> str:
+            return "__ZN3Foo3barEv"
+
+        @staticmethod
+        def display_function_name(_ea: int, *, demangle: bool = False) -> str:
+            return "Foo::bar()"
+
+    rows = functions._function_list(
+        OperationContext(runtime=FakeRuntime()),
+        functions.FunctionListRequest(
+            pattern="Foo::bar",
+            glob=False,
+            regex=False,
+            ignore_case=False,
+            segment=None,
+            limit=None,
+            demangle=False,
+        ),
+    )
+
+    assert rows == ()
+
+
+def test_function_list_filter_uses_display_name_with_demangle() -> None:
+    class FakeFunc:
+        start_ea = 0x401000
+        end_ea = 0x401010
+
+    class FakeIdaUtils:
+        @staticmethod
+        def Functions():
+            return [0x401000]
+
+    class FakeIdaFuncs:
+        @staticmethod
+        def get_func(_ea: int) -> FakeFunc:
+            return FakeFunc()
+
+    class FakeIdaSegment:
+        @staticmethod
+        def getseg(_ea: int):
+            return None
+
+    class FakeRuntime(IdaRuntime):
+        idautils = FakeIdaUtils()
+        ida_funcs = FakeIdaFuncs()
+        ida_segment = FakeIdaSegment()
+
+        @staticmethod
+        def function_name(_ea: int) -> str:
+            return "__ZN3Foo3barEv"
+
+        @staticmethod
+        def display_function_name(_ea: int, *, demangle: bool = False) -> str:
+            return "Foo::bar()"
+
+    rows = functions._function_list(
+        OperationContext(runtime=FakeRuntime()),
+        functions.FunctionListRequest(
+            pattern="Foo::bar",
+            glob=False,
+            regex=False,
+            ignore_case=False,
+            segment=None,
+            limit=None,
+            demangle=True,
+        ),
+    )
+
+    assert [(row.name, row.render_name) for row in rows] == [("__ZN3Foo3barEv", "Foo::bar()")]
 
 
 def test_database_info_reports_start_ea_separately_from_first_entry() -> None:

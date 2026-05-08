@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 from idac import doctor
@@ -66,10 +67,11 @@ def test_doctor_reports_gui_install_and_running_instances(monkeypatch, tmp_path:
         ],
     )
 
-    result = doctor.run_doctor(backend="gui", timeout=1.0)
+    result = doctor.run_doctor(scope="gui", timeout=1.0)
 
     assert result["healthy"] is True
     assert result["status"] == "ok"
+    assert result["backend"] == ["gui"]
     assert any(item["name"] == "bridge_targets" and item["status"] == "ok" for item in result["checks"])
 
 
@@ -124,7 +126,7 @@ def test_doctor_warns_for_runtime_package_drift_when_bridge_is_live(monkeypatch,
         ],
     )
 
-    result = doctor.run_doctor(backend="gui", timeout=1.0)
+    result = doctor.run_doctor(scope="gui", timeout=1.0)
 
     assert result["healthy"] is True
     assert result["status"] == "warn"
@@ -163,12 +165,60 @@ def test_doctor_accepts_copy_install_layout(monkeypatch, tmp_path: Path) -> None
     monkeypatch.setattr(doctor.gui, "list_instances", lambda: [])
     monkeypatch.setattr(doctor.gui, "list_targets", lambda timeout=None, warnings=None: [])
 
-    result = doctor.run_doctor(backend="gui", timeout=1.0)
+    result = doctor.run_doctor(scope="gui", timeout=1.0)
 
     statuses = {(item["name"], item["status"]) for item in result["checks"]}
     assert ("plugin_package", "ok") in statuses
     assert ("plugin_bootstrap", "ok") in statuses
     assert ("plugin_runtime_package", "ok") in statuses
+
+
+def test_doctor_all_treats_missing_gui_install_as_headless_warning(monkeypatch, tmp_path: Path) -> None:
+    source_dir = tmp_path / "plugin-src"
+    source_dir.mkdir()
+    bootstrap_source = tmp_path / "idac_bridge_plugin.py"
+    bootstrap_source.write_text("# bootstrap\n", encoding="utf-8")
+    runtime_package_source = tmp_path / "idac-src"
+    runtime_package_source.mkdir()
+    (runtime_package_source / "__init__.py").write_text("# idac\n", encoding="utf-8")
+
+    install_dir = tmp_path / "plugins" / "idac_bridge"
+    install_bootstrap = tmp_path / "plugins" / "idac_bridge_plugin.py"
+    install_runtime_package = tmp_path / "plugins" / "idac"
+
+    monkeypatch.setattr(doctor, "plugin_source_dir", lambda: source_dir)
+    monkeypatch.setattr(doctor, "plugin_bootstrap_source_path", lambda: bootstrap_source)
+    monkeypatch.setattr(doctor, "plugin_runtime_package_source_dir", lambda: runtime_package_source)
+    monkeypatch.setattr(doctor, "plugin_install_dir", lambda: install_dir)
+    monkeypatch.setattr(doctor, "plugin_bootstrap_install_path", lambda: install_bootstrap)
+    monkeypatch.setattr(doctor, "plugin_runtime_package_install_dir", lambda: install_runtime_package)
+    monkeypatch.setattr(doctor, "user_runtime_dir", lambda: tmp_path / "runtime")
+    monkeypatch.setattr(doctor, "bridge_registry_paths", lambda: [])
+    monkeypatch.setattr(doctor.gui, "list_instances", lambda: [])
+    monkeypatch.setattr(doctor.gui, "list_targets", lambda timeout=None, warnings=None: [])
+    monkeypatch.setattr(
+        doctor,
+        "_doctor_idalib",
+        lambda database: [
+            doctor._check("ok", "idalib", "install_dirs", "found at least one usable IDA install directory"),
+            doctor._check("ok", "idalib", "license", "IDA license check passed"),
+            doctor._check("ok", "idalib", "idapro_import", "idapro imported successfully"),
+        ],
+    )
+
+    result = doctor.run_doctor(scope="all", timeout=1.0)
+
+    assert result["healthy"] is True
+    assert result["status"] == "warn"
+    assert result["backend"] == ["idalib"]
+    gui_install_checks = [
+        item
+        for item in result["checks"]
+        if item["component"] == "gui"
+        and item["name"] in {"plugin_package", "plugin_bootstrap", "plugin_runtime_package"}
+    ]
+    assert {item["status"] for item in gui_install_checks} == {"warn"}
+    assert all("optional for headless idalib use" in item["summary"] for item in gui_install_checks)
 
 
 def test_doctor_warns_after_purging_refused_bridge_registry(monkeypatch, tmp_path: Path) -> None:
@@ -220,7 +270,7 @@ def test_doctor_warns_after_purging_refused_bridge_registry(monkeypatch, tmp_pat
         lambda *args, **kwargs: (_ for _ in ()).throw(doctor.gui.StaleBridgeInstanceError("refused bridge socket")),
     )
 
-    result = doctor.run_doctor(backend="gui", timeout=1.0)
+    result = doctor.run_doctor(scope="gui", timeout=1.0)
 
     assert result["healthy"] is True
     assert result["status"] == "warn"
@@ -262,13 +312,43 @@ def test_doctor_reports_missing_idalib_install(monkeypatch) -> None:
 
     monkeypatch.setattr(doctor, "_bootstrap_idapro", fail_bootstrap)
 
-    result = doctor.run_doctor(backend="idalib")
+    result = doctor.run_doctor(scope="idalib")
 
     assert result["healthy"] is False
     assert result["status"] == "error"
+    assert result["backend"] == []
     names = {item["name"] for item in result["checks"]}
     assert "install_dirs" in names
     assert "idapro_import" in names
+
+
+def test_doctor_reports_invalid_ida_license(monkeypatch, tmp_path: Path) -> None:
+    ida_dir = tmp_path / "IDA"
+    python_dir = ida_dir / "idalib" / "python"
+    python_dir.mkdir(parents=True)
+    idat = ida_dir / "idat"
+    idat.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(doctor, "_candidate_ida_dirs", lambda: [ida_dir])
+    monkeypatch.setattr(doctor, "_bootstrap_idapro", lambda: (_ for _ in ()).throw(RuntimeError("not reached")))
+    monkeypatch.setattr(
+        doctor,
+        "_ida_license_probe",
+        lambda executable: subprocess.CompletedProcess(
+            args=["idat"],
+            returncode=1,
+            stdout="",
+            stderr="Cannot continue without a valid license",
+        ),
+    )
+
+    result = doctor.run_doctor(scope="idalib")
+
+    assert result["healthy"] is False
+    assert result["backend"] == []
+    license_check = next(item for item in result["checks"] if item["name"] == "license")
+    assert license_check["status"] == "error"
+    assert license_check["summary"] == "IDA could not find a valid license"
 
 
 def test_doctor_cleanup_removes_stale_registry_and_orphan_socket(monkeypatch, tmp_path: Path) -> None:

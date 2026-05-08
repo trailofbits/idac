@@ -7,8 +7,9 @@ The command grammar for the `idac` CLI.
 - list commands use one optional positional filter such as `NAME_FILTER` or `TYPE_FILTER`
 - `--regex` enables regular-expression matching
 - matching is case-sensitive by default; `-i` makes it case-insensitive
-- `function list --demangle` renders demangled display names in text output
-- `function metadata` and JSON `function list` rows include `display_name` when available
+- `function list` text output includes the containing section, such as `.plt` or `.text`
+- `function list --demangle` matches and renders demangled display names
+- `function metadata` and JSON `function list` rows include `display_name` when available; JSON `function list` rows also include `section`
 - `segment list` lists database segments
 - setup, maintenance, and utility commands live under `misc`
 
@@ -19,6 +20,7 @@ idac docs
 idac docs workflows
 idac function list
 idac function list --demangle
+idac function list "init|open|close" --demangle --regex -i
 idac function list "sub_08041337"
 idac function list "sub_.*" --regex
 idac function list "sub_08041337" -i
@@ -43,6 +45,7 @@ idac search strings "tiny" --segment "__cstring" --timeout 30
 ```
 
 `xrefs` is a top-level command; there is no `function xrefs` command.
+For broad function discovery, prefer `function list "name1|name2" --regex -i` so IDA filters before rendering. Add `--demangle` when the filter should match demangled display names. Avoid producing a full function list just to pipe it into `rg`; add `--out <path>` if the filtered result is still too large for inline output.
 
 ## Preview
 

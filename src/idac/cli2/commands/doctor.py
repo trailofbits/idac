@@ -11,7 +11,7 @@ from ..result import CommandResult
 
 def _check(args: argparse.Namespace) -> CommandResult:
     result = run_doctor(
-        backend="all",
+        scope="all",
         timeout=getattr(args, "timeout", None),
     )
     healthy = bool(result.get("healthy"))
@@ -24,9 +24,8 @@ def _check(args: argparse.Namespace) -> CommandResult:
 
 
 def _doctor_failure_lines(result: dict[str, Any]) -> list[str]:
-    backend = result.get("backend", "unknown")
     status = result.get("status", "unknown")
-    lines = [f"doctor failed: backend={backend} status={status}"]
+    lines = [f"doctor failed: status={status}"]
     checks = result.get("checks")
     if not isinstance(checks, list):
         return lines

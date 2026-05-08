@@ -39,12 +39,13 @@ Live GUI notes:
 ## Open a binary
 
 ```bash
-idac --timeout 120 database open "/path/to/binary" --json
+idac database open "/path/to/binary" --json
+idac targets list --json
 idac database show -c "db:/path/to/binary" --json
 idac decompile "main" -c "db:/path/to/binary" --f5
 ```
 
-Use a longer `--timeout` for large binaries or first-time autoanalysis. If the target has multiple architectures, provide the intended architecture slice so IDA does not need an interactive loader choice.
+For large binaries or first-time autoanalysis, omit `--timeout` so the import can block indefinitely unless the user asked for a deadline. Do not wrap this import in a shell-level timeout or a tool-call timeout; let the command keep running and poll the session if your tool supports incremental output. `targets list --json` should show a `backend: "idalib"` row for the opened path. If the raw import does not name `main`, decompile `start_ea` / `entry_ea` from `database show --json` or an address from `function list --json`. If the target has multiple architectures, provide the intended architecture slice so IDA does not need an interactive loader choice.
 
 ## Work from an existing database file
 
@@ -188,7 +189,8 @@ Maintenance `misc` commands such as `misc reanalyze` are intentionally rejected 
 
 - Use `--json --out <path>` by default for `type class candidates`
 - If you only want functions, vtables, or RTTI from `type class candidates`, add `--kind` instead of post-filtering a broad mixed list
-- Use `--json --out <path>` by default for broad `function list [NAME_FILTER]` runs
+- Prefer IDA-side filters for broad function discovery: `function list "name1|name2" --regex -i --json --out <path>`, adding `--demangle` when matching display names
+- Avoid piping a full unfiltered `function list --demangle` through shell tools unless you genuinely need the whole list locally
 - For large `function locals list` runs, prefer `--json --out <path>` so the canonical `local_id` data stays readable after reanalysis drift
 - For rename previews on large functions, write the preview to disk with `preview -o ...`, then inspect the JSON with `jq` instead of trusting the inline summary alone
 - The equivalent family reads are `function list [NAME_FILTER]`, `type list [TYPE_FILTER]`, and `type class candidates [CANDIDATE_FILTER]` with optional `--regex` and `-i`

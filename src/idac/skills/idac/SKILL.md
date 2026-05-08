@@ -68,10 +68,11 @@ What is the task?
 1. Choose the context:
 
 - Omit `-c/--context` when exactly one live IDA GUI session is open.
-- You can place `-c/--context` and `--timeout` either before the subcommand or on the command itself. If both are present, the command-local value wins.
+- You can place `-c/--context` and `--timeout` either before the subcommand or on the command itself. If both are present, the command-local value wins. Omit `--timeout` to wait indefinitely.
 - Use `-c pid:<pid>` or `-c <module>` to select one live GUI session explicitly.
 - Use `-c "db:/path/to/file.i64"` or `-c "db:/path/to/file.idb"` for headless access to an existing database file.
-- For a new binary, first run `idac --timeout 120 database open /path/to/binary --json`; then use `-c "db:/path/to/binary"` for read commands.
+- For a new binary, first run `idac database open /path/to/binary --json`; then use `-c "db:/path/to/binary"` for read commands. For massive binaries or first-time autoanalysis, prefer the indefinite default unless the user asked for a deadline. Do not wrap this import in a shell-level timeout or a tool-call timeout; let the command keep running and poll the session if your tool supports incremental output.
+- After opening a binary or database headlessly, `idac targets list --json` should show a row with `backend: "idalib"`. Use the `db:/path` context for commands; do not treat a missing GUI row as a missing headless target.
 
 2. Choose the target:
 
@@ -84,6 +85,7 @@ What is the task?
 ```bash
 idac function list --json
 idac function list --demangle
+idac function list "init|open|close" --demangle --regex -i
 idac segment list
 idac decompile "sub_08041337"
 idac decompile "ExampleClass::method_1"
@@ -102,7 +104,8 @@ idac type list "example"
 idac type class candidates "ExampleClass" --json --out "/tmp/class_candidates.json"
 idac function prototype show "sub_08041337"
 idac misc reanalyze "sub_08041337"
-idac --timeout 120 database open "/path/to/binary" --json
+idac database open "/path/to/binary" --json
+idac targets list --json
 idac misc skill install
 ```
 
@@ -112,12 +115,14 @@ Run `idac docs class-recovery` when the task is C++ class recovery or vtable cle
 Run `idac docs ida-cpp-type-details` before writing or importing C++ class declarations, vtable types, or multiple-inheritance layouts that must match IDA's parser expectations.
 Run `idac docs templates` when you need a reusable starting point for a prototype batch, local-rename batch, checkpoint note, or locals-JSON `jq` filter.
 
-For strings, always pass both `--timeout` and `--segment`. Default to a two-step flow: run `search strings --scan --segment ...` on the relevant segment first, then use `search strings --segment ...` to read back defined-string results after the interesting region or token is known.
+For strings, always pass both `--timeout` and `--segment`; unlike `database open`, string/byte searches require a finite timeout. Default to a two-step flow: run `search strings --scan --segment ...` on the relevant segment first, then use `search strings --segment ...` to read back defined-string results after the interesting region or token is known.
 For dyld shared caches, do not use defined-string listing. Use `search strings --scan --segment ... --start ... --end ... --timeout 30` with a range no larger than 16 MiB.
 In binary-only analysis mode, bias toward strings, RTTI, vtables, demangled symbols, local types, and call behavior rather than any external lookup.
+For freshly imported binaries, symbol names can be thinner than in a prepared `.i64`; if `main` or an expected name is missing, use `database show --json` for `start_ea` / `entry_ea` and `function list --json` for candidate function addresses.
+For broad symbol discovery, prefer IDA-side filtering with `function list "name1|name2" --regex -i` over piping an unfiltered function list through shell tools. Add `--demangle` when the filter should match demangled display names. Add `--out <path>` when the filtered result may still be large.
 If decompile output looks stale after nearby mutations or reanalysis, rerun `decompile` with `--f5` or `--no-cache` to force a fresh Hex-Rays pass. `--f5` is an alias for `--no-cache`.
 Function-taking commands can also resolve a unique demangled C++ function name directly. If a short demangled name is overloaded, switch to a mangled name, fuller signature, or address.
-`function metadata` and JSON `function list` rows include `display_name` when a demangled symbol name is available. Use `function list --demangle` when text output should render that display name.
+`function metadata` and JSON `function list` rows include `display_name` when a demangled symbol name is available. JSON `function list` rows also include `section`; text output shows the section column by default. Use `function list --demangle` when filtering and text output should use the display name.
 
 ## Mutation workflow
 

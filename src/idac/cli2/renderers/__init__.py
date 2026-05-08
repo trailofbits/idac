@@ -73,10 +73,13 @@ def _function_header(value: dict[str, Any], *, key: str = "function") -> str:
 def render_target_list(value: Any) -> str:
     def render_row(item: Any) -> str:
         selector = _get_first_present(item, "selector", "target_id")
+        backend = item.get("backend")
         module = item.get("module")
         pid = item.get("instance_pid")
         suffix = " [active]" if item.get("active") else ""
         details: list[str] = []
+        if backend:
+            details.append(str(backend))
         if module:
             details.append(str(module))
         if pid not in (None, ""):
@@ -121,13 +124,48 @@ def render_segment_list(value: Any) -> str:
     return _render_list_rows(value, render_row)
 
 
-def render_doctor(value: Any) -> str:
+_ANSI_RESET = "\033[0m"
+_ANSI_BOLD = "\033[1m"
+_STATUS_COLORS = {
+    "ok": "\033[32m",
+    "warn": "\033[33m",
+    "error": "\033[31m",
+}
+_BOOL_COLORS = {
+    True: "\033[32m",
+    False: "\033[31m",
+}
+
+
+def _ansi(text: Any, code: str, *, color: bool) -> str:
+    rendered = str(text)
+    if not color:
+        return rendered
+    return f"{code}{rendered}{_ANSI_RESET}"
+
+
+def _status_text(status: Any, *, color: bool) -> str:
+    text = str(status)
+    return _ansi(text, _STATUS_COLORS.get(text, _ANSI_BOLD), color=color)
+
+
+def _bool_text(value: Any, *, color: bool) -> str:
+    truthy = bool(value)
+    return _ansi(str(truthy), _BOOL_COLORS[truthy], color=color)
+
+
+def render_doctor(value: Any, *, color: bool = False) -> str:
     if not isinstance(value, dict):
         return _fallback(value)
+    status = value.get("status", "unknown")
+    healthy = value.get("healthy", False)
+    backend = value.get("backend")
+    if not isinstance(backend, list):
+        backend = []
     lines: list[str] = [
-        f"status: {value.get('status', 'unknown')}",
-        f"healthy: {value.get('healthy', False)}",
-        f"backend: {value.get('backend', 'unknown')}",
+        f"status: {_status_text(status, color=color)}",
+        f"healthy: {_bool_text(healthy, color=color)}",
+        f"backend: {_join_inline(backend)}",
     ]
     checks = value.get("checks")
     if not isinstance(checks, list) or not checks:
@@ -142,7 +180,7 @@ def render_doctor(value: Any) -> str:
         name = item.get("name", "check")
         status = item.get("status", "unknown")
         summary = item.get("summary", "")
-        lines.append(f"- [{status}] {component}.{name}: {summary}".rstrip())
+        lines.append(f"- [{_status_text(status, color=color)}] {component}.{name}: {summary}".rstrip())
     return "\n".join(lines)
 
 
@@ -166,7 +204,11 @@ def render_targets_cleanup(value: Any) -> str:
 def render_function_list(value: Any) -> str:
     return _render_list_rows(
         value,
-        lambda item: f"{item.get('address', '<unknown>')}  {item.get('render_name') or item.get('name', '<unknown>')}",
+        lambda item: (
+            f"{item.get('address', '<unknown>')}  "
+            f"{item.get('section') or item.get('segment') or '<unknown>':<10}  "
+            f"{item.get('render_name') or item.get('name', '<unknown>')}"
+        ),
     )
 
 
