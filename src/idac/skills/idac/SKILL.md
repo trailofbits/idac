@@ -19,6 +19,7 @@ Use `py exec` as the escape hatch for one-off analysis, not the default path for
 - Stop a rename batch on the first miss. Reread locals, recalibrate selectors, and only then continue.
 - Declare support types before dependent prototypes.
 - Prefer minimal `struct` declarations first, then grow them from observed offsets and access patterns. Use blob padding for unknown regions instead of guessed scalar fields.
+- If observed field offsets prove a compiler-packed layout, declare the struct or union with `__attribute__((packed))`; do not use packed as a shortcut for unknown gaps.
 
 For bundled agent guidance, workflows, and IDA-specific reference material, run `idac docs`.
 Use `idac docs TOPIC` for focused readback, for example `idac docs cli`, `idac docs workflows`, `idac docs class-recovery`, or `idac docs ida-cpp-type-details`.
