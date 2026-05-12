@@ -119,7 +119,7 @@ idac decompile "ExampleDerived__method_1"
 When you need pseudocode for a whole family, prefer bulk decompile over many one-off `decompile` calls.
 - Use `decompilemany "<function-filter>" --out-dir ...` for name-filtered discovery.
 - For multiple explicit functions, write one function name or address per line and use `decompilemany --functions-file ... --out-dir ...`.
-The command writes one `.c` artifact per function plus `manifest.json`. Add `--disasm` or `--ctree` when the same selected functions also need disassembly or Hex-Rays tree artifacts. Treat `manifest.json` as the source of truth for full function names and exact artifact paths when long names need shortened filenames.
+The command writes one `.c` artifact per function plus `manifest.json`. Add `--disasm` or `--ctree` when the same selected functions also need disassembly or Hex-Rays tree artifacts. Treat `manifest.json` as the source of truth for full function names, exact addresses, and artifact paths when long names need shortened filenames. Use `.functions[].address` as the stable exact lookup key.
 For symbol-rich families, one early discovery capture can be worthwhile before mutations so you can grep every constructor, destructor, parser, and helper locally.
 After type import and reanalysis, rerun a narrower verification capture only if the broad artifact is still useful.
 During type or prototype recovery, prefer `decompile --f5` and `decompilemany --f5` so discovery and verification artifacts reflect the latest imported types and prototype changes.

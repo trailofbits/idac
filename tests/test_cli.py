@@ -1399,9 +1399,11 @@ def test_decompilemany_writes_optional_disasm_and_ctree_artifacts(tmp_path: Path
     capsys.readouterr()
     manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
     entry = manifest["functions"][0]
+    assert entry["address"] == "0x1000"
     assert entry["artifacts"]["decompile"].endswith(".c")
     assert entry["artifacts"]["disasm"].endswith(".asm")
     assert entry["artifacts"]["ctree"].endswith(".ctree")
+    assert Path(entry["artifacts"]["decompile"]).stem.endswith("_0x1000")
     assert Path(entry["artifacts"]["decompile"]).read_text(encoding="utf-8").startswith("int main")
     assert Path(entry["artifacts"]["disasm"]).read_text(encoding="utf-8") == "disasm for main\n"
     assert Path(entry["artifacts"]["ctree"]).read_text(encoding="utf-8") == "ctree for main\n"
@@ -1444,10 +1446,12 @@ def test_decompilemany_long_artifact_stems_keep_suffix_and_stable_digest(tmp_pat
     first_entry = manifests[0]["functions"][0]
     second_entry = manifests[1]["functions"][0]
     stem = first_entry["artifact_stem"]
+    assert first_entry["address"] == "0x1000"
     assert first_entry["filename_truncated"] is True
     assert stem == second_entry["artifact_stem"]
     assert stem.startswith("VeryLongTemplateName_")
     assert "ImportantTail" in stem
+    assert stem.endswith("_0x1000")
     assert len(Path(first_entry["artifact_path"]).stem) <= 180
 
 
