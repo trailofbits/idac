@@ -35,6 +35,7 @@ Live GUI notes:
 - for parsed-read and `--out` defaults, read [cli.md](cli.md)
 - when you want cross-references, use the top-level `xrefs` command rather than looking for a `function xrefs` subcommand
 - for a single large decompile, use `-o/--out` on `decompile`; reserve `--out-file` and `--out-dir` for `decompilemany`
+- run one `idac` command at a time per GUI target; the bridge serializes requests internally, and background parallel commands can fill the queue or make mutation ordering unclear
 
 ## Open a binary
 
@@ -170,6 +171,7 @@ Batch files should:
 - prefer `--decl-file` for long type or prototype text
 - always pass `--out` to `batch` so the full step log is captured in a stable artifact
 - keep related `--decl-file`, `--file`, and per-line `--out` paths next to the batch file; relative child paths are resolved from the batch file directory
+- prefer one ordered `batch` file over multiple background `idac` processes for mutation passes
 
 ```text
 # recovery.idac

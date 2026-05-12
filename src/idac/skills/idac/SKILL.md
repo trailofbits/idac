@@ -11,6 +11,7 @@ Use `py exec` as the escape hatch for one-off analysis, not the default path for
 ## Critical defaults
 
 - Work from the binary first. Do not search the web or external source trees unless the user explicitly asks for that or the task is specifically about external correlation.
+- Run `idac` commands synchronously for one target. Do not start parallel or background `idac` commands against the same GUI session or database; use `batch`, `decompilemany`, and `--out` artifacts for broad work.
 - During type or prototype recovery, always use `decompile --f5` or `decompilemany --f5`. `--f5` is an alias for `--no-cache`.
 - Before `function prototype set`, run `function prototype show` so the current signature is part of the audit trail and the intended delta is explicit.
 - After type or prototype mutations, run `misc reanalyze` before rename-heavy cleanup, then reread pseudocode or locals instead of assuming propagation.
@@ -132,6 +133,7 @@ Working rules for live GUI and `idalib` work:
 - Preview performs a real mutation under IDA undo. Preview applies the change, captures the result, and undoes it before returning.
   - Preview is always `preview <command...>` and writes JSON or JSONL.
 - For `idalib`, the first `-c <database>` command starts or reuses one per-database idalib process. Commands that target the same `-c <database>` reuse that open database state.
+- Treat commands for the same target as serialized. Wait for each `idac` command to finish before starting the next one; use `batch` when ordering matters or `decompilemany` when the same read should cover many functions.
 - Use `database save` explicitly when you need an on-disk checkpoint.
 - Use `database close` when you need a clean handoff point or want to discard pending in-memory changes with `--discard`.
 

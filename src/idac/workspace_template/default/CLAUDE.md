@@ -20,6 +20,7 @@ This is an idac reverse-engineering workspace.
 ## Conventions
 
 - Use `idac` for all IDA interactions — do not script IDA directly
+- Run one `idac` command at a time for a given target; use `batch` or `decompilemany` instead of background parallel `idac` commands
 - Read `reference/cli.md` before copying command examples from the workspace prompts
 - Refer to `reference/class-recovery.md` when doing class-recovery work
 - Refer to `reference/ida-cpp-type-details.md` when making types for C++ classes or vtables

@@ -714,6 +714,26 @@ def test_root_context_forwards_to_direct_command(monkeypatch, tmp_path: Path) ->
     assert captured["request"].timeout == 7.0
 
 
+def test_busy_backend_error_explains_serialized_requests(monkeypatch, capsys) -> None:
+    def fake_send_request(request):
+        return {
+            "ok": False,
+            "error": "idac-gui dispatcher queue is full (16/16)",
+            "error_kind": "busy",
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
+
+    exit_code = main(["-c", "pid:84428", "function", "metadata", "main"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "queue is full" in captured.err
+    assert "requests for one target are serialized" in captured.err
+    assert "batch/decompilemany" in captured.err
+
+
 def test_root_context_forwards_to_nested_command(monkeypatch, capsys) -> None:
     captured = {}
 
