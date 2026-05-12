@@ -122,3 +122,4 @@ Use `idac docs --list` to list every topic and `idac docs --all --out docs.md` t
 - `decompilemany --out-file` writes combined text
 - `decompilemany --out-dir` writes one file per function plus `manifest.json`
 - `decompilemany --disasm` and `--ctree` require `--out-dir` and add per-function `.asm` and `.ctree` artifacts to the manifest
+- long `decompilemany --out-dir` artifact names are shortened with a stable digest, while `manifest.json` keeps the full function name and exact paths

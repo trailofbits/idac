@@ -167,7 +167,7 @@ printf '%s\n' main sub_401000 0x401234 > funcs.txt
 idac decompilemany --functions-file "funcs.txt" --out-file ".idac/tmp/decompile.c" -c "db:sample.i64"
 ```
 
-With `--out-dir`, pass `--disasm` and/or `--ctree` to capture matching `.asm` and `.ctree` artifacts for each selected function alongside the `.c` decompile artifact. The manifest records all per-function artifact paths.
+With `--out-dir`, pass `--disasm` and/or `--ctree` to capture matching `.asm` and `.ctree` artifacts for each selected function alongside the `.c` decompile artifact. The manifest records full function names and all per-function artifact paths; very long artifact filenames are shortened with a stable digest while preserving useful name prefix and suffix text.
 
 Pass `--f5` (alias for `--no-cache`) when running readback after type or prototype changes so each function reflects the latest state.
 

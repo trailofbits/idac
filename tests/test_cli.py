@@ -1418,6 +1418,39 @@ def test_decompilemany_rejects_optional_artifacts_with_out_file(tmp_path: Path, 
     assert not out_file.exists()
 
 
+def test_decompilemany_long_artifact_stems_keep_suffix_and_stable_digest(tmp_path: Path, capsys, monkeypatch) -> None:
+    name = "VeryLongTemplateName_" + ("MiddleComponent_" * 12) + "ImportantTail"
+    manifests = []
+
+    monkeypatch.setattr(
+        "idac.cli2.commands.top_level._decompilemany_targets",
+        lambda args: [{"identifier": "0x1000", "name": name, "address": "0x1000"}],
+    )
+
+    for index, body in enumerate(("return 0", "return 1")):
+        out_dir = tmp_path / f"out_{index}"
+
+        def fake_single(args, *, identifier: str, body: str = body) -> dict[str, object]:
+            return {"text": f"int demo(void) {{ {body}; }}\n"}
+
+        monkeypatch.setattr("idac.cli2.commands.top_level._run_single_decompile", fake_single)
+
+        exit_code = main(["decompilemany", "demo", "--out-dir", str(out_dir), "-c", "db:/tmp/demo.i64"])
+
+        assert exit_code == 0
+        capsys.readouterr()
+        manifests.append(json.loads((out_dir / "manifest.json").read_text(encoding="utf-8")))
+
+    first_entry = manifests[0]["functions"][0]
+    second_entry = manifests[1]["functions"][0]
+    stem = first_entry["artifact_stem"]
+    assert first_entry["filename_truncated"] is True
+    assert stem == second_entry["artifact_stem"]
+    assert stem.startswith("VeryLongTemplateName_")
+    assert "ImportantTail" in stem
+    assert len(Path(first_entry["artifact_path"]).stem) <= 180
+
+
 def test_doctor_with_out_prints_error_summary(tmp_path: Path, capsys, monkeypatch) -> None:
     out_path = tmp_path / "doctor.json"
 

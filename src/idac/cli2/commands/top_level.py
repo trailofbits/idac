@@ -15,7 +15,7 @@ from ..errors import CliUserError
 from ..result import CommandResult
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
-_MAX_FILENAME_NAME = 50
+_MAX_FILENAME_STEM = 180
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,12 @@ class DecompileManyRequest:
     no_cache: bool
     include_disasm: bool
     include_ctree: bool
+
+
+@dataclass(frozen=True)
+class ArtifactStem:
+    stem: str
+    truncated: bool
 
 
 def _decompilemany_request(args: argparse.Namespace) -> DecompileManyRequest:
@@ -58,13 +64,25 @@ def _safe_address(address: str) -> str:
     return _SAFE_FILENAME_RE.sub("_", address).strip("._-") or "ea"
 
 
-def _stem_for_text(name: str, address: str, text: str) -> str:
+def _identity_digest(*, name: str, address: str, identifier: str) -> str:
+    text = "\0".join((name, address, identifier))
+    return f"{zlib.crc32(text.encode('utf-8')) & 0xFFFFFFFF:08x}"
+
+
+def _stem_for_function(name: str, address: str, identifier: str) -> ArtifactStem:
     safe_name = _safe_filename_name(name)
     safe_address = _safe_address(address)
-    if len(safe_name) <= _MAX_FILENAME_NAME:
-        return f"{safe_name}_{safe_address}"
-    digest = f"{zlib.crc32(text.encode('utf-8')) & 0xFFFFFFFF:08x}"
-    return f"{safe_name[:_MAX_FILENAME_NAME].rstrip('._-')}_{digest}_{safe_address}"
+    full_stem = f"{safe_name}_{safe_address}"
+    if len(full_stem) <= _MAX_FILENAME_STEM:
+        return ArtifactStem(full_stem, False)
+
+    suffix = f"_{_identity_digest(name=name, address=address, identifier=identifier)}_{safe_address}"
+    available = max(24, _MAX_FILENAME_STEM - len(suffix) - 1)
+    head_len = max(12, (available * 2) // 3)
+    tail_len = max(8, available - head_len)
+    head = safe_name[:head_len].rstrip("._-") or safe_name[:head_len]
+    tail = safe_name[-tail_len:].lstrip("._-") or safe_name[-tail_len:]
+    return ArtifactStem(f"{head}_{tail}{suffix}", True)
 
 
 def _decompilemany_targets(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -254,7 +272,8 @@ def run_decompilemany(args: argparse.Namespace) -> CommandResult:
         if out_dir is None:
             combined_sections.append(text)
         else:
-            stem = _stem_for_text(str(item["name"]), str(item["address"]), text)
+            stem_info = _stem_for_function(str(item["name"]), str(item["address"]), identifier)
+            stem = stem_info.stem
             entry_artifacts: dict[str, str] = {}
             artifact_path = out_dir / f"{stem}.c"
             output = write_output_result(text, fmt="text", out_path=artifact_path, stem="decompile")
@@ -263,6 +282,9 @@ def run_decompilemany(args: argparse.Namespace) -> CommandResult:
             artifacts.append(artifact)
             entry_artifacts["decompile"] = str(artifact_path)
             entry["artifact_path"] = str(artifact_path)
+            entry["artifact_stem"] = stem
+            if stem_info.truncated:
+                entry["filename_truncated"] = True
             if disasm_payload is not None:
                 disasm_text = str(disasm_payload["text"])
                 disasm_path = out_dir / f"{stem}.asm"
