@@ -172,6 +172,8 @@ Practical rules:
 - keep the first import minimal: plain `struct`, direct field declarations, and no preprocessor wrappers or comment noise
 - only add vtable-specific forms when there is direct evidence of virtual dispatch on that class, such as a constructor storing a vtable pointer, a recovered runtime vtable symbol, or an already-confirmed `__vftable` member
 - keep helper-compatible names such as `ClassName_vtbl` and `__vftable`
+- use `__attribute__((packed))` when constructor, accessor, serializer, or field-offset evidence proves the compiler packed the layout
+- do not use `packed` to hide uncertainty; keep explicit blob padding for true gaps and reread `type struct show` or `type class show` after import
 - treat `__cppobj` as optional refinement, not a requirement for the first successful import
 - for secondary-base virtual tables, use the IDA-specific `ClassName_XXXX_vtbl` pattern
 - use `--alias old=new` during import when namespace-qualified names need flattening for local-type parsing

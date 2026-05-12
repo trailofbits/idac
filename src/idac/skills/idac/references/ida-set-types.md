@@ -80,6 +80,17 @@ Below is the full list of attributes that can be handled by IDA.
 | `ms_struct` | use microsoft layout for the structure/union       |
 | `format`    | possible formats: printf, scanf, strftime, strfmon |
 
+Use `packed` only when the recovered offsets prove that normal ABI alignment would insert gaps that are not present in the binary. For example:
+
+```
+struct __attribute__((packed)) WireHeader {
+  unsigned char tag;
+  unsigned int length;
+};
+```
+
+If the binary has a real unknown region between known fields, keep explicit padding instead of marking the whole type packed.
+
 ## Data Declaration Keywords
 
 For data declarations, the following custom `__attribute((annotate(X)))` keywords have been added. The control the representation of numbers in the output:

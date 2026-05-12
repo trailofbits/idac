@@ -35,6 +35,7 @@ Live GUI notes:
 - for parsed-read and `--out` defaults, read [cli.md](cli.md)
 - when you want cross-references, use the top-level `xrefs` command rather than looking for a `function xrefs` subcommand
 - for a single large decompile, use `-o/--out` on `decompile`; reserve `--out-file` and `--out-dir` for `decompilemany`
+- run one `idac` command at a time per GUI target; the bridge serializes requests internally, and background parallel commands can fill the queue or make mutation ordering unclear
 
 ## Open a binary
 
@@ -118,7 +119,7 @@ idac decompile "ExampleDerived__method_1"
 When you need pseudocode for a whole family, prefer bulk decompile over many one-off `decompile` calls.
 - Use `decompilemany "<function-filter>" --out-dir ...` for name-filtered discovery.
 - For multiple explicit functions, write one function name or address per line and use `decompilemany --functions-file ... --out-dir ...`.
-The command writes one `.c` artifact per function plus `manifest.json`.
+The command writes one `.c` artifact per function plus `manifest.json`. Add `--disasm` or `--ctree` when the same selected functions also need disassembly or Hex-Rays tree artifacts. Treat `manifest.json` as the source of truth for full function names, exact addresses, and artifact paths when long names need shortened filenames. Use `.functions[].address` as the stable exact lookup key.
 For symbol-rich families, one early discovery capture can be worthwhile before mutations so you can grep every constructor, destructor, parser, and helper locally.
 After type import and reanalysis, rerun a narrower verification capture only if the broad artifact is still useful.
 During type or prototype recovery, prefer `decompile --f5` and `decompilemany --f5` so discovery and verification artifacts reflect the latest imported types and prototype changes.
@@ -170,6 +171,8 @@ Batch files should:
 - prefer `--decl-file` for long type or prototype text
 - always pass `--out` to `batch` so the full step log is captured in a stable artifact
 - keep related `--decl-file`, `--file`, and per-line `--out` paths next to the batch file; relative child paths are resolved from the batch file directory
+- prefer one ordered `batch` file over multiple background `idac` processes for mutation passes
+- include `batch --out` for any persistent mutation; without it, mutating batches are rejected before execution
 
 ```text
 # recovery.idac

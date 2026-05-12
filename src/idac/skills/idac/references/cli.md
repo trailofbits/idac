@@ -36,6 +36,7 @@ idac decompile "sub_08041337"
 idac decompile "sub_08041337" -o "/tmp/sub_08041337.txt"
 idac decompilemany "sub_08041337" --out-file "/tmp/sub_08041337.c"
 idac decompilemany --functions-file "funcs.txt" --out-dir "/tmp/decomp"
+idac decompilemany --functions-file "funcs.txt" --out-dir "/tmp/decomp" --disasm --ctree
 idac disasm "sub_08041337"
 idac ctree "sub_08041337"
 idac xrefs "sub_08041337"
@@ -65,6 +66,7 @@ Read-only commands under `preview` are treated as no-op previews with identical 
 
 Batch accepts one command per line and writes structured JSON or JSONL.
 It allows `preview ...` lines, but commands that are not batch-safe are rejected.
+If a batch contains persistent mutating commands, `batch --out` is required so the ordered result log is preserved before any changes run.
 
 ```bash
 idac batch "recovery.idac" -o "/tmp/recovery.json"
@@ -119,3 +121,5 @@ Use `idac docs --list` to list every topic and `idac docs --all --out docs.md` t
 - for multiple explicit functions, write one function name or address per line and pass `decompilemany --functions-file <path>`
 - `decompilemany --out-file` writes combined text
 - `decompilemany --out-dir` writes one file per function plus `manifest.json`
+- `decompilemany --disasm` and `--ctree` require `--out-dir` and add per-function `.asm` and `.ctree` artifacts to the manifest
+- long `decompilemany --out-dir` artifact names are shortened with a stable digest; use `manifest.json` `.functions[].address` as the stable exact lookup key, and `.functions[].artifact_path` / `.functions[].artifacts` for file paths

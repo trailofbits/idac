@@ -89,6 +89,16 @@ def command_result(
     )
 
 
+def _response_error_message(response: dict[str, Any]) -> str:
+    message = str(response.get("error") or "request failed")
+    if response.get("error_kind") == "busy":
+        message += (
+            "; idac requests for one target are serialized, so wait for the current command to finish "
+            "or use batch/decompilemany instead of running parallel idac commands"
+        )
+    return message
+
+
 def send_op(
     args: argparse.Namespace,
     *,
@@ -112,7 +122,7 @@ def send_op(
         )
     )
     if not response.get("ok"):
-        raise CliUserError(str(response.get("error") or "request failed"))
+        raise CliUserError(_response_error_message(response))
     warnings = [str(item) for item in (response.get("warnings") or []) if str(item)]
     return command_result(render_op or op, response.get("result"), warnings=warnings)
 

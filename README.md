@@ -1,13 +1,15 @@
 # idac
 
-idac is the IDA Pro CLI for the agents (and humans). One Unix socket, no JSON-RPC framing, no sidecar daemon, no babysitting — just `idac decompile sub_08041337` from any shell, any sandbox, any agent loop.
+idac is the IDA Pro CLI for the agents (and humans). One Unix socket, no JSON-RPC framing, no sidecar daemon, no babysitting — just `idac decompile sub_08041337` from any shell or agent
+
+`idac` is in early alpha. It is pretty good but CLI functionality and features are currently being actively developed.
 
 ## Why idac
 
-- **Agent-native by default** — every command emits structured JSON, every mutation supports `preview` for dry-run, and the bundled skill teaches Claude Code and Codex to drive it.
-- **Not an MCP server** — composes with shell, pipes, `xargs`, `jq`, and your agent's existing tool-use loop.
+- **Agent-native by default** — every command can emit structured JSON, every mutation supports `preview` for dry-run, and the bundled skill teaches Claude Code and Codex to drive it.
+- **Not an MCP server** — compose with shell, pipes, `xargs`, `jq`, and your agent's existing tool-use loop.
 - **Built for batches** — recover an entire class hierarchy, retype a hundred locals, or decompile every `Handler_*` in one `idac batch` invocation against a shared context.
-- **Live or headless** — the same commands work against any of your seven open IDA databases or saved database. Switch with one flag, no separate tooling.
+- **Live or headless** — the same commands work against any of your several open IDA databases or saved database. Switch with `-c` flag to specify a pid or saved idb/i64
 
 ## Demo
 
@@ -169,6 +171,8 @@ idac decompilemany --functions-file "funcs.txt" --out-file ".idac/tmp/decompile.
 
 Pass `--f5` (alias for `--no-cache`) when running readback after type or prototype changes so each function reflects the latest state.
 
+With `--out-dir`, pass `--disasm` and/or `--ctree` to capture matching `.asm` and `.ctree` artifacts for each selected function alongside the `.c` decompile artifact. The manifest records each function's `name`, exact `address`, and artifact paths.
+
 Function-targeting commands (`decompile`, `disasm`, `ctree`, and the `function` family) accept demangled C++ names when they resolve uniquely, for example `idac decompile "ExampleClass::method_1"`. On non-unique matches, use a mangled name, full signature, or address. Other identifier-taking commands (`name`, `comment`, `bookmark`, `search`, `xref`, vtable lookups) take only addresses or mangled names.
 
 `function metadata` and `function list --json` include a `display_name` field with the demangled symbol name when available. `function list --json` rows also include `section`; text output shows that section column by default. `function list --demangle` changes filtering and text output to use the display name while keeping JSON `name` stable.
@@ -182,7 +186,7 @@ idac batch "recovery.idac" --out "/tmp/recovery_batch.json"
 idac batch "rename-pass.idac" -c "db:sample.i64" --out "/tmp/rename-pass.jsonl"
 ```
 
-Batch files use one shell-like subcommand per line, omit the leading `idac` (a leading `idac` is also accepted), and inherit `-c/--context` and `--timeout` from `batch`. Relative child paths such as `--decl-file`, `--functions-file`, and per-line `--out` resolve from the batch file directory. Blank lines and `#` comments are ignored.
+Batch files use one shell-like subcommand per line, omit the leading `idac` (a leading `idac` is also accepted), and inherit `-c/--context` and `--timeout` from `batch`. Relative child paths such as `--decl-file`, `--functions-file`, and per-line `--out` resolve from the batch file directory. Blank lines and `#` comments are ignored. If a batch contains persistent mutating commands, `batch --out` is required so the ordered result log is preserved before any changes run.
 
 A prototype-cleanup batch file (`prototype-pass.idac`) might look like:
 
@@ -230,4 +234,4 @@ See [docs/development.md](docs/development.md) for fixture regeneration, live GU
 ## Credits
 
 Inspired by [@banteg's `bn` Binary Ninja CLI tool](https://github.com/banteg/bn).
-Written by [Codex](https://openai.com/codex)/gpt-5.3-codex and gpt-5.4.
+Written by [Codex](https://openai.com/codex)/gpt-5.3-codex/gpt-5.4/gpt-5.5.

@@ -537,6 +537,8 @@ def test_decompilemany_help_mentions_file_and_output_modes(capsys) -> None:
     assert "--out-file" in help_text
     assert "--out-dir" in help_text
     assert "--regex" in help_text
+    assert "--disasm" in help_text
+    assert "--ctree" in help_text
     assert "This is not a list of function names" in normalized_help
     assert "one per line" in normalized_help
     assert "examples:" in help_text
@@ -710,6 +712,26 @@ def test_root_context_forwards_to_direct_command(monkeypatch, tmp_path: Path) ->
     assert captured["request"].backend == "idalib"
     assert captured["request"].database == "/tmp/demo.i64"
     assert captured["request"].timeout == 7.0
+
+
+def test_busy_backend_error_explains_serialized_requests(monkeypatch, capsys) -> None:
+    def fake_send_request(request):
+        return {
+            "ok": False,
+            "error": "idac-gui dispatcher queue is full (16/16)",
+            "error_kind": "busy",
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
+
+    exit_code = main(["-c", "pid:84428", "function", "metadata", "main"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "queue is full" in captured.err
+    assert "requests for one target are serialized" in captured.err
+    assert "batch/decompilemany" in captured.err
 
 
 def test_root_context_forwards_to_nested_command(monkeypatch, capsys) -> None:
@@ -1154,6 +1176,24 @@ def test_batch_preserves_missing_timeout_error_in_structured_output(tmp_path: Pa
     assert payload["results"][0]["stderr"] == "`idac search bytes` requires --timeout"
 
 
+def test_batch_rejects_mutating_commands_without_out_before_execution(tmp_path: Path, capsys, monkeypatch) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("comment set main entry\n", encoding="utf-8")
+
+    def fake_send_request(request):
+        raise AssertionError("mutating batch command should not execute without --out")
+
+    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
+
+    exit_code = main(["batch", str(batch_path), "-c", "db:/tmp/demo.i64"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "mutating batch commands require `--out <path.json|path.jsonl>`" in captured.err
+    assert "line is 1: comment set main entry" in captured.err
+
+
 def test_batch_preserves_argparse_error_in_structured_output(tmp_path: Path, capsys) -> None:
     batch_path = tmp_path / "commands.txt"
     out_path = tmp_path / "batch.json"
@@ -1332,6 +1372,87 @@ def test_decompilemany_out_file_keeps_raw_text_with_json_suffix(tmp_path: Path, 
     assert "\nint second(void)" in content
     with pytest.raises(json.JSONDecodeError):
         json.loads(content)
+
+
+def test_decompilemany_writes_optional_disasm_and_ctree_artifacts(tmp_path: Path, capsys, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+
+    monkeypatch.setattr(
+        "idac.cli2.commands.top_level._decompilemany_targets",
+        lambda args: [{"identifier": "main", "name": "main", "address": "0x1000"}],
+    )
+    monkeypatch.setattr(
+        "idac.cli2.commands.top_level._run_single_decompile",
+        lambda args, *, identifier: {"text": "int main(void) { return 0; }\n"},
+    )
+
+    def fake_text_op(args, *, op: str, identifier: str) -> dict[str, object]:
+        return {"text": f"{op} for {identifier}\n"}
+
+    monkeypatch.setattr("idac.cli2.commands.top_level._run_single_text_op", fake_text_op)
+
+    exit_code = main(
+        ["decompilemany", "main", "--out-dir", str(out_dir), "--disasm", "--ctree", "-c", "db:/tmp/demo.i64"]
+    )
+
+    assert exit_code == 0
+    capsys.readouterr()
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+    entry = manifest["functions"][0]
+    assert entry["address"] == "0x1000"
+    assert entry["artifacts"]["decompile"].endswith(".c")
+    assert entry["artifacts"]["disasm"].endswith(".asm")
+    assert entry["artifacts"]["ctree"].endswith(".ctree")
+    assert Path(entry["artifacts"]["decompile"]).stem.endswith("_0x1000")
+    assert Path(entry["artifacts"]["decompile"]).read_text(encoding="utf-8").startswith("int main")
+    assert Path(entry["artifacts"]["disasm"]).read_text(encoding="utf-8") == "disasm for main\n"
+    assert Path(entry["artifacts"]["ctree"]).read_text(encoding="utf-8") == "ctree for main\n"
+
+
+def test_decompilemany_rejects_optional_artifacts_with_out_file(tmp_path: Path, capsys) -> None:
+    out_file = tmp_path / "combined.c"
+
+    exit_code = main(["decompilemany", "main", "--out-file", str(out_file), "--disasm", "-c", "db:/tmp/demo.i64"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "decompilemany --disasm/--ctree require --out-dir" in captured.err
+    assert not out_file.exists()
+
+
+def test_decompilemany_long_artifact_stems_keep_suffix_and_stable_digest(tmp_path: Path, capsys, monkeypatch) -> None:
+    name = "VeryLongTemplateName_" + ("MiddleComponent_" * 12) + "ImportantTail"
+    manifests = []
+
+    monkeypatch.setattr(
+        "idac.cli2.commands.top_level._decompilemany_targets",
+        lambda args: [{"identifier": "0x1000", "name": name, "address": "0x1000"}],
+    )
+
+    for index, body in enumerate(("return 0", "return 1")):
+        out_dir = tmp_path / f"out_{index}"
+
+        def fake_single(args, *, identifier: str, body: str = body) -> dict[str, object]:
+            return {"text": f"int demo(void) {{ {body}; }}\n"}
+
+        monkeypatch.setattr("idac.cli2.commands.top_level._run_single_decompile", fake_single)
+
+        exit_code = main(["decompilemany", "demo", "--out-dir", str(out_dir), "-c", "db:/tmp/demo.i64"])
+
+        assert exit_code == 0
+        capsys.readouterr()
+        manifests.append(json.loads((out_dir / "manifest.json").read_text(encoding="utf-8")))
+
+    first_entry = manifests[0]["functions"][0]
+    second_entry = manifests[1]["functions"][0]
+    stem = first_entry["artifact_stem"]
+    assert first_entry["address"] == "0x1000"
+    assert first_entry["filename_truncated"] is True
+    assert stem == second_entry["artifact_stem"]
+    assert stem.startswith("VeryLongTemplateName_")
+    assert "ImportantTail" in stem
+    assert stem.endswith("_0x1000")
+    assert len(Path(first_entry["artifact_path"]).stem) <= 180
 
 
 def test_doctor_with_out_prints_error_summary(tmp_path: Path, capsys, monkeypatch) -> None:

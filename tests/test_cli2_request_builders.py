@@ -202,6 +202,8 @@ def test_decompilemany_request_captures_modes(tmp_path: Path) -> None:
         regex=True,
         ignore_case=False,
         no_cache=True,
+        disasm=False,
+        ctree=False,
     )
 
     request = top_level._decompilemany_request(args)
@@ -210,6 +212,8 @@ def test_decompilemany_request_captures_modes(tmp_path: Path) -> None:
     assert request.out_dir == tmp_path / "out"
     assert request.regex is True
     assert request.no_cache is True
+    assert request.include_disasm is False
+    assert request.include_ctree is False
 
 
 def test_decompilemany_request_captures_extra_positionals(tmp_path: Path) -> None:
@@ -221,12 +225,16 @@ def test_decompilemany_request_captures_extra_positionals(tmp_path: Path) -> Non
         regex=False,
         ignore_case=False,
         no_cache=False,
+        disasm=False,
+        ctree=False,
     )
 
     request = top_level._decompilemany_request(args)
 
     assert request.pattern == "main"
     assert request.extra_patterns == ("add", "sub_1000")
+    assert request.include_disasm is False
+    assert request.include_ctree is False
 
 
 def test_python_exec_request_reads_stdin(monkeypatch: pytest.MonkeyPatch) -> None:

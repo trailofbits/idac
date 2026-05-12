@@ -120,6 +120,46 @@ def _captured_cli_message(*parts: str, fallback: str) -> str:
     return message or fallback
 
 
+def _command_lines(batch_path: Path) -> list[tuple[int, str]]:
+    lines: list[tuple[int, str]] = []
+    for line_number, raw_line in enumerate(batch_path.read_text(encoding="utf-8").splitlines(), start=1):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append((line_number, stripped))
+    return lines
+
+
+def _argv_from_batch_line(stripped: str) -> list[str]:
+    argv = shlex.split(stripped, comments=True, posix=True)
+    if argv and argv[0] == "idac":
+        argv = argv[1:]
+    return argv
+
+
+def _reject_mutating_batch_without_out(
+    *,
+    root_parser: argparse.ArgumentParser,
+    command_lines: list[tuple[int, str]],
+    out_path: Path | None,
+) -> None:
+    if out_path is not None:
+        return
+    for line_number, stripped in command_lines:
+        try:
+            argv = _argv_from_batch_line(stripped)
+            if not argv:
+                continue
+            parsed = _parse_batch_args(root_parser, argv)
+        except (BatchParseError, ValueError):
+            continue
+        if bool(vars(parsed).get("_mutating_command", False)):
+            raise CliUserError(
+                "mutating batch commands require `--out <path.json|path.jsonl>` so the ordered "
+                f"result log is preserved before changes run; first mutating line is {line_number}: {stripped}"
+            )
+
+
 def failure_lines(payload: Any) -> list[str]:
     if not isinstance(payload, dict):
         return []
@@ -143,18 +183,15 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
     rows: list[dict[str, Any]] = []
     batch_path = Path(args.batch_file)
     batch_dir = batch_path.parent.resolve(strict=False)
-    for line_number, raw_line in enumerate(batch_path.read_text(encoding="utf-8").splitlines(), start=1):
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
+    command_lines = _command_lines(batch_path)
+    _reject_mutating_batch_without_out(root_parser=root_parser, command_lines=command_lines, out_path=args.out)
+    for line_number, stripped in command_lines:
         started = time.perf_counter()
         try:
             try:
-                argv = shlex.split(stripped, comments=True, posix=True)
+                argv = _argv_from_batch_line(stripped)
             except ValueError as exc:
                 raise BatchParseError(str(exc), exit_code=2) from exc
-            if argv and argv[0] == "idac":
-                argv = argv[1:]
             if not argv:
                 raise CliUserError("empty command")
             parsed = _parse_batch_args(root_parser, argv)
