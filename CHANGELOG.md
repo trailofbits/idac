@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.16.0
+
+This release improves headless `idalib` startup and discovery, expands bulk decompile artifact output, and tightens safety around serialized mutation workflows.
+
+- Added automatic IDA install discovery from the user config and surfaced headless `idalib` targets alongside GUI targets, with clearer health diagnostics for missing licenses, missing installs, and backend startup failures.
+- Made `idalib` worker startup more reliable by using an explicit readiness pipe, which avoids guessing when the worker socket is ready and produces better timeout behavior.
+- Added optional `decompilemany` disassembly and ctree artifact outputs, documented address lookup behavior, and stabilized generated artifact names.
+- Hardened batch execution by requiring explicit output for mutating batch runs and clarifying serialized `idac` usage in the bundled agent/workspace guidance.
+- Improved function listing by classifying entries and refining demangled-name filtering, with updated renderers, docs, and coverage.
+- Refreshed README and bundled skill guidance for binary workflows, packed-struct recovery, and current backend behavior.
+
 ## 0.15.0
 
 This release adds a local docs surface for agent workflows and keeps the bundled workspace reference expectations aligned with the shipped assets.
