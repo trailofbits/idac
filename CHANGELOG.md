@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.1
+
+This patch release fixes the bundled Codex workspace template permissions for routine `idac` development workflows.
+
+- Updated the default workspace template to include the approved `uv` and `git add` command prefixes used by the repo's standard validation and release-prep flows.
+
 ## 0.16.0
 
 This release improves headless `idalib` startup and discovery, expands bulk decompile artifact output, and tightens safety around serialized mutation workflows.
