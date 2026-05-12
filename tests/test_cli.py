@@ -537,6 +537,8 @@ def test_decompilemany_help_mentions_file_and_output_modes(capsys) -> None:
     assert "--out-file" in help_text
     assert "--out-dir" in help_text
     assert "--regex" in help_text
+    assert "--disasm" in help_text
+    assert "--ctree" in help_text
     assert "This is not a list of function names" in normalized_help
     assert "one per line" in normalized_help
     assert "examples:" in help_text
@@ -1332,6 +1334,50 @@ def test_decompilemany_out_file_keeps_raw_text_with_json_suffix(tmp_path: Path, 
     assert "\nint second(void)" in content
     with pytest.raises(json.JSONDecodeError):
         json.loads(content)
+
+
+def test_decompilemany_writes_optional_disasm_and_ctree_artifacts(tmp_path: Path, capsys, monkeypatch) -> None:
+    out_dir = tmp_path / "out"
+
+    monkeypatch.setattr(
+        "idac.cli2.commands.top_level._decompilemany_targets",
+        lambda args: [{"identifier": "main", "name": "main", "address": "0x1000"}],
+    )
+    monkeypatch.setattr(
+        "idac.cli2.commands.top_level._run_single_decompile",
+        lambda args, *, identifier: {"text": "int main(void) { return 0; }\n"},
+    )
+
+    def fake_text_op(args, *, op: str, identifier: str) -> dict[str, object]:
+        return {"text": f"{op} for {identifier}\n"}
+
+    monkeypatch.setattr("idac.cli2.commands.top_level._run_single_text_op", fake_text_op)
+
+    exit_code = main(
+        ["decompilemany", "main", "--out-dir", str(out_dir), "--disasm", "--ctree", "-c", "db:/tmp/demo.i64"]
+    )
+
+    assert exit_code == 0
+    capsys.readouterr()
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+    entry = manifest["functions"][0]
+    assert entry["artifacts"]["decompile"].endswith(".c")
+    assert entry["artifacts"]["disasm"].endswith(".asm")
+    assert entry["artifacts"]["ctree"].endswith(".ctree")
+    assert Path(entry["artifacts"]["decompile"]).read_text(encoding="utf-8").startswith("int main")
+    assert Path(entry["artifacts"]["disasm"]).read_text(encoding="utf-8") == "disasm for main\n"
+    assert Path(entry["artifacts"]["ctree"]).read_text(encoding="utf-8") == "ctree for main\n"
+
+
+def test_decompilemany_rejects_optional_artifacts_with_out_file(tmp_path: Path, capsys) -> None:
+    out_file = tmp_path / "combined.c"
+
+    exit_code = main(["decompilemany", "main", "--out-file", str(out_file), "--disasm", "-c", "db:/tmp/demo.i64"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "decompilemany --disasm/--ctree require --out-dir" in captured.err
+    assert not out_file.exists()
 
 
 def test_doctor_with_out_prints_error_summary(tmp_path: Path, capsys, monkeypatch) -> None:

@@ -167,6 +167,8 @@ printf '%s\n' main sub_401000 0x401234 > funcs.txt
 idac decompilemany --functions-file "funcs.txt" --out-file ".idac/tmp/decompile.c" -c "db:sample.i64"
 ```
 
+With `--out-dir`, pass `--disasm` and/or `--ctree` to capture matching `.asm` and `.ctree` artifacts for each selected function alongside the `.c` decompile artifact. The manifest records all per-function artifact paths.
+
 Pass `--f5` (alias for `--no-cache`) when running readback after type or prototype changes so each function reflects the latest state.
 
 Function-targeting commands (`decompile`, `disasm`, `ctree`, and the `function` family) accept demangled C++ names when they resolve uniquely, for example `idac decompile "ExampleClass::method_1"`. On non-unique matches, use a mangled name, full signature, or address. Other identifier-taking commands (`name`, `comment`, `bookmark`, `search`, `xref`, vtable lookups) take only addresses or mangled names.

@@ -36,6 +36,7 @@ idac decompile "sub_08041337"
 idac decompile "sub_08041337" -o "/tmp/sub_08041337.txt"
 idac decompilemany "sub_08041337" --out-file "/tmp/sub_08041337.c"
 idac decompilemany --functions-file "funcs.txt" --out-dir "/tmp/decomp"
+idac decompilemany --functions-file "funcs.txt" --out-dir "/tmp/decomp" --disasm --ctree
 idac disasm "sub_08041337"
 idac ctree "sub_08041337"
 idac xrefs "sub_08041337"
@@ -119,3 +120,4 @@ Use `idac docs --list` to list every topic and `idac docs --all --out docs.md` t
 - for multiple explicit functions, write one function name or address per line and pass `decompilemany --functions-file <path>`
 - `decompilemany --out-file` writes combined text
 - `decompilemany --out-dir` writes one file per function plus `manifest.json`
+- `decompilemany --disasm` and `--ctree` require `--out-dir` and add per-function `.asm` and `.ctree` artifacts to the manifest

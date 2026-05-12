@@ -28,6 +28,8 @@ class DecompileManyRequest:
     regex: bool
     ignore_case: bool
     no_cache: bool
+    include_disasm: bool
+    include_ctree: bool
 
 
 def _decompilemany_request(args: argparse.Namespace) -> DecompileManyRequest:
@@ -43,6 +45,8 @@ def _decompilemany_request(args: argparse.Namespace) -> DecompileManyRequest:
         regex=args.regex,
         ignore_case=args.ignore_case,
         no_cache=args.no_cache,
+        include_disasm=bool(args.disasm),
+        include_ctree=bool(args.ctree),
     )
 
 
@@ -152,6 +156,25 @@ def _run_single_decompile(
     return value
 
 
+def _run_single_text_op(
+    args: argparse.Namespace,
+    *,
+    op: str,
+    identifier: str,
+) -> dict[str, Any]:
+    result = send_op(
+        args,
+        op=op,
+        params={"identifier": identifier},
+        render_op=op,
+        preview=False,
+    )
+    value = result.value
+    if not isinstance(value, dict) or not isinstance(value.get("text"), str):
+        raise RuntimeError(f"{op} returned an unexpected result shape")
+    return value
+
+
 def run_decompile(args: argparse.Namespace) -> CommandResult:
     return send_op(
         args,
@@ -182,6 +205,8 @@ def run_imports(args: argparse.Namespace) -> CommandResult:
 
 def run_decompilemany(args: argparse.Namespace) -> CommandResult:
     request = _decompilemany_request(args)
+    if request.out_file is not None and (request.include_disasm or request.include_ctree):
+        raise CliUserError("decompilemany --disasm/--ctree require --out-dir")
     targets = _decompilemany_targets(args)
     if not targets:
         raise CliUserError("no functions matched")
@@ -197,8 +222,14 @@ def run_decompilemany(args: argparse.Namespace) -> CommandResult:
         out_dir.mkdir(parents=True, exist_ok=True)
     for item in targets:
         identifier = str(item["identifier"])
+        disasm_payload: dict[str, Any] | None = None
+        ctree_payload: dict[str, Any] | None = None
         try:
             payload = _run_single_decompile(args, identifier=identifier)
+            if request.include_disasm:
+                disasm_payload = _run_single_text_op(args, op="disasm", identifier=identifier)
+            if request.include_ctree:
+                ctree_payload = _run_single_text_op(args, op="ctree", identifier=identifier)
         except (BackendError, CliUserError) as exc:
             failed += 1
             entries.append(
@@ -224,12 +255,33 @@ def run_decompilemany(args: argparse.Namespace) -> CommandResult:
             combined_sections.append(text)
         else:
             stem = _stem_for_text(str(item["name"]), str(item["address"]), text)
+            entry_artifacts: dict[str, str] = {}
             artifact_path = out_dir / f"{stem}.c"
             output = write_output_result(text, fmt="text", out_path=artifact_path, stem="decompile")
             artifact = dict(output.artifact or {})
             artifact.update({"kind": "decompile", "identifier": identifier, "chars": len(text)})
             artifacts.append(artifact)
+            entry_artifacts["decompile"] = str(artifact_path)
             entry["artifact_path"] = str(artifact_path)
+            if disasm_payload is not None:
+                disasm_text = str(disasm_payload["text"])
+                disasm_path = out_dir / f"{stem}.asm"
+                output = write_output_result(disasm_text, fmt="text", out_path=disasm_path, stem="disasm")
+                artifact = dict(output.artifact or {})
+                artifact.update({"kind": "disasm", "identifier": identifier, "chars": len(disasm_text)})
+                artifacts.append(artifact)
+                entry_artifacts["disasm"] = str(disasm_path)
+                entry["disasm_chars"] = len(disasm_text)
+            if ctree_payload is not None:
+                ctree_text = str(ctree_payload["text"])
+                ctree_path = out_dir / f"{stem}.ctree"
+                output = write_output_result(ctree_text, fmt="text", out_path=ctree_path, stem="ctree")
+                artifact = dict(output.artifact or {})
+                artifact.update({"kind": "ctree", "identifier": identifier, "chars": len(ctree_text)})
+                artifacts.append(artifact)
+                entry_artifacts["ctree"] = str(ctree_path)
+                entry["ctree_chars"] = len(ctree_text)
+            entry["artifacts"] = entry_artifacts
         entries.append(entry)
 
     if out_dir is None:
@@ -397,6 +449,16 @@ def register(
         dest="no_cache",
         action="store_true",
         help="Force a fresh Hex-Rays decompilation instead of reusing cached pseudocode",
+    )
+    parser.add_argument(
+        "--disasm",
+        action="store_true",
+        help="With --out-dir, also write one .asm disassembly artifact per selected function",
+    )
+    parser.add_argument(
+        "--ctree",
+        action="store_true",
+        help="With --out-dir, also write one .ctree Hex-Rays ctree artifact per selected function",
     )
     parser.set_defaults(
         run=run_decompilemany,
