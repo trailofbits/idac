@@ -184,7 +184,7 @@ idac batch "recovery.idac" --out "/tmp/recovery_batch.json"
 idac batch "rename-pass.idac" -c "db:sample.i64" --out "/tmp/rename-pass.jsonl"
 ```
 
-Batch files use one shell-like subcommand per line, omit the leading `idac` (a leading `idac` is also accepted), and inherit `-c/--context` and `--timeout` from `batch`. Relative child paths such as `--decl-file`, `--functions-file`, and per-line `--out` resolve from the batch file directory. Blank lines and `#` comments are ignored.
+Batch files use one shell-like subcommand per line, omit the leading `idac` (a leading `idac` is also accepted), and inherit `-c/--context` and `--timeout` from `batch`. Relative child paths such as `--decl-file`, `--functions-file`, and per-line `--out` resolve from the batch file directory. Blank lines and `#` comments are ignored. If a batch contains persistent mutating commands, `batch --out` is required so the ordered result log is preserved before any changes run.
 
 A prototype-cleanup batch file (`prototype-pass.idac`) might look like:
 

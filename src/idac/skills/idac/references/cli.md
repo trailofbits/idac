@@ -66,6 +66,7 @@ Read-only commands under `preview` are treated as no-op previews with identical 
 
 Batch accepts one command per line and writes structured JSON or JSONL.
 It allows `preview ...` lines, but commands that are not batch-safe are rejected.
+If a batch contains persistent mutating commands, `batch --out` is required so the ordered result log is preserved before any changes run.
 
 ```bash
 idac batch "recovery.idac" -o "/tmp/recovery.json"

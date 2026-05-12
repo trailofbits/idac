@@ -172,6 +172,7 @@ Batch files should:
 - always pass `--out` to `batch` so the full step log is captured in a stable artifact
 - keep related `--decl-file`, `--file`, and per-line `--out` paths next to the batch file; relative child paths are resolved from the batch file directory
 - prefer one ordered `batch` file over multiple background `idac` processes for mutation passes
+- include `batch --out` for any persistent mutation; without it, mutating batches are rejected before execution
 
 ```text
 # recovery.idac

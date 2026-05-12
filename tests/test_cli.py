@@ -1176,6 +1176,24 @@ def test_batch_preserves_missing_timeout_error_in_structured_output(tmp_path: Pa
     assert payload["results"][0]["stderr"] == "`idac search bytes` requires --timeout"
 
 
+def test_batch_rejects_mutating_commands_without_out_before_execution(tmp_path: Path, capsys, monkeypatch) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("comment set main entry\n", encoding="utf-8")
+
+    def fake_send_request(request):
+        raise AssertionError("mutating batch command should not execute without --out")
+
+    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
+
+    exit_code = main(["batch", str(batch_path), "-c", "db:/tmp/demo.i64"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "mutating batch commands require `--out <path.json|path.jsonl>`" in captured.err
+    assert "line is 1: comment set main entry" in captured.err
+
+
 def test_batch_preserves_argparse_error_in_structured_output(tmp_path: Path, capsys) -> None:
     batch_path = tmp_path / "commands.txt"
     out_path = tmp_path / "batch.json"
