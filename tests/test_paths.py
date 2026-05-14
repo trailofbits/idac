@@ -11,6 +11,8 @@ from idac.paths import (
     ensure_claude_skills_dir,
     ensure_codex_skills_dir,
     ensure_user_runtime_dir,
+    hcli_config_dir,
+    hcli_configured_install_dir,
     ida_config_path,
     ida_configured_install_dir,
     plugin_bootstrap_install_path,
@@ -42,6 +44,7 @@ def test_read_only_path_getters_do_not_create_directories(monkeypatch, tmp_path:
     assert bridge_registry_paths() == []
     assert ida_config_path() == idausr / "ida-config.json"
     assert ida_configured_install_dir() is None
+    assert hcli_configured_install_dir() is None
     assert plugin_install_dir() == idausr / "plugins" / "idac_bridge"
     assert plugin_bootstrap_install_path() == idausr / "plugins" / "idac_bridge_plugin.py"
     assert plugin_runtime_package_install_dir() == idausr / "plugins" / "idac"
@@ -103,3 +106,66 @@ def test_ida_configured_install_dir_reads_user_config(monkeypatch, tmp_path: Pat
     )
 
     assert ida_configured_install_dir() == install_dir
+
+
+def test_hcli_configured_install_dir_reads_default_instance(monkeypatch, tmp_path: Path) -> None:
+    config_dir = tmp_path / "hcli"
+    install_dir = tmp_path / "IDA Professional 9.2.app"
+    monkeypatch.setattr(paths, "hcli_config_dir", lambda: config_dir)
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "ida.default": "ida-pro-9.2",
+                "ida.instances": {
+                    "ida-pro-9.1": str(tmp_path / "IDA Professional 9.1.app"),
+                    "ida-pro-9.2": str(install_dir),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert hcli_configured_install_dir() == install_dir
+
+
+def test_hcli_config_dir_uses_macos_location_before_xdg(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(paths.sys, "platform", "darwin")
+    monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+
+    assert hcli_config_dir() == tmp_path / "Library" / "Application Support" / "hcli"
+
+
+def test_hcli_config_dir_uses_xdg_config_home_off_macos(monkeypatch, tmp_path: Path) -> None:
+    xdg_config_home = tmp_path / "xdg-config"
+    monkeypatch.setattr(paths.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
+
+    assert hcli_config_dir() == xdg_config_home / "hcli"
+
+
+def test_hcli_config_dir_uses_windows_location_before_xdg(monkeypatch, tmp_path: Path) -> None:
+    local_app_data = tmp_path / "LocalAppData"
+    monkeypatch.setattr(paths.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+
+    assert hcli_config_dir() == local_app_data / "hex-rays" / "hcli"
+
+
+def test_hcli_configured_install_dir_ignores_missing_default(monkeypatch, tmp_path: Path) -> None:
+    config_dir = tmp_path / "hcli"
+    monkeypatch.setattr(paths, "hcli_config_dir", lambda: config_dir)
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "ida.default": "ida-pro-9.3",
+                "ida.instances": {"ida-pro-9.2": str(tmp_path / "IDA Professional 9.2.app")},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert hcli_configured_install_dir() is None
