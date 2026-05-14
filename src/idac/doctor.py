@@ -28,6 +28,7 @@ from .transport.schema import RequestEnvelope
 from .version import VERSION
 
 IDA_LICENSE_PROBE_TIMEOUT_SECONDS = 20.0
+IDA_EULA_REGISTRY_KEYS = ("EULA 90", "EULA 91", "EULA 92", "EULA 93")
 
 
 def _check(status: str, component: str, name: str, summary: str, **details: Any) -> dict[str, Any]:
@@ -399,8 +400,49 @@ def _idalib_import_checks(database: Optional[str]) -> list[dict[str, Any]]:
             candidates=[str(path) for path in candidates],
         )
     )
+    checks.append(_ida_eula_check())
     checks.append(_idalib_hexrays_check(database))
     return checks
+
+
+def _ida_eula_check() -> dict[str, Any]:
+    try:
+        import ida_registry  # type: ignore
+    except Exception as exc:
+        return _check(
+            "error",
+            "idalib",
+            "eula",
+            f"failed to import ida_registry for EULA check: {exc}",
+        )
+
+    values: dict[str, int | None] = {}
+    errors: dict[str, str] = {}
+    for key in IDA_EULA_REGISTRY_KEYS:
+        try:
+            values[key] = int(ida_registry.reg_read_int(key, 0))
+        except Exception as exc:
+            values[key] = None
+            errors[key] = str(exc)
+
+    accepted = [key for key, value in values.items() if value == 1]
+    status = "ok" if accepted else "error"
+    remediation = None
+    if status == "ok":
+        summary = "IDA EULA acceptance was found in the registry"
+    else:
+        remediation = "Run `hcli ida accept-eula`."
+        summary = f"IDA EULA acceptance was not found in the registry. {remediation}"
+    return _check(
+        status,
+        "idalib",
+        "eula",
+        summary,
+        accepted_keys=accepted,
+        values=values,
+        errors=errors,
+        remediation=remediation,
+    )
 
 
 def _idalib_hexrays_probe(database: str) -> bool:
@@ -507,6 +549,7 @@ def _available_backends(checks: list[dict[str, Any]]) -> list[str]:
         idalib_statuses.get("install_dirs") == "ok"
         and idalib_statuses.get("license") == "ok"
         and idalib_statuses.get("idapro_import") == "ok"
+        and idalib_statuses.get("eula") == "ok"
     ):
         available.append("idalib")
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from idac import doctor
 from idac.metadata import (
@@ -203,6 +205,7 @@ def test_doctor_all_treats_missing_gui_install_as_headless_warning(monkeypatch, 
             doctor._check("ok", "idalib", "install_dirs", "found at least one usable IDA install directory"),
             doctor._check("ok", "idalib", "license", "IDA license check passed"),
             doctor._check("ok", "idalib", "idapro_import", "idapro imported successfully"),
+            doctor._check("ok", "idalib", "eula", "IDA EULA acceptance was found in the registry"),
         ],
     )
 
@@ -349,6 +352,37 @@ def test_doctor_reports_invalid_ida_license(monkeypatch, tmp_path: Path) -> None
     license_check = next(item for item in result["checks"] if item["name"] == "license")
     assert license_check["status"] == "error"
     assert license_check["summary"] == "IDA could not find a valid license"
+
+
+def test_doctor_reports_accepted_ida_eula(monkeypatch) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_registry",
+        SimpleNamespace(reg_read_int=lambda key, default=0: 1 if key == "EULA 93" else default),
+    )
+
+    check = doctor._ida_eula_check()
+
+    assert check["status"] == "ok"
+    assert check["name"] == "eula"
+    assert check["details"]["accepted_keys"] == ["EULA 93"]
+
+
+def test_doctor_reports_missing_ida_eula_acceptance(monkeypatch) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "ida_registry",
+        SimpleNamespace(reg_read_int=lambda key, default=0: default),
+    )
+
+    check = doctor._ida_eula_check()
+
+    assert check["status"] == "error"
+    assert check["name"] == "eula"
+    assert check["summary"] == (
+        "IDA EULA acceptance was not found in the registry. Run `hcli ida accept-eula`."
+    )
+    assert check["details"]["remediation"] == "Run `hcli ida accept-eula`."
 
 
 def test_doctor_cleanup_removes_stale_registry_and_orphan_socket(monkeypatch, tmp_path: Path) -> None:
