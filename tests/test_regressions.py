@@ -97,6 +97,36 @@ def test_idalib_startup_failure_preserves_child_detail() -> None:
     assert message.endswith("Cannot continue without a valid license")
 
 
+def test_candidate_ida_dirs_prefers_hcli_before_legacy_config(monkeypatch, tmp_path: Path) -> None:
+    hcli_app = tmp_path / "IDA Professional 9.2.app"
+    hcli_macos = hcli_app / "Contents" / "MacOS"
+    legacy_dir = tmp_path / "IDA Professional 9.1.app" / "Contents" / "MacOS"
+    env_dir = tmp_path / "IDA env"
+    fallback_dir = tmp_path / "IDA fallback"
+
+    monkeypatch.setattr(idalib_common, "hcli_configured_install_dir", lambda: hcli_app)
+    monkeypatch.setattr(idalib_common, "ida_configured_install_dir", lambda: legacy_dir)
+    monkeypatch.setattr(idalib_common, "default_ida_install_dirs", lambda: [fallback_dir])
+    monkeypatch.setenv("IDAC_IDA_INSTALL_DIR", str(env_dir))
+    monkeypatch.delenv("IDADIR", raising=False)
+    monkeypatch.setattr(idalib_common.sys, "platform", "darwin")
+
+    assert idalib_common.candidate_ida_dirs() == [env_dir, hcli_macos, legacy_dir, fallback_dir]
+
+
+def test_candidate_ida_dirs_deduplicates_hcli_and_legacy_config(monkeypatch, tmp_path: Path) -> None:
+    install_dir = tmp_path / "IDA"
+
+    monkeypatch.setattr(idalib_common, "hcli_configured_install_dir", lambda: install_dir)
+    monkeypatch.setattr(idalib_common, "ida_configured_install_dir", lambda: install_dir)
+    monkeypatch.setattr(idalib_common, "default_ida_install_dirs", lambda: [install_dir])
+    monkeypatch.delenv("IDAC_IDA_INSTALL_DIR", raising=False)
+    monkeypatch.delenv("IDADIR", raising=False)
+    monkeypatch.setattr(idalib_common.sys, "platform", "linux")
+
+    assert idalib_common.candidate_ida_dirs() == [install_dir]
+
+
 def test_idalib_server_rejects_empty_operation() -> None:
     with pytest.raises(Exception, match="idalib backend requires an operation name"):
         idalib_server._parse_request({"version": WIRE_PROTOCOL_VERSION, "op": "   ", "params": {}})

@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import os
 import sys
+from itertools import chain
 from pathlib import Path
 from typing import Any, Optional
 
-from idac.paths import ida_configured_install_dir
+from idac.paths import hcli_configured_install_dir, ida_configured_install_dir
 
 IDAPRO_IMPORT_ERRORS = (ImportError, ModuleNotFoundError, OSError, RuntimeError, ValueError)
 
@@ -41,14 +42,24 @@ def default_ida_install_dirs() -> list[Path]:
 
 
 def candidate_ida_dirs() -> list[Path]:
-    """Return deduplicated IDA install candidates, preferring explicit env vars."""
+    """Return deduplicated IDA install candidates, preferring explicit configuration."""
 
     explicit = [
         Path(raw).expanduser() for raw in (os.environ.get("IDAC_IDA_INSTALL_DIR"), os.environ.get("IDADIR")) if raw
     ]
-    configured = ida_configured_install_dir()
-    configured_candidates = [] if configured is None else [configured]
-    return _dedupe_paths([*explicit, *configured_candidates, *default_ida_install_dirs()])
+    configured_candidates = (
+        candidate
+        for read_configured_dir in (hcli_configured_install_dir, ida_configured_install_dir)
+        for candidate in (read_configured_dir(),)
+        if candidate is not None
+    )
+    candidates = []
+    for candidate in chain(explicit, configured_candidates, default_ida_install_dirs()):
+        expanded = candidate.expanduser()
+        if sys.platform == "darwin" and expanded.suffix == ".app":
+            expanded = expanded / "Contents" / "MacOS"
+        candidates.append(expanded)
+    return _dedupe_paths(candidates)
 
 
 def normalize_database_path(path: str) -> str:

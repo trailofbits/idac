@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 from .metadata import (
@@ -80,6 +81,40 @@ def ida_configured_install_dir() -> Path | None:
     if not isinstance(paths, dict):
         return None
     raw_install_dir = paths.get("ida-install-dir")
+    if not isinstance(raw_install_dir, str) or not raw_install_dir.strip():
+        return None
+    return Path(raw_install_dir).expanduser()
+
+
+def hcli_config_dir() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "hcli"
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        if base:
+            return Path(base).expanduser() / "hex-rays" / "hcli"
+        return Path.home() / "AppData" / "Local" / "hex-rays" / "hcli"
+    base = os.environ.get("XDG_CONFIG_HOME")
+    if base:
+        return Path(base).expanduser() / "hcli"
+    return Path.home() / ".config" / "hcli"
+
+
+def hcli_configured_install_dir() -> Path | None:
+    try:
+        config_path = hcli_config_dir() / "config.json"
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    default_name = payload.get("ida.default")
+    if not isinstance(default_name, str) or not default_name.strip():
+        return None
+    instances = payload.get("ida.instances")
+    if not isinstance(instances, dict):
+        return None
+    raw_install_dir = instances.get(default_name)
     if not isinstance(raw_install_dir, str) or not raw_install_dir.strip():
         return None
     return Path(raw_install_dir).expanduser()
