@@ -1,32 +1,104 @@
 # idac
 
-idac is the IDA Pro CLI for the agents (and humans). One Unix socket, no JSON-RPC framing, no sidecar daemon, no babysitting — just `idac decompile sub_08041337` from any shell or agent
+![version](https://img.shields.io/badge/version-0.16.1-blue)
+![python](https://img.shields.io/badge/python-3.9%2B-blue)
+![status](https://img.shields.io/badge/status-alpha-orange)
 
-`idac` is in early alpha. It is pretty good but CLI functionality and features are currently being actively developed.
+The IDA Pro CLI built for agents and humans. One Unix socket — no JSON-RPC framing, no sidecar daemon, no MCP server. Just `idac decompile "sub_08041337"` from any shell or agent.
+
+> `idac` is in early alpha and actively developed. It is already useful day to day, but the CLI surface may still change between releases.
+
+## Contents
+
+- [Why idac](#why-idac)
+- [Demo](#demo)
+- [Quick start](#quick-start)
+- [Requirements](#requirements)
+- [How it works](#how-it-works)
+- [Agent sandbox setup](#agent-sandbox-setup)
+- [Usage](#usage)
+- [Highlights](#highlights)
+- [Skill](#skill)
+- [Development](#development)
+- [Credits](#credits)
 
 ## Why idac
 
-- **Agent-native by default** — every command can emit structured JSON, every mutation supports `preview` for dry-run, and the bundled skill teaches Claude Code and Codex to drive it.
-- **Not an MCP server** — compose with shell, pipes, `xargs`, `jq`, and your agent's existing tool-use loop.
-- **Built for batches** — recover an entire class hierarchy, retype a hundred locals, or decompile every `Handler_*` in one `idac batch` invocation against a shared context.
-- **Live or headless** — the same commands work against any of your several open IDA databases or saved database. Switch with `-c` flag to specify a pid or saved idb/i64
+- **Not an MCP server** — compose with the shell you already have: pipes, `xargs`, `jq`, and your agent's existing tool-use loop. No server to run, no protocol to babysit.
+- **Agent-native by default** — every command can emit structured JSON (`-j`), and a bundled skill teaches Claude Code and Codex to drive `idac` instead of guessing at raw IDAPython.
+- **Safe mutations** — every mutation supports `preview`, which applies the change under IDA's undo, captures the before/after, and rolls it back. Dry-run any rename, retype, or prototype change before committing it.
+- **Built for batches** — recover an entire class hierarchy, retype a hundred locals, or decompile every `Handler_*` in one invocation against a shared context.
+- **Live or headless** — the same commands work against a running IDA GUI session or a saved `.i64`/`.idb`. Switch targets with `-c`; with one GUI open, omit it entirely.
 
 ## Demo
 
+Run this against the fixture committed in this repo:
+
 ```bash
-idac decompilemany "Handler_" --out-dir decomp/ -c "db:sample.i64"
+idac decompilemany "CreateHandler_" --out-dir decomp/ -c "db:fixtures/idb/handler_hierarchy.i64"
 ```
 
-Every `Handler_*` function decompiled into its own `.c` file with a `manifest.json`. Works identically against a live GUI session — drop the `-c` flag and idac auto-targets the only open instance.
+Every matching function is decompiled into its own `.c` file (named `<symbol>_0x<address>`) alongside a `manifest.json` index:
+
+```
+decomp/
+├── CreateHandler_Text_0x100000588.c
+├── CreateHandler_Stream_0x100000608.c
+├── CreateHandler_Pack_0x100000688.c
+└── manifest.json
+```
+
+The `.c` files hold the real Hex-Rays pseudocode:
+
+```c
+Handler *__cdecl CreateHandler_Text()
+{
+  Handler_Text *v1; // [xsp+8h] [xbp-18h]
+
+  v1 = (Handler_Text *)operator new(0x38u);
+  Handler_Text::Handler_Text(v1);
+  return v1;
+}
+```
+
+`manifest.json` records the exact address, symbol, and artifact paths for each function (abridged to one of three entries):
+
+```json
+{
+  "ok": true,
+  "pattern": "CreateHandler_",
+  "out_dir": "decomp",
+  "functions_total": 3,
+  "functions_succeeded": 3,
+  "functions_failed": 0,
+  "functions": [
+    {
+      "identifier": "CreateHandler_Text",
+      "name": "CreateHandler_Text",
+      "address": "0x100000588",
+      "ok": true,
+      "chars": 175,
+      "artifact_path": "decomp/CreateHandler_Text_0x100000588.c",
+      "artifact_stem": "CreateHandler_Text_0x100000588",
+      "artifacts": { "decompile": "decomp/CreateHandler_Text_0x100000588.c" }
+    }
+  ]
+}
+```
+
+The same command works against a live GUI session — drop `-c` and `idac` auto-targets the only open instance.
 
 ## Quick start
 
-Install, then wire up the GUI plugin and agent skill:
+Clone and install the CLI, then wire up the GUI plugin and agent skill:
 
 ```bash
-uv tool install -e .
-idac misc plugin install
-idac misc skill install
+git clone https://github.com/trailofbits/idac.git
+cd idac
+uv tool install .            # installs the `idac` command on your PATH
+idac doctor                  # verify IDA install, license, and bridge
+idac misc plugin install     # GUI bridge plugin
+idac misc skill install      # Claude Code + Codex skill
 ```
 
 Talk to a live GUI session:
@@ -34,54 +106,53 @@ Talk to a live GUI session:
 ```bash
 idac targets list --json
 idac decompile "sub_08041337"
-idac decompile "sub_08041337" --f5
+idac decompile "sub_08041337" --f5        # force a fresh Hex-Rays pass
 idac decompile "sub_08041337" -c "pid:1234"
 ```
 
 Work headless against an existing database:
 
 ```bash
-idac doctor
 idac database show -c "db:sample.i64"
 idac decompile "ExampleClass::method_1" -c "db:sample.i64"
-idac decompile "sub_08041337" --no-cache -c "db:sample.i64"
 ```
 
-If running from the repo without a global install:
-
-```bash
-uv run idac --help
-```
+To run from a checkout without installing globally, use `uv run idac --help`.
 
 ## Requirements
 
-For `idalib`, `idapro` must already be installed. This repo assumes the standard IDA 9.3 macOS layout at `/Applications/IDA Professional 9.3.app/Contents/MacOS`.
+- **Python 3.9+** and [`uv`](https://docs.astral.sh/uv/).
+- **IDA Pro** with the **Hex-Rays decompiler** (required for `decompile`, `ctree`, and class recovery).
+- A valid IDA license. Headless work uses `idalib`, which requires `idapro` to be installed and importable.
+
+`idac` discovers your IDA install from the user config automatically. On macOS it also falls back to the standard IDA 9.3 layout at `/Applications/IDA Professional 9.3.app/Contents/MacOS`. Run `idac doctor` to confirm what was detected.
 
 ## How it works
 
-Most commands can run with no context at all when exactly one live IDA GUI session is open. For explicit selection, use `-c/--context` with either a GUI selector or a database locator such as `db:sample.i64`.
+`idac` has two execution paths, and the same command surface drives both:
 
-**Drive your live IDA session** — idac connects to a running IDA desktop over a Unix socket bridge. Use `idac targets list --json` to discover GUI and open headless targets. If only one GUI is open, most commands can omit `-c` entirely. Use `-c pid:<pid>` or `-c <module>` when multiple GUI sessions are open.
+- **`gui`** connects to a running IDA desktop over a Unix-socket bridge plugin. With exactly one GUI open, most commands need no `-c` at all. Use `-c pid:<pid>` or `-c <module>` to pick one of several open sessions.
+- **`idalib`** opens a `.i64`/`.idb`/binary in a short-lived headless worker. Passing `-c "db:<path>"` starts or reuses a per-database `idalib` process automatically; those rows show `backend: "idalib"` in `targets list --json`.
 
-**Spin up headless databases on demand** — passing `-c "db:<database.i64|idb|binary>"` starts or reuses a headless per-database `idalib` process automatically. Open headless rows show `backend: "idalib"` in `targets list --json`. Use `idac database save -c "db:<database>"` to checkpoint and `idac database close -c "db:<database>"` to tear down.
+Discover everything that's reachable with `idac targets list --json`. Checkpoint headless state with `idac database save -c "db:<path>"` and tear it down with `idac database close -c "db:<path>"`.
+
+Unix-socket access is required for all live GUI operations, read-only and mutating alike. If read-only commands succeed but a mutation fails, troubleshoot the underlying IDA/database error rather than assuming a permission split.
 
 ## Agent sandbox setup
 
-Both backends use Unix sockets. The recommended setup is to scaffold a project-local reversing workspace:
+Scaffold a project-local reversing workspace for sandboxed agents:
 
 ```bash
 idac workspace init reversing-workspace
 ```
 
-That creates workspace-local `.claude/` and `.codex/` config files, agent guidance files, prompt templates, a `reference/` copy of the bundled skill docs, and a git-backed directory layout for reverse-engineering work. The generated sandbox settings are intentionally broad so sandboxed agents can reach the `idac` Unix socket bridge.
+That creates workspace-local `.claude/` and `.codex/` config, agent guidance files, prompt templates, a `reference/` copy of the bundled skill docs, and a git-backed directory layout for RE work. The generated sandbox settings are intentionally broad so sandboxed agents can reach the `idac` Unix socket bridge.
 
-Unix socket access is required for all live GUI operations (read-only and mutating). If read-only commands succeed but a mutation fails, troubleshoot the underlying IDA/database error rather than assuming a socket permission split.
-
-If you prefer manual setup or want to customize the generated files, see the workspace templates under [src/idac/workspace_template/default](src/idac/workspace_template/default).
+To customize the generated files, see the templates under [src/idac/workspace_template/default](src/idac/workspace_template/default).
 
 ## Usage
 
-Use `idac --help` for a specific subcommand or `idac --full-help` for the complete CLI surface.
+Use `idac <command> --help` for one subcommand, `idac --full-help` for the complete CLI surface, and `idac docs` for an index of bundled command, workflow, and IDA reference material (`idac docs cli`, `idac docs workflows`, `idac docs class-recovery`, ...).
 
 ### Command families
 
@@ -99,114 +170,86 @@ Use `idac --help` for a specific subcommand or `idac --full-help` for the comple
 | Workspace | `workspace init` |
 | Maintenance | `misc reanalyze`, `database open/save/close`, `targets cleanup`, `misc plugin`, `misc skill` |
 
-Many models want to fill up their context quickly by running strings so currently `search bytes` and `search strings` require both `--timeout` and `--segment`.
-
-### Preview
-
-Preview uses a wrapper command:
-
-```bash
-idac preview -o "/tmp/preview.json" function prototype set "sub_08041337" --decl "int __fastcall sub_08041337(void *ctx, const unsigned char *buf, unsigned int len)"
-```
-
-### Local Selectors
-
-`function locals update`, `function locals rename`, and `function locals retype` use the same selector model. `rename` takes the replacement name via `--new-name`:
-
-```bash
-idac function locals update "sub_08041337" "v12" --rename "value_maybe" --decl "unsigned int value_maybe;"
-idac function locals rename "sub_08041337" "v12" --new-name "value_maybe"
-idac function locals rename "sub_08041337" "3" --new-name "value_maybe"
-idac function locals rename "sub_08041337" "stack(16)@0x100000460" --new-name "value_maybe"
-idac function locals retype "sub_08041337" "v12" --type "unsigned int"
-idac function locals retype "sub_08041337" "v12" --decl "unsigned int v12;"
-```
-
-Selector forms:
-
-- local name such as `v12`
-- numeric index such as `3`
-- canonical local id such as `stack(16)@0x100000460`
-
-Use `function locals list --json` to read the canonical `local_id` string.
-Prefer `--index` or `--local-id` for longer mutation passes or after prototype/reanalysis changes:
-
-```bash
-idac function locals update "sub_08041337" "value_maybe" --index 3 --decl "unsigned int value_maybe;"
-idac function locals update "sub_08041337" --local-id "stack(16)@0x100000460" --rename "value_maybe"
-idac function locals rename "sub_08041337" --index 3 --new-name "value_maybe"
-idac function locals retype "sub_08041337" --local-id "stack(16)@0x100000460" --decl-file "local_v4.h"
-```
-
-Use `--type` when you only need to spell a simple type such as `unsigned int` or `MyStruct *`.
-Use `--decl` or `--decl-file` when the retype needs a full declaration, for example arrays, function pointers, or a declaration whose exact local spelling matters.
-Prefer `function locals update` when a recovered local needs both a better name and a better type in one pass. Keep `rename` and `retype` for simple one-off edits.
-
 ### Output
 
-Most read commands default to `--format text`. Use `--format json` (or the `-j` shortcut) or `--format jsonl` when parsing output, and `-o/--out <path>` for large results. When `--out` is set, `stdout` stays empty and the CLI prints a short `stderr` summary with the artifact path; broad discovery commands also include result counts there. Matching is case-sensitive by default, broad list commands use one positional name filter, `--regex` treats that filter as a regular expression, `function list --demangle` matches and renders demangled display names, and `type list` / `type struct list` / `type enum list` require `--out` when no filter is given.
+Most read commands default to `--format text`. Use `--format json` (or `-j`) or `--format jsonl` when parsing, and `-o/--out <path>` for large results. With `--out`, `stdout` stays empty and a short `stderr` summary reports the artifact path and result counts. Matching is case-sensitive by default; `--regex` treats the filter as a regular expression and `-i` makes it case-insensitive. `search bytes` and `search strings` require both `--timeout` and `--segment`.
 
-### Fresh Decompile
+## Highlights
 
-If pseudocode looks stale after reanalysis or nearby mutations, rerun decompile with a fresh Hex-Rays pass:
+A few of the commands that make `idac` worth reaching for. See `idac docs cli` and `idac docs workflows` for the full reference.
+
+### Preview a mutation before committing
+
+`preview` is a wrapper that runs the real mutation under IDA undo and rolls it back, returning the before/after so you (or an agent) can verify the change first:
 
 ```bash
-idac decompile "sub_08041337" --no-cache
-idac decompile "sub_08041337" --f5
+idac preview -o "/tmp/preview.json" \
+  function prototype set "sub_08041337" \
+  --decl "int __fastcall sub_08041337(void *ctx, const unsigned char *buf, unsigned int len)"
 ```
 
-`--f5` is an alias for `--no-cache`, named after the usual Hex-Rays refresh shortcut in the UI.
+### Recover C++ class hierarchies
 
-### Decompile Many
-
-`decompilemany` decompiles a set of functions in one pass against a shared context. Select either by name filter or by reading exact identifiers from a file, and choose between one combined output file (`--out-file`) or one `.c` file per function plus a `manifest.json` (`--out-dir`):
+Walk vtables, flattened layouts, and inheritance straight from the database:
 
 ```bash
-idac decompilemany "Handler_" --out-dir ".idac/tmp/decomp" -c "db:sample.i64"
-idac decompilemany "Handler_.*" --regex --out-dir ".idac/tmp/decomp" -c "db:sample.i64"
+idac type class list
+idac type class hierarchy "ExampleClass"
+idac type class show "ExampleDerived"          # flattened object layout
+idac type class vtable "ExampleDerived" --runtime
+```
+
+### Decompile a whole family in one pass
+
+Select by name filter or by reading exact identifiers from a file; emit one combined file or one `.c` per function plus a `manifest.json`:
+
+```bash
+idac decompilemany "Handler_" --out-dir "decomp/" -c "db:sample.i64"
+idac decompilemany "Handler_.*" --regex --out-dir "decomp/" --disasm --ctree
 
 printf '%s\n' main sub_401000 0x401234 > funcs.txt
-idac decompilemany --functions-file "funcs.txt" --out-file ".idac/tmp/decompile.c" -c "db:sample.i64"
+idac decompilemany --functions-file "funcs.txt" --out-file "decompile.c"
 ```
 
-Pass `--f5` (alias for `--no-cache`) when running readback after type or prototype changes so each function reflects the latest state.
+Pass `--f5` after type or prototype changes so each function reflects the latest state. With `--out-dir`, the manifest records each function's `name`, exact `address`, and artifact paths.
 
-With `--out-dir`, pass `--disasm` and/or `--ctree` to capture matching `.asm` and `.ctree` artifacts for each selected function alongside the `.c` decompile artifact. The manifest records each function's `name`, exact `address`, and artifact paths.
+### Run an ordered mutation pass with batch
 
-Function-targeting commands (`decompile`, `disasm`, `ctree`, and the `function` family) accept demangled C++ names when they resolve uniquely, for example `idac decompile "ExampleClass::method_1"`. On non-unique matches, use a mangled name, full signature, or address. Other identifier-taking commands (`name`, `comment`, `bookmark`, `search`, `xref`, vtable lookups) take only addresses or mangled names.
-
-`function metadata` and `function list --json` include a `display_name` field with the demangled symbol name when available. `function list --json` rows also include `section`; text output shows that section column by default. `function list --demangle` changes filtering and text output to use the display name while keeping JSON `name` stable.
-
-### Batch
-
-Run many subcommands against one shared context:
+Run many subcommands against one shared context, leaving behind a stable ordered log. Batch files use one subcommand per line (drop the leading `idac`) and inherit `-c` and `--timeout` from the `batch` call:
 
 ```bash
 idac batch "recovery.idac" --out "/tmp/recovery_batch.json"
-idac batch "rename-pass.idac" -c "db:sample.i64" --out "/tmp/rename-pass.jsonl"
 ```
 
-Batch files use one shell-like subcommand per line, omit the leading `idac` (a leading `idac` is also accepted), and inherit `-c/--context` and `--timeout` from `batch`. Relative child paths such as `--decl-file`, `--functions-file`, and per-line `--out` resolve from the batch file directory. Blank lines and `#` comments are ignored. If a batch contains persistent mutating commands, `batch --out` is required so the ordered result log is preserved before any changes run.
-
-A prototype-cleanup batch file (`prototype-pass.idac`) might look like:
-
-```
-# Run after support types already exist locally.
+```text
+# recovery.idac — run after support types exist locally
+type declare --replace --decl-file "recovered_classes.h"
 function prototype set "0x100000000" --decl "int __fastcall ExampleClass__parseHeader(ExampleClass *__hidden this, const unsigned __int8 *buf, unsigned int len)"
-function prototype set "0x100000100" --decl "void *__fastcall ExampleClass__buildResult(ExampleClass *__hidden this, InputContext *ctx, const ExampleOptions *options)"
-function prototype set "0x100000200" --decl "unsigned int __fastcall ExampleClass__getCount(const ExampleClass *__hidden this)"
-```
-
-A local-rename pass (`rename-pass.idac`) is just a sequence of `function locals rename` lines:
-
-```
 function locals rename "0x100000000" 5 --new-name header_size
 function locals rename "0x100000000" 6 --new-name record_type
-function locals rename "0x100000100" 4 --new-name result_ptr
-function locals rename "0x100000100" 11 --new-name error_code
 ```
 
-Batch reuses the same handler surface as normal execution, accepts `preview ...` lines, and writes JSON or JSONL based on the output filename. Maintenance and setup `misc` commands are intentionally rejected from `batch`.
+Mutating batches require `--out` so the result log is preserved before any change runs. Maintenance/setup `misc` commands are intentionally rejected from `batch`.
+
+### Address locals three ways
+
+`function locals update/rename/retype` share one selector model — local name, numeric index, or canonical `local_id`. Prefer `--index` or `--local-id` for longer passes and after reanalysis, since names drift:
+
+```bash
+idac function locals rename "sub_08041337" "v12" --new-name "value_maybe"
+idac function locals rename "sub_08041337" --index 3 --new-name "value_maybe"
+idac function locals retype "sub_08041337" --local-id "stack(16)@0x100000460" --type "unsigned int"
+```
+
+Read the canonical `local_id` with `idac function locals list --json`. Use `update` when a local needs both a better name and type in one pass.
+
+### Escape hatch: raw IDAPython
+
+When no first-class command fits, drop to IDAPython against the same target:
+
+```bash
+idac py exec --code "result = {'entry': hex(idc.get_inf_attr(idc.INF_START_EA))}"
+```
 
 ## Skill
 
@@ -216,10 +259,7 @@ A bundled skill in [src/idac/skills/idac](src/idac/skills/idac) teaches Claude C
 idac misc skill install
 ```
 
-This installs into both `~/.claude/skills/idac` and `~/.codex/skills/idac`. Both agents auto-discover skills from their `skills/` directories.
-
-Once installed, the skill is loaded automatically when relevant. For starter task prompts (general analysis, class-recovery passes, full reverse-engineering passes), run `idac workspace init <dir>` to scaffold a workspace whose `prompts/` directory contains ready-to-edit templates. Use `idac docs` for an index of bundled command, workflow, and IDA reference material.
-
+This installs into both `~/.claude/skills/idac` and `~/.codex/skills/idac`; both agents auto-discover skills from their `skills/` directories. Once installed, the skill loads automatically when relevant. For starter prompts (general analysis, class-recovery passes, full reverse-engineering passes), run `idac workspace init <dir>` to scaffold a workspace whose `prompts/` directory contains ready-to-edit templates.
 
 ## Development
 
