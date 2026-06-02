@@ -152,9 +152,9 @@ For shell inspection of JSON artifacts, prefer portable tools such as:
 - `type list`, `type class candidates`, and `function list` artifacts are top-level JSON arrays, so inspect them with `.[]`.
 
 ```bash
-jq '.functions_succeeded' /tmp/class_family_decompile/decompile_manifest.json
-jq -r '.functions[] | select(.ok) | [.name, .artifact_path] | @tsv' /tmp/class_family_decompile/decompile_manifest.json
-jq -r '.steps[] | select(.ok == false) | [.line, .command, .error] | @tsv' /tmp/recovery_batch.json
+jq '.functions_succeeded' /tmp/class_family_decompile_discovery/manifest.json
+jq -r '.functions[] | select(.ok) | [.name, .artifact_path] | @tsv' /tmp/class_family_decompile_discovery/manifest.json
+jq -r '.results[] | select(.exit_code != 0) | [.line, .command] | @tsv' /tmp/recovery_batch.json
 jq -r '.[].name' /tmp/class_types.json
 jq -r '.[] | select(.kind == "function_symbol") | .name' /tmp/class_candidates.json
 jq -r '.[] | [.kind, .name] | @tsv' /tmp/class_candidates.json

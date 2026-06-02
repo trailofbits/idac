@@ -1,30 +1,7 @@
 # Workspace
 
-This is an idac reverse-engineering workspace.
+<!-- Both agents share one guidance file to avoid drift. -->
+<!-- Claude Code imports AGENTS.md below; Codex reads AGENTS.md directly. -->
+<!-- Set your default target in AGENTS.md, not here. -->
 
-## Structure
-
-- `audit/` — audit notes and findings
-- `headers/recovered/` — headers reconstructed from reversing
-- `headers/vendor/` — reference headers from SDKs or public source
-- `reference/` — local copies of the bundled IDA and idac reference docs
-- `scripts/` — reusable idac/IDA Python scripts
-- `prompts/` — reusable agent prompts
-- `.idac/tmp/` — scratch space for transient output (gitignored)
-
-## Default target
-
-<!-- Set your default target here so the agent knows which database to use -->
-<!-- Example: -c db:/path/to/firmware.i64 -->
-
-## Conventions
-
-- Use `idac` for all IDA interactions — do not script IDA directly
-- Run one `idac` command at a time for a given target; use `batch` or `decompilemany` instead of background parallel `idac` commands
-- Read `reference/cli.md` before copying command examples from the workspace prompts
-- Refer to `reference/class-recovery.md` when doing class-recovery work
-- Refer to `reference/ida-cpp-type-details.md` when making types for C++ classes or vtables
-- Write findings to `audit/`
-- Store reusable type definitions in `headers/`
-- Store reusable scripts in `scripts/`
-- Use `.idac/tmp/` for large transient `--out` files
+@AGENTS.md

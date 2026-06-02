@@ -11,8 +11,8 @@ jq -r '.locals[] | [.index, .local_id, .display_name, .type] | @tsv' /tmp/locals
 # Show arguments only
 jq -r '.locals[] | select(.is_arg) | [.index, .display_name, .type] | @tsv' /tmp/locals.json
 
-# Show unnamed locals only
-jq -r '.locals[] | select(.display_name | startswith("<unnamed_")) | [.index, .type] | @tsv' /tmp/locals.json
+# Show auto-named / unnamed locals only (IDA defaults: vN or <unnamed_N>)
+jq -r '.locals[] | select(.display_name | test("^v[0-9]+$|^<unnamed_")) | [.index, .display_name, .type] | @tsv' /tmp/locals.json
 
 # Show one selected rename set by index
 jq -r '.locals[] | select(.index==4 or .index==5 or .index==6 or .index==12) | [.index, .display_name, .type] | @tsv' /tmp/locals.json
