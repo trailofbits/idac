@@ -2,7 +2,7 @@
 
 IDA extends standard C/C++ type declarations with specialized annotations that provide control over data interpretation and display in disassembly and decompiled code.
 
-For a complete list of all type system keywords, see the [Type System Keywords](type-system-keywords.html)
+For a complete list of all type system keywords, see [ida-set-types.md](ida-set-types.md).
 
 ## Shifted Pointers
 
@@ -192,7 +192,7 @@ The base, target delta, and the target can be omitted. If the base is BADADDR, i
   __offset(type|AUTO, tdelta)
 ```
 
-Zero based offsets without any additional attributes and having the size that corresponds the current application target (e.g. REF_OFF32 for a 32-bit bit application), the shoft __off form can be used.
+Zero based offsets without any additional attributes and having the size that corresponds to the current application target (e.g. REF_OFF32 for a 32-bit application), the short __off form can be used.
 
 **Examples**:
 
@@ -278,7 +278,7 @@ Syntax:
 Instead of a plain number, the name of a struct or union member will be used. If delta is present, it will be subtracted from the value before converting it into a struct/union member name.
 
 **Example**:
-An integer variable named `var` that hold an offset from the beginning of the `mystruct` structure:
+An integer variable named `var` that holds an offset from the beginning of the `mystruct` structure:
 
 ```
   int var __stroff(mystruct);

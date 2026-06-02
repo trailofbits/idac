@@ -49,7 +49,7 @@ There is a restriction for a __usercall function type: all stack locations shoul
   The pointed function is a usercall function and expects its second
   argument in the ECX register, its return value is in the EBX register.
   The rule of thumb to apply in such complex cases is to specify the
-  the registers just before the opening brace for the parameter list.
+  registers just before the opening brace for the parameter list.
 
 - registers used for the location names must be valid for the current
   processor; some registers are unsupported (if the register name is
@@ -93,7 +93,7 @@ If the binary has a real unknown region between known fields, keep explicit padd
 
 ## Data Declaration Keywords
 
-For data declarations, the following custom `__attribute((annotate(X)))` keywords have been added. The control the representation of numbers in the output:
+For data declarations, the following custom `__attribute__((annotate(X)))` keywords have been added. They control the representation of numbers in the output:
 
 | Keyword       | Description                                       |
 | ------------- | ------------------------------------------------- |

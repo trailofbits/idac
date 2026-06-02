@@ -43,7 +43,7 @@ Use the `$idac` skill for this reverse-engineering task.
 - Keep an append-only audit trail. Add a new dated section instead of rewriting prior notes.
 - Record durable notes in `audit/journal.md` and open questions in `audit/open-questions.md`. Create them if missing.
 - For each pass, log the exact target and scope, functions and types reviewed, evidence used for recovered fields and names, mutations attempted, what improved, what failed, tool rough edges, and recommended next steps.
-- Keep machine-readable mutation logs, JSON outputs, and decompile dumps in `artifacts/` when present. Use `.idac/tmp/` for transient outputs when they do not need to be kept.
+- Keep machine-readable mutation logs, JSON outputs, and decompile dumps you want to preserve in `audit/`. Use `.idac/tmp/` for transient outputs that do not need to be kept.
 - For larger mutation passes, prefer a saved `recovery.idac` batch file plus its `batch --out` log so future agents can audit the exact mutation order and results.
 
 ## Completion Requirements
