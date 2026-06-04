@@ -1291,6 +1291,45 @@ def test_type_declare_failure_returns_exit_1_and_stderr(capsys, monkeypatch) -> 
     assert "line 1:" in captured.err
 
 
+def test_prototype_check_failure_returns_exit_1_and_stderr(capsys, monkeypatch) -> None:
+    def fake_send_request(request):
+        return {
+            "ok": True,
+            "result": {
+                "address": "0x401000",
+                "success": False,
+                "parsed": False,
+                "is_function": False,
+                "arglocs_calculated": None,
+                "unknown_types": [],
+                "diagnostics": ["IDA failed to parse the prototype declaration"],
+            },
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
+
+    exit_code = main(
+        [
+            "function",
+            "prototype",
+            "check",
+            "-c",
+            "db:/tmp/demo.i64",
+            "target",
+            "--decl",
+            "int target(",
+        ]
+    )
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["success"] is False
+    assert "function prototype check failed:" in captured.err
+    assert "IDA failed to parse the prototype declaration" in captured.err
+
+
 def test_preview_failure_writes_artifact_and_stderr_summary(tmp_path: Path, capsys, monkeypatch) -> None:
     out_path = tmp_path / "preview.json"
 

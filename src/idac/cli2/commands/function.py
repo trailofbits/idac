@@ -141,6 +141,38 @@ def run_prototype_set(args: argparse.Namespace) -> CommandResult:
     return send_op(args, op="proto_set", params=params, render_op="proto_set")
 
 
+def _prototype_check_failure_lines(value: dict[str, object]) -> list[str]:
+    diagnostics = [str(item) for item in value.get("diagnostics") or [] if str(item)]
+    lines = ["function prototype check failed:"]
+    if diagnostics:
+        lines.extend(f"- {item}" for item in diagnostics)
+    else:
+        lines.append("- prototype declaration did not validate")
+    return lines
+
+
+def run_prototype_check(args: argparse.Namespace) -> CommandResult:
+    result = send_op(
+        args,
+        op="proto_check",
+        params={"identifier": args.function, "decl": read_decl_text(args)},
+        render_op="proto_check",
+    )
+    exit_code = 0
+    stderr_lines: list[str] = []
+    if isinstance(result.value, dict) and result.value.get("success") is False:
+        exit_code = 1
+        stderr_lines = _prototype_check_failure_lines(result.value)
+    return CommandResult(
+        render_op=result.render_op,
+        value=result.value,
+        exit_code=exit_code,
+        warnings=list(result.warnings),
+        stderr_lines=stderr_lines,
+        artifacts=list(result.artifacts),
+    )
+
+
 def register(
     root_parser: argparse.ArgumentParser, subparsers: argparse._SubParsersAction[argparse.ArgumentParser]
 ) -> None:
@@ -299,6 +331,19 @@ def register(
     child.add_argument("function", help="Function name or address")
     child.set_defaults(
         run=run_prototype_show, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
+    )
+
+    child = add_command(proto_parser, proto_subparsers, "check", help_text="Validate a prototype without applying it")
+    add_context_options(child)
+    add_output_options(child, default_format="json")
+    child.add_argument("function", help="Function name or address")
+    add_decl_input(child, help_text="Prototype declaration text")
+    child.set_defaults(
+        run=run_prototype_check,
+        context_policy="standard",
+        allow_batch=True,
+        allow_preview=True,
+        _mutating_command=False,
     )
 
     child = add_command(proto_parser, proto_subparsers, "set", help_text="Set a prototype")

@@ -83,6 +83,12 @@ class PrototypeSetRequest:
 
 
 @dataclass(frozen=True)
+class PrototypeCheckRequest:
+    identifier: str
+    decl: str
+
+
+@dataclass(frozen=True)
 class PrototypeView:
     address: str
     prototype: str
@@ -113,6 +119,17 @@ class PrototypeMutationResult:
     callers_failed: int = 0
 
 
+@dataclass(frozen=True)
+class PrototypeCheckResult:
+    address: str
+    success: bool
+    parsed: bool
+    is_function: bool
+    arglocs_calculated: bool | None
+    unknown_types: tuple[str, ...]
+    diagnostics: tuple[str, ...]
+
+
 def _require_identifier(params: dict[str, object]) -> str:
     return require_str(params.get("identifier"), field="address or identifier")
 
@@ -131,6 +148,13 @@ def _parse_proto_set(params: dict[str, object]) -> PrototypeSetRequest:
         preview_decompile=bool(params.get("preview_decompile")),
         propagate_callers=bool(params.get("propagate_callers")),
     )
+
+
+def _parse_proto_check(params: dict[str, object]) -> PrototypeCheckRequest:
+    decl = str(params.get("decl") or "")
+    if not decl:
+        raise IdaOperationError("prototype declaration is required")
+    return PrototypeCheckRequest(identifier=_require_identifier(params), decl=decl)
 
 
 def _prototype_view(
@@ -234,11 +258,76 @@ def _parse_prototype_decl(runtime: IdaRuntime, decl: str):
     return None
 
 
+def _prototype_arglocs_ok(runtime: IdaRuntime, tif) -> bool | None:
+    if not getattr(tif, "is_func", lambda: False)():
+        return False
+    ida_typeinf = runtime.ida_typeinf
+    ftd_factory = getattr(ida_typeinf, "func_type_data_t", None)
+    if not callable(ftd_factory):
+        return None
+    details = ftd_factory()
+    get_details = getattr(tif, "get_func_details", None)
+    if not callable(get_details):
+        return None
+    flags = getattr(ida_typeinf, "GTD_CALC_ARGLOCS", 0)
+    try:
+        return bool(get_details(details, flags))
+    except TypeError:
+        return bool(get_details(details))
+
+
+def _mark_prototype_dirty(runtime: IdaRuntime, ea: int, *, include_callers: bool) -> None:
+    try:
+        ida_hexrays = runtime.require_hexrays()
+    except Exception:
+        return
+    with suppress_recoverable_ida_errors():
+        ida_hexrays.mark_cfunc_dirty(ea, False)
+        if include_callers:
+            for ref in runtime.idautils.CodeRefsTo(ea, 0):
+                caller = runtime.ida_funcs.get_func(ref)
+                if caller is not None:
+                    ida_hexrays.mark_cfunc_dirty(caller.start_ea, False)
+        ida_hexrays.clear_cached_cfuncs()
+
+
 def _proto_get(context: OperationContext, request: PrototypeGetRequest) -> PrototypeView:
     viewed = _prototype_view(context, request)
     if isinstance(viewed, PrototypeView):
         return viewed
     raise IdaOperationError("internal error: expected a prototype view for proto_get")
+
+
+def _proto_check(context: OperationContext, request: PrototypeCheckRequest) -> PrototypeCheckResult:
+    runtime = context.runtime
+    ea = runtime.function_ea(request.identifier)
+    unknown_types = tuple(_unknown_proto_types(runtime, request.decl))
+    diagnostics: list[str] = []
+    tif = _parse_prototype_decl(runtime, request.decl)
+    parsed = tif is not None
+    is_function = False
+    arglocs_calculated: bool | None = None
+    if tif is None:
+        if unknown_types:
+            diagnostics.append("unknown type(s): " + ", ".join(unknown_types))
+        else:
+            diagnostics.append("IDA failed to parse the prototype declaration")
+    else:
+        is_function = bool(getattr(tif, "is_func", lambda: False)())
+        if not is_function:
+            diagnostics.append("declaration parsed but did not produce a function type")
+        arglocs_calculated = _prototype_arglocs_ok(runtime, tif)
+        if arglocs_calculated is False:
+            diagnostics.append("IDA could not calculate function argument locations")
+    return PrototypeCheckResult(
+        address=hex(ea),
+        success=parsed and is_function and arglocs_calculated is not False,
+        parsed=parsed,
+        is_function=is_function,
+        arglocs_calculated=arglocs_calculated,
+        unknown_types=unknown_types,
+        diagnostics=tuple(diagnostics),
+    )
 
 
 def _proto_set(context: OperationContext, request: PrototypeSetRequest) -> PrototypeMutationResult:
@@ -269,6 +358,7 @@ def _proto_set(context: OperationContext, request: PrototypeSetRequest) -> Proto
     callers_failed = 0
     if request.propagate_callers:
         callers_considered, callers_updated, callers_failed = _propagate_callee_tinfo(runtime, ea, tif)
+    _mark_prototype_dirty(runtime, ea, include_callers=request.propagate_callers)
     normalized_decl = decl if decl.endswith(";") else f"{decl};"
     if original_name and _decl_looks_like_destructor(normalized_decl):
         current_name = runtime.ida_name.get_name(ea) or ""
@@ -303,6 +393,11 @@ def prototype_operations() -> tuple[OperationSpec[object, object], ...]:
                 use_undo=True,
             ),
         ),
+        OperationSpec(
+            name="proto_check",
+            parse=_parse_proto_check,
+            run=_proto_check,
+        ),
     )
 
 
@@ -312,6 +407,8 @@ def op_proto_set(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, ob
 
 
 __all__ = [
+    "PrototypeCheckRequest",
+    "PrototypeCheckResult",
     "PrototypeGetRequest",
     "PrototypeMutationResult",
     "PrototypePreviewErrorView",

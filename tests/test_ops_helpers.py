@@ -1934,6 +1934,61 @@ def test_proto_set_retries_with_relaxed_namespace_parse() -> None:
     ]
 
 
+def test_proto_check_allows_successful_parse_with_heuristic_unknowns() -> None:
+    class FakeTif:
+        @staticmethod
+        def is_func() -> bool:
+            return True
+
+    tif = FakeTif()
+
+    class FakeIdaTypeInf:
+        PT_SIL = 0x1
+        PT_VAR = 0x8
+        PT_SEMICOLON = 0x4000
+
+        @staticmethod
+        def tinfo_t() -> object:
+            return tif
+
+        @staticmethod
+        def parse_decl(out_tif: object, til: object, decl: str, flags: int) -> bool:
+            assert out_tif is tif
+            assert til is None
+            assert decl == "void __fastcall target(void (*cb)(int));"
+            assert flags == 0x4009
+            return True
+
+    class FakeRuntime(IdaRuntime):
+        def function_ea(self, identifier: str) -> int:
+            assert identifier == "target"
+            return 0x401000
+
+        def mod(self, name: str) -> object:
+            if name == "ida_typeinf":
+                return FakeIdaTypeInf()
+            raise AssertionError(name)
+
+        def find_named_type(self, name: str):
+            assert name == "cb"
+            return None
+
+    result = prototypes._proto_check(
+        OperationContext(runtime=FakeRuntime()),
+        prototypes.PrototypeCheckRequest(
+            identifier="target",
+            decl="void __fastcall target(void (*cb)(int))",
+        ),
+    )
+
+    assert result.success is True
+    assert result.parsed is True
+    assert result.is_function is True
+    assert result.arglocs_calculated is None
+    assert result.unknown_types == ("cb",)
+    assert result.diagnostics == ()
+
+
 def test_proto_set_optionally_propagates_to_callers() -> None:
     tif = object()
 

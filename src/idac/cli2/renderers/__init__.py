@@ -656,6 +656,27 @@ def render_type_declare(value: Any) -> str:
     return "\n".join(lines)
 
 
+def render_proto_check(value: Any) -> str:
+    if not isinstance(value, dict):
+        return _fallback(value)
+    lines = [
+        f"success: {bool(value.get('success'))}",
+        f"address: {_get_first_present(value, 'address')}",
+        f"parsed: {bool(value.get('parsed'))}",
+        f"is_function: {bool(value.get('is_function'))}",
+    ]
+    arglocs = value.get("arglocs_calculated")
+    if arglocs is not None:
+        lines.append(f"arglocs_calculated: {bool(arglocs)}")
+    unknown = value.get("unknown_types")
+    if isinstance(unknown, list) and unknown:
+        lines.append("unknown_types: " + ", ".join(str(item) for item in unknown))
+    diagnostics = value.get("diagnostics")
+    if isinstance(diagnostics, list) and diagnostics:
+        _append_section(lines, "diagnostics", [f"- {item}" for item in diagnostics])
+    return "\n".join(lines)
+
+
 def _render_type_diagnostic(item: TypeDeclareDiagnostic) -> str:
     line = item.get("line")
     message = item.get("message") or item.get("kind") or "diagnostic"
@@ -774,6 +795,7 @@ __all__ = [
     "render_imports",
     "render_lines",
     "render_locals",
+    "render_proto_check",
     "render_python_exec",
     "render_search_results",
     "render_segment_list",
