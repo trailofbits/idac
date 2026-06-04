@@ -23,14 +23,18 @@ idac type list "Example"
 idac function list "Example_" --json --out "/tmp/class_family_functions.json"
 idac decompilemany "Example_" --out-dir "/tmp/class_family_decompile_discovery"
 idac type class candidates "Example" --json --out "/tmp/class_candidates.json"
+idac type check --decl-file "support_types.h"
 idac type declare --replace --decl-file "support_types.h"
+idac type check --decl-file "recovered_classes.h"
 idac type declare --replace --decl-file "recovered_classes.h"
+idac type deps "ExampleDerived"
 idac type class list "Example"
 idac type class show "ExampleDerived"
 idac type class fields "ExampleDerived" --derived-only
 idac type class hierarchy "ExampleBase"
 idac type class vtable "ExampleDerived" --runtime
 idac function prototype show "0x100012340"
+idac function prototype check "0x100012340" --decl "bool __fastcall ExampleDerived__method_1(ExampleDerived *__hidden this, const unsigned char *buf, u64 len, const char *arg3, u32 flags)"
 idac preview -o "/tmp/proto_preview.json" function prototype set "0x100012340" --decl "bool __fastcall ExampleDerived__method_1(ExampleDerived *__hidden this, const unsigned char *buf, u64 len, const char *arg3, u32 flags)"
 idac misc reanalyze "ExampleDerived__method_1"
 idac decompilemany "Example_" --f5 --out-dir "/tmp/class_family_decompile_verify"
@@ -53,6 +57,8 @@ Raw runtime slot inspection is not exposed as a first-class CLI command. Use `ty
   Use `--kind` when you want only one subset, such as `--kind function_symbol`.
 - Skip `type class candidates` when clean demangled symbols and RTTI already identify the family. It is most useful for opaque targets.
 - `type declare --replace`: re-import a recovered class header without leaving stale local types behind.
+- `type check`: validate recovered declaration text without importing it. Run it before large class headers or parser-risky C++ syntax.
+- `type deps`: print an existing local type with IDA dependency expansion when available; use it for audit artifacts after import.
 - `type class list`: find the classes materialized in local types.
   Use the positional class-filter form `type class list [CLASS_FILTER]`.
 - `type class show`: read the flattened object layout, including inherited fields.
@@ -70,6 +76,7 @@ Raw runtime slot inspection is not exposed as a first-class CLI command. Use `ty
 - During discovery, stop decompiling once constructor, destructor, one accessor, and one serializer or parser have already proven the layout.
 - `function prototype set`: apply corrected function types to the runtime virtual targets after the class layout is in place.
   Use `function prototype show` first so the current signature is recorded before the update.
+  Use `function prototype check` before applying high-risk target signatures.
   Use `preview -o /tmp/proto_preview.json function prototype set ...`; the command-specific preview readback carries richer before/after data when supported.
   Clean up the shared helpers that dominate many callers before spending time on local renames. Once helper prototypes are correct and callers are reanalyzed, the remaining rename work is usually much smaller and more trustworthy.
 - Treat return-type changes as higher risk than parameter-name changes. If the body does not clearly prove the returned semantic type, keep the return generic.
@@ -97,6 +104,7 @@ Confidence and naming conventions:
 - rename locals last
 - recover support types before cosmetic renames; early support-type recovery usually improves output more than local-name cleanup
 - For large local-variable sets, read `function locals list --json --out <path>` and calibrate selectors from the JSON artifact before renaming.
+- For many local edits in one function, prefer `function locals apply --json-file <plan.json>` after a fresh locals dump.
 - For rename previews on large functions, write the preview to disk with `preview -o <path>` and inspect the artifact with `jq` instead of trusting inline output.
 
 For selector calibration before rename-heavy phases, read [workflows.md](workflows.md#selector-calibration).
@@ -156,6 +164,7 @@ Practical rules:
 - for secondary-base virtual tables, use the IDA-specific `ClassName_XXXX_vtbl` pattern
 - use `--alias old=new` during import when namespace-qualified names need flattening for local-type parsing
 - if import errors suggest parser trouble, simplify the declaration and retry with preview first
+- run `type check --decl-file ...` before importing the simplified declaration
 
 ## Stop conditions
 

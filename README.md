@@ -160,12 +160,12 @@ Use `idac <command> --help` for one subcommand, `idac --full-help` for the compl
 |--------|----------|
 | Discovery | `doctor`, `docs`, `targets list`, `database show`, `segment list`, `bookmark list/show`, `comment show` |
 | Functions | `function list`, `metadata`, `frame`, `stackvars`, `callees`, `callers`, `prototype`, `locals` |
-| Decompilation | `decompile`, `decompilemany`, `disasm`, `ctree` |
+| Decompilation | `decompile`, `decompilemany`, `disasm`, `disasm --start/--end`, `ctree` |
 | Search | `search bytes`, `search strings`, `xrefs`, `imports` |
-| Types | `type list`, `show`, `declare`, `type struct list/show/field`, `type enum list/show/member`, `type class vtable` |
+| Types | `type list`, `show`, `deps`, `check`, `declare`, `type struct list/show/field`, `type enum list/show/member`, `type class vtable` |
 | Classes | `type class list`, `show`, `hierarchy`, `fields`, `candidates` |
-| Mutations | `misc rename`, `comment set/delete`, `bookmark add/set/delete`, `function prototype set`, `function locals update/rename/retype`, `type struct field set/rename/delete`, `type enum member set/rename/delete` |
-| Batch | `batch`, `preview` |
+| Mutations | `misc rename`, `comment set/delete`, `bookmark add/set/delete`, `function prototype set`, `function locals update/rename/retype/apply`, `type struct field set/rename/delete`, `type enum member set/rename/delete` |
+| Batch | `batch`, `batch --lint`, `preview` |
 | IDAPython | `py exec` |
 | Workspace | `workspace init` |
 | Maintenance | `misc reanalyze`, `database open/save/close`, `targets cleanup`, `misc plugin`, `misc skill` |
@@ -220,17 +220,21 @@ Run many subcommands against one shared context, leaving behind a stable ordered
 
 ```bash
 idac batch "recovery.idac" --out "/tmp/recovery_batch.json"
+idac batch "recovery.idac" --lint --out "/tmp/recovery_batch_lint.json"
 ```
 
 ```text
 # recovery.idac — run after support types exist locally
+type check --decl-file "recovered_classes.h"
 type declare --replace --decl-file "recovered_classes.h"
+function prototype check "0x100000000" --decl "int __fastcall ExampleClass__parseHeader(ExampleClass *__hidden this, const unsigned __int8 *buf, unsigned int len)"
 function prototype set "0x100000000" --decl "int __fastcall ExampleClass__parseHeader(ExampleClass *__hidden this, const unsigned __int8 *buf, unsigned int len)"
+misc reanalyze "0x100000000"
 function locals rename "0x100000000" 5 --new-name header_size
 function locals rename "0x100000000" 6 --new-name record_type
 ```
 
-Mutating batches require `--out` so the result log is preserved before any change runs. Maintenance/setup `misc` commands are intentionally rejected from `batch`.
+Mutating batches require `--out` so the result log is preserved before any change runs. `batch --lint` parses child commands, resolves relative input paths, rejects unsupported batch commands, and warns on risky local selectors before execution. Setup `misc` commands are intentionally rejected from `batch`; `misc reanalyze` is batch-safe and belongs between type/prototype changes and local cleanup.
 
 ### Address locals three ways
 
@@ -240,9 +244,10 @@ Mutating batches require `--out` so the result log is preserved before any chang
 idac function locals rename "sub_08041337" "v12" --new-name "value_maybe"
 idac function locals rename "sub_08041337" --index 3 --new-name "value_maybe"
 idac function locals retype "sub_08041337" --local-id "stack(16)@0x100000460" --type "unsigned int"
+idac function locals apply "sub_08041337" --json-file "locals-plan.json"
 ```
 
-Read the canonical `local_id` with `idac function locals list --json`. Use `update` when a local needs both a better name and type in one pass.
+Read the canonical `local_id` with `idac function locals list --json`. Use `update` when one local needs both a better name and type in one pass, and `apply` when several locals in one function should be applied from one fresh locals snapshot.
 
 ### Escape hatch: raw IDAPython
 

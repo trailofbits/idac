@@ -27,6 +27,8 @@ If the idac guide is not already in context, run `idac docs guide` first. Use fo
 - Work from the binary/database first; do external correlation only when the user asks or the task requires it.
 - Keep durable notes in `audit/<target>-recovery.md`; use `.idac/tmp/` for transient JSON, decompile, or preview artifacts.
 - If you mutate the database or headers, record what changed, what evidence justified it, what failed, and what remains inferred.
+- Before any mutation batch, run `idac batch <file> --lint --out .idac/tmp/<name>.lint.json`.
+- Use `type check`, `function prototype check`, and `type deps` when parser behavior or type dependencies are part of the risk.
 
 ## Audit Entry
 
@@ -36,5 +38,6 @@ Append to `audit/<target>-recovery.md` using `references/templates/checkpoint-no
 
 - Representative readback for the scoped target has been inspected.
 - Any committed mutation has been reanalyzed and reread when required by the guide.
+- Local cleanup after reanalysis used fresh `function locals list --json` data, stable selectors, or `function locals apply`.
 - The audit entry names changed database state, updated headers, uncertainty, failed commands, and next steps.
 - The final response summarizes only the material outcome and remaining risk.

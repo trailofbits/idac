@@ -27,6 +27,10 @@ If the idac guide is not already in context, run `idac docs guide` first. For th
 - Recover support types before dependent prototypes and before cosmetic local cleanup.
 - Use the vtable import -> redecompile with `--f5` -> refine -> re-import loop when virtual dispatch is relevant.
 - Apply prototypes to runtime virtual targets, not just local vtable slot types.
+- Validate class headers with `type check` before import, and use `type deps` when a dependency-expanded type declaration should be captured.
+- Validate high-risk virtual target signatures with `function prototype check` before `function prototype set`.
+- Before a mutation batch, run `batch --lint --out .idac/tmp/<target>.lint.json`.
+- After reanalysis, use fresh locals JSON plus stable selectors or `function locals apply` for local cleanup.
 - Keep uncertain field, member, parameter, and local names explicitly provisional.
 
 ## Artifacts

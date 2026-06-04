@@ -14,9 +14,12 @@ Prefer first-class `idac` commands, then `idac py exec`, then external or ad hoc
 - Run one `idac` command at a time for each target. Use `batch`, `decompilemany`, and `--out` artifacts for broad work instead of background parallel commands.
 - Use `decompile --f5` or `decompilemany --f5` during type or prototype recovery. `--f5` is an alias for `--no-cache`.
 - Preview supported persistent mutations first, then commit only after the preview confirms the intended change. Outside batch mode, `preview` requires `-o/--out`.
-- Before `function prototype set`, run `function prototype show`; declare missing support types before dependent prototypes.
+- Before `function prototype set`, run `function prototype show`; use `function prototype check` for high-risk declarations; declare missing support types before dependent prototypes.
+- Before importing large headers, validate with `type check --decl-file ...`. Use `type deps <name>` when an existing local type needs IDA-printed dependencies.
 - After type or prototype mutations, run `misc reanalyze`, then reread pseudocode or locals before rename-heavy cleanup.
 - Before batch local renames or retypes, capture `function locals list --json --out <path>` and prefer `--local-id` or `--index` after prototypes or reanalysis may have shifted locals.
+- For many local edits in one function, prefer `function locals apply --json-file ...` over a long name-only rename sequence.
+- Before executing mutation batches, run `batch --lint -o <lint.json> <batch.idac>` and fix reported parse, path, selector, or logging issues.
 - Stop a rename batch on the first miss. Reread locals, recalibrate selectors, and only then continue.
 - Context selection: omit `-c` for one live GUI session, use `-c pid:<pid>` for multiple GUI sessions, and use `-c "db:/path"` for headless work.
 - Prefer minimal `struct` declarations first, then grow them from observed offsets and access patterns. Use blob padding for unknown regions instead of guessed scalar fields.
@@ -72,6 +75,7 @@ idac decompile "sub_08041337" -c "pid:1234" -o /tmp/sub_08041337.c
 idac decompile "sub_08041337" -o /tmp/sub_08041337.c
 # current context
 idac xrefs "sub_08041337" --json
+idac disasm --start "0x100000460" --end "0x1000004a0"
 ```
 
 ## Mutation outline
@@ -80,10 +84,11 @@ Use `idac docs workflows` (`workflows.md`) for exact syntax.
 
 1. Discovery and read-only audit.
 2. Preview supported persistent mutations with `preview -o <path> <command...>`.
-3. Commit the mutation.
-4. Run `misc reanalyze` after type or prototype changes.
-5. Reread pseudocode or locals; calibrate local selectors from fresh JSON.
-6. Verify final readback and, when working in a workspace, record the pass in the workspace audit log (`audit/<target>-recovery.md`) if one exists.
+3. For batches, run `batch --lint -o <lint.json> <batch.idac>` before the real run.
+4. Commit the mutation.
+5. Run `misc reanalyze` after type or prototype changes.
+6. Reread pseudocode or locals; calibrate local selectors from fresh JSON.
+7. Verify final readback and, when working in a workspace, record the pass in the workspace audit log (`audit/<target>-recovery.md`) if one exists.
 
 For headless `db:` work, checkpoint with `database save`; `database close` saves by default, and `database close --discard` abandons pending changes. Live GUI edits remain in the IDA session.
 
@@ -104,7 +109,7 @@ Use `py exec` only when no first-class command covers the task cleanly:
 idac py exec --code "print(hex(idaapi.get_imagebase())); result = {'entry': hex(idc.get_inf_attr(idc.INF_START_EA))}"
 ```
 
-Supported modes: `--code`, `--stdin`, `--script`. Add `--persist` only when later `py exec` calls in the same session must reuse Python globals.
+Supported modes: `--code`, `--stdin`, `--script`. `--script` preserves IDAPython script semantics such as `__file__`, script-directory imports, and `sys.argv` when IDA exposes that helper. Add `--persist` only when later `py exec` calls in the same session must reuse Python globals.
 The execution scope includes the core `ida*` modules that `idac` imports itself, plus `idautils`, `idc`, and `result`.
 
 ## Reference index

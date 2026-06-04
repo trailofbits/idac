@@ -42,11 +42,15 @@ idac decompilemany "sub_08041337" --out-file "/tmp/sub_08041337.c"
 idac decompilemany --functions-file "funcs.txt" --out-dir "/tmp/decomp"
 idac decompilemany --functions-file "funcs.txt" --out-dir "/tmp/decomp" --disasm --ctree
 idac disasm "sub_08041337"
+idac disasm --start "0x100000460" --end "0x1000004a0"
 idac ctree "sub_08041337"
 idac xrefs "sub_08041337"
 idac imports
 idac search bytes "74 69 6e 79" --segment "__cstring" --timeout 30
 idac search strings "tiny" --segment "__cstring" --timeout 30
+idac type deps "ExampleStruct"
+idac type check --decl-file "recovered_types.h" --json
+idac function prototype check "sub_08041337" --decl-file "sub_08041337_proto.h" --json
 ```
 
 `xrefs` is a top-level command; there is no `function xrefs` command.
@@ -74,6 +78,7 @@ If a batch contains persistent mutating commands, `batch --out` is required so t
 
 ```bash
 idac batch "recovery.idac" -o "/tmp/recovery.json"
+idac batch "recovery.idac" --lint -o "/tmp/recovery.lint.json"
 ```
 
 Batch files may include blank lines and `#` comments.
@@ -82,17 +87,22 @@ Example batch file:
 
 ```text
 # recovery.idac
+type check --decl-file "recovered_types.h"
 type declare --replace --decl-file "recovered_types.h"
 type declare --clang --decl-file "recovered_templates.hpp"
+function prototype check "sub_08041337" --decl-file "sub_08041337_proto.h"
 function prototype set "sub_08041337" --decl-file "sub_08041337_proto.h"
+misc reanalyze "sub_08041337"
 function locals update "sub_08041337" --local-id "stack(16)@0x100000460" --rename "value_maybe" --decl-file "local_v4.h"
 function locals rename "sub_08041337" --index 6 --new-name "entry_count"
 function locals retype "sub_08041337" --index 7 --type "unsigned int"
 function locals retype "sub_08041337" --index 8 --decl-file "local_v8.h"
+function locals apply "sub_08041337" --json-file "locals-plan.json"
 preview function prototype set "sub_08041337" --decl-file "sub_08041337_proto.h"
 ```
 
 Keep setup-only `misc` commands such as `misc plugin install` and `misc skill install` outside saved batch files.
+`misc reanalyze` is batch-safe and should be placed between type/prototype mutations and local cleanup when the batch is a full recovery pass.
 `search strings` and `search bytes` require both `--timeout` and `--segment`.
 On dyld shared caches, `search strings` only allows `--scan` with explicit `--start` / `--end` bounds up to 16 MiB.
 For `function locals retype`, `--type` is shorthand for simple type text. Use `--decl` or `--decl-file` when you need a full declaration, such as arrays or function pointers.
@@ -119,6 +129,9 @@ Use `idac docs --list` to list every topic and `idac docs --all --out docs.md` t
 - terminal output still enforces the inline size limit
 - large inline results print a short summary first, then error
 - `type declare --clang` uses IDA's clang parser for more complex C/C++ declarations
+- `type check` validates declarations without importing them; use it before large or parser-risky `type declare` runs
+- `function prototype check` validates a function declaration without applying it
+- `type deps NAME` prints an existing type with IDA dependency expansion when available
 - `type list`, `type struct list`, and `type enum list` require `--out` when no pattern is given
 - `decompile` uses `-o/--out` for a single rendered result; `decompilemany` uses `--out-file` or `--out-dir` for bulk artifacts
 - `decompilemany FUNCTION_FILTER` selects functions by name substring; it is not a list of exact functions

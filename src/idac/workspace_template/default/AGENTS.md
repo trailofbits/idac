@@ -32,4 +32,7 @@ If the idac guide is not already in context, run `idac docs guide`. Detailed ref
 - Store reusable type definitions in `headers/`
 - Store reusable scripts in `scripts/`
 - Use `.idac/tmp/` for large transient `--out` files
+- Before executing mutation batches, run `idac batch <file> --lint --out .idac/tmp/<name>.lint.json`.
+- Validate parser-risky declarations with `type check` or `function prototype check` before mutating.
+- After type/prototype mutations and reanalysis, use fresh `function locals list --json` data; prefer `--local-id`, `--index`, or `function locals apply`.
 - Keep pass updates and audit notes concise and factual; skip tutorial explanations unless asked.

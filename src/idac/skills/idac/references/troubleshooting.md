@@ -50,6 +50,15 @@ idac database close -c "db:sample.i64" --discard
 
 Declare the missing support or placeholder types first, then retry the prototype. See `idac docs workflows` for the safe mutation loop and `idac docs class-recovery` for support-type ordering.
 
+Before retrying, use:
+
+```bash
+idac type check --decl-file "support_types.h"
+idac function prototype check "sub_08041337" --decl-file "sub_08041337_proto.h"
+```
+
+If a local type exists but its dependencies are unclear, use `type deps <name>` to ask IDA to print the type with dependencies when possible.
+
 ## Preview did not persist
 
 That is expected. `preview` applies the mutation, captures the result, and undoes it before returning.
@@ -61,6 +70,7 @@ idac preview -o "/tmp/preview.json" comment set "sub_08041337" "entry point"
 Preview performs the real mutation before undoing it, so the readback reflects the temporary changed state.
 
 For `function locals update`, `function locals rename`, and `function locals retype`, preview always returns the full before/after local list.
+For `function locals apply`, preview also returns before/after local lists, so use it when a single function has many coordinated local changes.
 
 Preview payloads are structured JSON or JSONL objects with these top-level keys:
 
@@ -100,6 +110,7 @@ Run:
 idac misc reanalyze "sub_08041337"
 idac decompile "sub_08041337"
 idac decompile "sub_08041337" --f5
+idac function locals list "sub_08041337" --json --out "/tmp/sub_08041337.locals.json"
 ```
 
 `--f5` forces a fresh Hex-Rays pass instead of reusing cached pseudocode.
@@ -113,6 +124,7 @@ If a function, local-variable list, or decompile result is too large for the ter
 idac decompile "sub_08041337" --f5 --out "/tmp/sub_08041337.json"
 idac function locals list "sub_08041337" --json --out "/tmp/sub_08041337.locals.json"
 idac decompilemany "Example_" --out-dir "/tmp/example_family"
+idac disasm --start "0x100000460" --end "0x1000004a0" --out "/tmp/range.asm"
 ```
 
 When the output is mostly for later inspection, prefer a file artifact from the start. That keeps the readback stable across reanalysis and avoids truncation.

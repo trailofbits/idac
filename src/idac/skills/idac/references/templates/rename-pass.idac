@@ -5,6 +5,8 @@
 #   idac function locals list <function> --json --out /tmp/locals.json
 # Prefer --index or --local-id after any prototype or reanalysis change.
 # Stop on the first miss, refresh locals, and recalibrate selectors.
+# For many edits in one function, create a JSON plan from the fresh locals dump and use:
+#   function locals apply <function> --json-file locals-plan.json
 
 function locals rename 0x100000000 --index 5 --new-name header_size
 function locals rename 0x100000000 --index 6 --new-name record_type

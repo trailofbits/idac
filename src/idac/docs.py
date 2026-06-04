@@ -9,9 +9,7 @@ from .paths import skill_reference_source_dir, skill_source_dir, workspace_templ
 _DOCS_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "Start here",
-        (
-            "guide",
-        ),
+        ("guide",),
     ),
     (
         "CLI and operation help",

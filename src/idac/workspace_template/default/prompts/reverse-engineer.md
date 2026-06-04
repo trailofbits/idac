@@ -30,8 +30,9 @@ Skip this section for a single well-defined target. For a class family, module, 
 1. Capture the function/type surface with filtered `function list`, `type list`, and class-candidate reads.
 2. Prioritize base types, common support structs, shared helpers, and prototypes that dominate many callers.
 3. Establish dependency order: support types before prototypes, base layouts before derived layouts, prototypes before local cleanup.
-4. Check `audit/` and `headers/recovered/` so prior work is extended rather than rediscovered.
-5. Record the priority order in `audit/<target>-triage.md` if the pass spans multiple targets.
+4. Validate risky type/prototype declarations with `type check` and `function prototype check` before applying them.
+5. Check `audit/` and `headers/recovered/` so prior work is extended rather than rediscovered.
+6. Record the priority order in `audit/<target>-triage.md` if the pass spans multiple targets.
 
 ## Recovery Focus
 
@@ -39,6 +40,9 @@ Skip this section for a single well-defined target. For a class family, module, 
 - For virtual classes, use the vtable import -> redecompile with `--f5` -> refine -> re-import loop until readback stops revealing structural facts.
 - Include directly blocking support types or enums, but do not expand into adjacent families without evidence that the scoped objective requires it.
 - Keep per-target headers separate unless types are tightly coupled.
+- Run `batch --lint --out .idac/tmp/<name>.lint.json` before executing any mutating batch.
+- Use `type deps <name>` when an imported type's dependency-expanded declaration is the best audit artifact.
+- Prefer `function locals apply` for coordinated per-function local cleanup after reanalysis.
 
 ## Artifacts
 
