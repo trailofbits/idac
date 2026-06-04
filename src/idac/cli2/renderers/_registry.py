@@ -40,6 +40,7 @@ _RENDERER_NAMES = {
     "local_rename": "render_locals",
     "local_retype": "render_locals",
     "local_update": "render_locals",
+    "local_apply_plan": "render_locals",
     "proto_get": "render_type_show",
     "proto_check": "render_proto_check",
     "proto_set": "_fallback",

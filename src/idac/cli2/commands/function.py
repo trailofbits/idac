@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -118,6 +119,26 @@ def run_locals_retype(args: argparse.Namespace) -> CommandResult:
 
 def run_locals_update(args: argparse.Namespace) -> CommandResult:
     return send_op(args, op="local_update", params=local_update_params(args), render_op="local_update")
+
+
+def _locals_apply_plan_params(args: argparse.Namespace) -> dict[str, object]:
+    path = Path(args.json_file)
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise CliUserError(f"failed to read local apply JSON file {path}: {exc}") from exc
+    try:
+        raw = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise CliUserError(f"invalid local apply JSON: {exc}") from exc
+    items = (raw.get("items") or raw.get("locals")) if isinstance(raw, dict) else raw
+    if not isinstance(items, list):
+        raise CliUserError("local apply JSON must be a list or an object with an items list")
+    return {"identifier": args.function, "items": items}
+
+
+def run_locals_apply_plan(args: argparse.Namespace) -> CommandResult:
+    return send_op(args, op="local_apply_plan", params=_locals_apply_plan_params(args), render_op="local_apply_plan")
 
 
 def run_prototype_show(args: argparse.Namespace) -> CommandResult:
@@ -320,6 +341,26 @@ def register(
     )
     child.set_defaults(
         run=run_locals_update, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=True
+    )
+
+    child = add_command(locals_parser, locals_subparsers, "apply", help_text="Apply local updates from JSON")
+    child.formatter_class = argparse.RawDescriptionHelpFormatter
+    child.epilog = """plan JSON:
+  [
+    {"local_id": "stack(16)@0x100000460", "rename": "count", "decl": "unsigned int count;"},
+    {"index": 3, "type": "uint64_t"}
+  ]
+"""
+    add_context_options(child)
+    add_output_options(child, default_format="json")
+    child.add_argument("function", help="Function name or address")
+    child.add_argument("--json-file", required=True, type=Path, help="Read local update plan JSON from this file")
+    child.set_defaults(
+        run=run_locals_apply_plan,
+        context_policy="standard",
+        allow_batch=True,
+        allow_preview=True,
+        _mutating_command=True,
     )
 
     proto_parser = add_command(parser, parser_subparsers, "prototype", help_text="Prototype operations")

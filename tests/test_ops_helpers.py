@@ -1790,6 +1790,25 @@ def test_local_update_allows_unnamed_local_selected_by_stable_selector(monkeypat
     assert payload["changed"] is True
 
 
+def test_local_apply_plan_parser_accepts_stable_selector_items() -> None:
+    request = locals._parse_local_apply_plan(
+        {
+            "identifier": "main",
+            "items": [
+                {"local_id": "stack(16)@0x401000", "rename": "count", "decl": "unsigned int count;"},
+                {"selector": {"index": "3"}, "type": "uint64_t"},
+            ],
+        }
+    )
+
+    assert request.identifier == "main"
+    assert request.items[0].selector.local_id == "stack(16)@0x401000"
+    assert request.items[0].new_name == "count"
+    assert request.items[0].decl == "unsigned int count;"
+    assert request.items[1].selector.index == 3
+    assert request.items[1].type_text == "uint64_t"
+
+
 def test_proto_set_parses_silently_and_applies_tinfo() -> None:
     calls: list[tuple[object, ...]] = []
     tif = object()

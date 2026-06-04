@@ -49,6 +49,7 @@ OperationName = Literal[
     "local_rename",
     "local_retype",
     "local_update",
+    "local_apply_plan",
     "proto_get",
     "proto_check",
     "proto_set",
