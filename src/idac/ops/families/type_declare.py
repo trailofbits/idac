@@ -120,6 +120,7 @@ class TypeDeclareBisectResult(TypedDict, total=False):
 class TypeDeclareResult(TypedDict, total=False):
     errors: int
     replace: bool
+    check: bool
     aliases_applied: list[AppliedAlias]
     diagnostics: list[TypeDiagnosticDict]
     imported_types: list[str]
@@ -593,13 +594,47 @@ def _parse_type_declarations(runtime: IdaRuntime, decl: str, *, replace: bool, c
 def _parse_type_declarations_with_clang(runtime: IdaRuntime, decl: str) -> int:
     ida_typeinf = runtime.mod("ida_typeinf")
     ida_srclang = runtime.mod("ida_srclang")
-    hti_flags = ida_typeinf.HTI_DCL | ida_typeinf.HTI_SEMICOLON
-    if "::" in decl:
-        hti_flags |= getattr(ida_typeinf, "HTI_RELAXED", 0)
+    hti_flags = _clang_parse_flags(ida_typeinf, decl, test=False)
     errors = ida_srclang.parse_decls_with_parser_ext("clang", None, decl, hti_flags)
     if errors < 0:
         raise IdaOperationError("clang parser is unavailable for type declare")
     return errors
+
+
+def _clang_parse_flags(ida_typeinf: Any, decl: str, *, test: bool) -> int:
+    hti_flags = ida_typeinf.HTI_DCL | ida_typeinf.HTI_SEMICOLON
+    if test:
+        hti_flags |= getattr(ida_typeinf, "HTI_TST", 0)
+    if "::" in decl:
+        hti_flags |= getattr(ida_typeinf, "HTI_RELAXED", 0)
+    return hti_flags
+
+
+def _test_type_declarations(runtime: IdaRuntime, decl: str, *, replace: bool, clang: bool) -> int:
+    ida_typeinf = runtime.mod("ida_typeinf")
+    if clang:
+        ida_srclang = runtime.mod("ida_srclang")
+        hti_flags = _clang_parse_flags(ida_typeinf, decl, test=True)
+        with ida_undo_restore_point(
+            runtime,
+            action_name="idac_type_check_clang",
+            label="idac type check clang",
+            unavailable_message="type check --clang requires IDA undo support",
+            restore_error_message="type check --clang could not restore the trial import via undo",
+        ):
+            errors = ida_srclang.parse_decls_with_parser_ext("clang", None, decl, hti_flags)
+            if errors < 0:
+                raise IdaOperationError("clang parser is unavailable for type check")
+            return errors
+
+    parse_decls = getattr(ida_typeinf, "parse_decls", None)
+    if callable(parse_decls):
+        hti_flags = ida_typeinf.HTI_DCL | ida_typeinf.HTI_SEMICOLON | getattr(ida_typeinf, "HTI_TST", 0)
+        if "::" in decl:
+            hti_flags |= getattr(ida_typeinf, "HTI_RELAXED", 0)
+        return int(parse_decls(None, decl, None, hti_flags))
+
+    return _trial_type_parse_errors(runtime, decl, replace=replace, clang=False, label="check")
 
 
 def _typedef_alias_names(text: str) -> set[str]:
@@ -1004,6 +1039,26 @@ def _type_declare(context: OperationContext, request: TypeDeclareRequest) -> Typ
     )
 
 
+def _type_declare_check(context: OperationContext, request: TypeDeclareRequest) -> TypeDeclareResult:
+    runtime = context.runtime
+    decl, aliases_applied = _apply_type_aliases(request.decl, list(request.aliases))
+    chunks, brace_balance = _parse_declaration_chunks(decl)
+    errors = _test_type_declarations(runtime, decl, replace=request.replace, clang=request.clang)
+    result = _type_declare_result(
+        decl,
+        replace=request.replace,
+        errors=errors,
+        before={},
+        after={},
+        aliases_applied=aliases_applied,
+        chunks=chunks,
+        brace_balance=brace_balance,
+        bisect=None,
+    )
+    result["check"] = True
+    return result
+
+
 def op_type_declare(runtime: IdaRuntime, params: dict[str, Any]) -> TypeDeclareResult:
     return _type_declare(OperationContext(runtime=runtime), _parse_request(params))
 
@@ -1020,6 +1075,11 @@ def type_declare_operations() -> tuple[OperationSpec[object, object], ...]:
                 capture_after=_preview_snapshot,
                 use_undo=True,
             ),
+        ),
+        OperationSpec(
+            name="type_declare_check",
+            parse=_parse_request,
+            run=_type_declare_check,
         ),
     )
 
@@ -1040,6 +1100,7 @@ __all__ = [
     "_normalize_aliases",
     "_opaque_by_value_members",
     "_split_declarations",
+    "_test_type_declarations",
     "_type_declare_diagnostics",
     "op_type_declare",
     "type_declare_operations",

@@ -1256,6 +1256,88 @@ def test_type_declare_clang_uses_srclang_parser_ext() -> None:
     assert calls == [("clang", None, "struct ns::Widget { int value; };", 0x280400)]
 
 
+def test_type_declare_check_uses_parse_decls_test_flag() -> None:
+    calls: list[tuple[object, str, object, int]] = []
+
+    class FakeIdaTypeInf:
+        HTI_DCL = 0x400
+        HTI_SEMICOLON = 0x200000
+        HTI_RELAXED = 0x80000
+        HTI_TST = 0x20
+
+        @staticmethod
+        def parse_decls(til: object, decl: str, printer: object, flags: int) -> int:
+            calls.append((til, decl, printer, flags))
+            return 0
+
+    class FakeRuntime:
+        def mod(self, name: str):
+            if name == "ida_typeinf":
+                return FakeIdaTypeInf()
+            raise AssertionError(name)
+
+    errors = type_declare._test_type_declarations(
+        FakeRuntime(),
+        "struct ns::Widget { int value; };",
+        replace=False,
+        clang=False,
+    )
+
+    assert errors == 0
+    assert calls == [(None, "struct ns::Widget { int value; };", None, 0x280420)]
+
+
+def test_type_declare_check_clang_runs_parser_under_undo() -> None:
+    calls: list[tuple[object, ...]] = []
+
+    class FakeUndo:
+        @staticmethod
+        def create_undo_point(**kwargs) -> bool:
+            calls.append(("undo_create", kwargs["action_name"], kwargs["label"]))
+            return True
+
+        @staticmethod
+        def perform_undo() -> bool:
+            calls.append(("undo",))
+            return True
+
+    class FakeIdaTypeInf:
+        HTI_DCL = 0x400
+        HTI_SEMICOLON = 0x200000
+        HTI_RELAXED = 0x80000
+        HTI_TST = 0x20
+
+    class FakeIdaSrclang:
+        @staticmethod
+        def parse_decls_with_parser_ext(parser_name: str, til: object, decl: str, flags: int) -> int:
+            calls.append(("parse", parser_name, til, decl, flags))
+            return 0
+
+    class FakeRuntime:
+        def mod(self, name: str):
+            if name == "ida_undo":
+                return FakeUndo()
+            if name == "ida_typeinf":
+                return FakeIdaTypeInf()
+            if name == "ida_srclang":
+                return FakeIdaSrclang()
+            raise AssertionError(name)
+
+    errors = type_declare._test_type_declarations(
+        FakeRuntime(),
+        "struct ns::Widget { int value; };",
+        replace=False,
+        clang=True,
+    )
+
+    assert errors == 0
+    assert calls == [
+        ("undo_create", "idac_type_check_clang", "idac type check clang"),
+        ("parse", "clang", None, "struct ns::Widget { int value; };", 0x280420),
+        ("undo",),
+    ]
+
+
 def test_type_declare_clang_reports_unavailable_parser() -> None:
     class FakeIdaTypeInf:
         HTI_DCL = 0x400
