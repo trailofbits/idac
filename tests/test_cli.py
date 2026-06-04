@@ -1220,6 +1220,250 @@ def test_batch_rejects_mutating_commands_without_out_before_execution(tmp_path: 
     assert "line is 1: comment set main entry" in captured.err
 
 
+def test_batch_lint_reports_mutating_without_out_before_execution(tmp_path: Path, capsys, monkeypatch) -> None:
+    batch_path = tmp_path / "commands.txt"
+    decl_file = tmp_path / "types.h"
+    decl_file.write_text("typedef int sample_type;\n", encoding="utf-8")
+    batch_path.write_text("type declare --decl-file types.h\n", encoding="utf-8")
+
+    def fake_execute(parsed, *, root_parser):
+        raise AssertionError("batch lint should not execute child commands")
+
+    monkeypatch.setattr("idac.cli2.batch.execute_parsed", fake_execute)
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "mutating batch command requires wrapper --out" in captured.out
+
+
+def test_batch_lint_writes_report_and_warns_on_name_local_selector_after_type_phase(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    batch_path = tmp_path / "commands.txt"
+    out_path = tmp_path / "lint.json"
+    decl_file = tmp_path / "types.h"
+    decl_file.write_text("typedef int sample_type;\n", encoding="utf-8")
+    batch_path.write_text(
+        "\n".join(
+            [
+                "type declare --decl-file types.h",
+                "function locals update main v1 --rename count",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fake_execute(parsed, *, root_parser):
+        raise AssertionError("batch lint should not execute child commands")
+
+    monkeypatch.setattr("idac.cli2.batch.execute_parsed", fake_execute)
+
+    exit_code = main(["batch", str(batch_path), "--lint", "-o", str(out_path)])
+
+    assert exit_code == 0
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["mode"] == "lint"
+    assert payload["commands_total"] == 2
+    assert payload["warnings_total"] == 1
+    assert "name-only local selector after type/prototype/reanalysis work" in payload["warnings"][0]["message"]
+    capsys.readouterr()
+
+
+def test_batch_lint_reports_command_local_validation_errors(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    out_path = tmp_path / "lint.json"
+    batch_path.write_text("function locals update main v1\n", encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint", "-o", str(out_path)])
+
+    assert exit_code == 1
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["ok"] is False
+    assert payload["errors_total"] == 1
+    assert payload["results"][0]["status"] == "failed"
+    assert "at least one of --rename or declaration input is required" in payload["results"][0]["stderr"]
+    capsys.readouterr()
+
+
+def test_batch_lint_rejects_incomplete_command_groups(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("function\ntype struct\n", encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["errors_total"] == 2
+    assert payload["results"][0]["exit_code"] == 2
+    assert "usage: idac function" in payload["results"][0]["stderr"]
+    assert payload["results"][1]["exit_code"] == 2
+    assert "usage: idac type struct" in payload["results"][1]["stderr"]
+
+
+def test_batch_lint_reports_disasm_missing_selector(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("disasm\n", encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "disasm requires a function or --start/--end" in captured.out
+
+
+def test_batch_lint_reports_type_list_missing_pattern_or_out(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("type list\n", encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "this list can be very large" in captured.out
+
+
+def test_batch_lint_accepts_disasm_range_and_type_list_filter(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("disasm --start 0x1000 --end 0x1010\ntype list Foo\n", encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["commands_linted"] == 2
+
+
+def test_batch_lint_rejects_forwarded_context_for_no_context_commands(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("docs cli\n", encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint", "-c", "db:/tmp/demo.i64"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "`idac docs` does not accept -c/--context" in captured.out
+
+
+def test_batch_lint_rejects_forwarded_timeout_for_no_context_commands(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("docs cli\n", encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint", "--timeout", "1"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "`idac docs` does not accept --timeout" in captured.out
+
+
+def test_batch_lint_reports_missing_relative_input_file(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("type check --decl-file missing.h\n", encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "decl_file path does not exist" in captured.out
+
+
+def test_batch_lint_reports_missing_required_timeout(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text('search bytes "74 69 6e 79" --segment __TEXT\n', encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "`idac search bytes` requires --timeout" in captured.out
+
+
+def test_batch_lint_accepts_batch_safe_no_context_commands(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("docs cli\ndoctor\n", encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["commands_total"] == 2
+    assert payload["commands_linted"] == 2
+    assert payload["errors"] == []
+
+
+def test_batch_lint_reports_preview_wrapped_missing_input_file(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("preview function prototype set main --decl-file missing.h\n", encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "decl_file path does not exist" in captured.out
+
+
+def test_batch_lint_reports_preview_wrapped_missing_required_timeout(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text('preview search bytes "74 69 6e 79" --segment __TEXT\n', encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "`idac search bytes` requires --timeout" in captured.out
+
+
+def test_batch_lint_reports_preview_wrapped_unsupported_command(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text('preview py exec --code "result = 1"\n', encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "command is not available in preview mode" in captured.out
+
+
+def test_batch_lint_rejects_preview_wrapped_incomplete_command_group(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    batch_path.write_text("preview function\n", encoding="utf-8")
+
+    exit_code = main(["batch", str(batch_path), "--lint"])
+
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["errors_total"] == 1
+    assert payload["results"][0]["exit_code"] == 2
+    assert "usage: idac function" in payload["results"][0]["stderr"]
+
+
+def test_batch_records_missing_local_apply_file_in_ordered_output(tmp_path: Path, capsys) -> None:
+    batch_path = tmp_path / "commands.txt"
+    out_path = tmp_path / "batch.json"
+    batch_path.write_text(
+        "function locals apply -c db:/tmp/demo.i64 main --json-file missing-locals.json\n",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["batch", str(batch_path), "-o", str(out_path)])
+
+    assert exit_code == 1
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["ok"] is False
+    assert payload["commands_failed"] == 1
+    row = payload["results"][0]
+    assert row["status"] == "failed"
+    assert row["exit_code"] == 1
+    assert "failed to read local apply JSON file" in row["stderr"]
+    capsys.readouterr()
+
+
 def test_batch_preserves_argparse_error_in_structured_output(tmp_path: Path, capsys) -> None:
     batch_path = tmp_path / "commands.txt"
     out_path = tmp_path / "batch.json"

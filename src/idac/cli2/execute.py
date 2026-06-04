@@ -6,7 +6,7 @@ from .context import apply_context, require_timeout_if_needed, resolve_context, 
 from .errors import CliUserError
 
 
-def _reject_unsupported_forwarded_context(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+def reject_unsupported_forwarded_context(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if args._uses_context:
         return
     command = f"`{parser.prog}`"
@@ -18,7 +18,7 @@ def _reject_unsupported_forwarded_context(parser: argparse.ArgumentParser, args:
 
 def prepare_args(args: argparse.Namespace) -> argparse.Namespace:
     parser = args._selected_parser
-    _reject_unsupported_forwarded_context(parser, args)
+    reject_unsupported_forwarded_context(parser, args)
     if args._uses_context:
         require_timeout_if_needed(args)
         resolved = resolve_context(parser, args)
