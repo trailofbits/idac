@@ -7,7 +7,7 @@ These templates are generic starting points for common `idac` mutation passes.
 - `rename-pass.idac`
   - Use for selective local renames after reanalysis and a fresh locals dump.
 - `checkpoint-note.md`
-  - Use for short pass notes that separate confirmed changes, failures, remaining unknowns, and next steps.
+  - Use for per-target `audit/<target>-recovery.md` entries that separate confirmed changes, failures, open questions, and next steps.
 - `locals-jq-snippets.sh`
   - Use for inspecting the wrapped `function locals list --json --out ...` artifact shape without rediscovering the `jq` filters.
 

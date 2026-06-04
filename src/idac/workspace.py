@@ -174,7 +174,7 @@ def initialize_workspace(dest: Path, *, force: bool = False) -> dict[str, Any]:
 
     reference_created, reference_overwritten = _copy_tree(
         skill_reference_source_dir(),
-        destination / "reference",
+        destination / "references",
         tracking_root=destination,
         force=force,
         workspace_exists=workspace_exists,
@@ -204,7 +204,7 @@ def initialize_workspace(dest: Path, *, force: bool = False) -> dict[str, Any]:
         },
         "next_steps": [
             "Run `idac misc skill install` if you haven't already",
-            "Edit CLAUDE.md to set your default target",
+            "Edit AGENTS.md to set your default target",
             "Commit when the workspace looks right",
         ],
     }

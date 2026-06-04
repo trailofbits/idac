@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This file documents the current public `idac` surface.
+Read this when bridge/backend state, mutation failures, stale decompiler output, or sandbox socket access is unclear.
 
 ## No GUI targets found
 
@@ -34,25 +34,21 @@ idac decompile "sub_08041337" -c "pid:<pid>"
 
 ## Open a binary with `idalib`
 
-The `idalib` backend can open a binary that IDA recognizes. Try this before looking for a prebuilt database:
-
-```bash
-idac database open "/path/to/binary" --json
-idac targets list --json
-idac database show -c "db:/path/to/binary" --json
-idac decompile "main" -c "db:/path/to/binary" --f5
-```
-
-For large binaries or first-time autoanalysis, omit `--timeout` so the import can block indefinitely unless the user asked for a deadline. Do not wrap this import in a shell-level timeout or a tool-call timeout; let the command keep running and poll the session if your tool supports incremental output. If `main` is not named after a raw import, use `start_ea` / `entry_ea` from `database show --json` or an address from `function list --json`. If the target has multiple architectures, provide the intended architecture slice so IDA does not need an interactive loader choice.
+The `idalib` backend can open a binary that IDA recognizes. For the canonical command sequence, timeout guidance, and `main` fallback, read [targets-and-backends.md](targets-and-backends.md#database-context).
 
 ## `idalib` changes did not reach disk
 
-That is expected until you save the open database:
+That is expected until you save the open database. `database close -c "db:sample.i64"` saves before closing by default; use `database close -c "db:sample.i64" --discard` to abandon pending changes.
 
 ```bash
 idac database save -c "db:sample.i64"
 idac database close -c "db:sample.i64"
+idac database close -c "db:sample.i64" --discard
 ```
+
+## `function prototype set` reports unknown type(s)
+
+Declare the missing support or placeholder types first, then retry the prototype. See `idac docs workflows` for the safe mutation loop and `idac docs class-recovery` for support-type ordering.
 
 ## Preview did not persist
 
@@ -106,7 +102,7 @@ idac decompile "sub_08041337"
 idac decompile "sub_08041337" --f5
 ```
 
-`--f5` is an alias for `--no-cache` and forces a fresh Hex-Rays pass instead of reusing cached pseudocode.
+`--f5` forces a fresh Hex-Rays pass instead of reusing cached pseudocode.
 If the issue is backend-related, rerun `doctor` first.
 
 ## Large readback is hard to inspect inline

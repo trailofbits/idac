@@ -134,9 +134,9 @@ To run from a checkout without installing globally, use `uv run idac --help`.
 - **`gui`** connects to a running IDA desktop over a Unix-socket bridge plugin. With exactly one GUI open, most commands need no `-c` at all. Use `-c pid:<pid>` or `-c <module>` to pick one of several open sessions.
 - **`idalib`** opens a `.i64`/`.idb`/binary in a short-lived headless worker. Passing `-c "db:<path>"` starts or reuses a per-database `idalib` process automatically; those rows show `backend: "idalib"` in `targets list --json`.
 
-Discover everything that's reachable with `idac targets list --json`. Checkpoint headless state with `idac database save -c "db:<path>"` and tear it down with `idac database close -c "db:<path>"`.
+Discover everything that's reachable with `idac targets list --json`. Checkpoint headless state with `idac database save -c "db:<path>"`; `idac database close -c "db:<path>"` saves before closing by default, and `--discard` abandons pending changes.
 
-Unix-socket access is required for all live GUI operations, read-only and mutating alike. If read-only commands succeed but a mutation fails, troubleshoot the underlying IDA/database error rather than assuming a permission split.
+For bridge socket and sandbox diagnostics, run `idac docs troubleshooting`.
 
 ## Agent sandbox setup
 
@@ -146,13 +146,13 @@ Scaffold a project-local reversing workspace for sandboxed agents:
 idac workspace init reversing-workspace
 ```
 
-That creates workspace-local `.claude/` and `.codex/` config, agent guidance files, prompt templates, a `reference/` copy of the bundled skill docs, and a git-backed directory layout for RE work. The generated sandbox settings are intentionally broad so sandboxed agents can reach the `idac` Unix socket bridge.
+That creates workspace-local `.claude/` and `.codex/` config, agent guidance files, prompt templates, a `references/` copy of the bundled skill docs, and a git-backed directory layout for RE work. The generated sandbox settings are intentionally broad so sandboxed agents can reach the `idac` Unix socket bridge.
 
 To customize the generated files, see the templates under [src/idac/workspace_template/default](src/idac/workspace_template/default).
 
 ## Usage
 
-Use `idac <command> --help` for one subcommand, `idac --full-help` for the complete CLI surface, and `idac docs` for an index of bundled command, workflow, and IDA reference material (`idac docs cli`, `idac docs workflows`, `idac docs class-recovery`, ...).
+Use `idac <command> --help` for one subcommand, `idac --full-help` for the complete CLI surface, and `idac docs` for an index of bundled command, workflow, and IDA reference material (`idac docs guide`, `idac docs cli`, `idac docs workflows`, `idac docs class-recovery`, ...).
 
 ### Command families
 
@@ -208,7 +208,8 @@ idac decompilemany "Handler_" --out-dir "decomp/" -c "db:sample.i64"
 idac decompilemany "Handler_.*" --regex --out-dir "decomp/" --disasm --ctree
 
 printf '%s\n' main sub_401000 0x401234 > funcs.txt
-idac decompilemany --functions-file "funcs.txt" --out-file "decompile.c"
+idac decompilemany --functions-file "funcs.txt" --out-dir "decomp-exact/"
+# Or use --out-file for one combined text file without a manifest.
 ```
 
 Pass `--f5` after type or prototype changes so each function reflects the latest state. With `--out-dir`, the manifest records each function's `name`, exact `address`, and artifact paths.

@@ -36,8 +36,8 @@ def test_workspace_init_creates_expected_tree(idac_cmd: list[str], idac_env: dic
     assert (dest / "scripts").is_dir()
     assert not any(path.is_file() and path.name != ".gitkeep" for path in (dest / "scripts").iterdir())
     assert (dest / "prompts" / "general-analysis.md").is_file()
-    assert (dest / "reference" / "cli.md").is_file()
-    assert (dest / "reference" / "class-recovery.md").is_file()
+    assert (dest / "references" / "cli.md").is_file()
+    assert (dest / "references" / "class-recovery.md").is_file()
     assert (dest / ".git").is_dir()
     assert _git_repo_root(dest) == dest.resolve()
     assert "Initialized git repository." in proc.stdout
@@ -45,8 +45,8 @@ def test_workspace_init_creates_expected_tree(idac_cmd: list[str], idac_env: dic
     assert ".codex/rules/" in proc.stdout
     assert "audit/.gitkeep" in proc.stdout
     assert "prompts/general-analysis.md" in proc.stdout
-    assert "reference/cli.md" in proc.stdout
-    assert "reference/workflows.md" in proc.stdout
+    assert "references/cli.md" in proc.stdout
+    assert "references/workflows.md" in proc.stdout
     assert ".idac/" in proc.stdout
     assert ".idac/tmp/" in proc.stdout
 
@@ -62,7 +62,7 @@ def test_workspace_init_into_existing_empty_directory_succeeds(
     assert proc.returncode == 0, proc.stderr or proc.stdout
     assert (dest / ".idac" / "tmp").is_dir()
     assert (dest / "CLAUDE.md").is_file()
-    assert (dest / "reference" / "cli.md").is_file()
+    assert (dest / "references" / "cli.md").is_file()
 
 
 def test_workspace_init_refuses_existing_workspace_without_force(
@@ -87,7 +87,7 @@ def test_workspace_init_force_overwrites_config_but_preserves_content(
 
     claude_path = dest / "CLAUDE.md"
     prompt_path = dest / "prompts" / "general-analysis.md"
-    reference_path = dest / "reference" / "cli.md"
+    reference_path = dest / "references" / "cli.md"
     custom_audit_note = dest / "audit" / "finding.txt"
     original_claude = claude_path.read_text(encoding="utf-8")
 

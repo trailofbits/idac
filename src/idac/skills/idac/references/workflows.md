@@ -1,6 +1,6 @@
 # Common Workflows
 
-This file documents the current public `idac` workflows.
+Read this for safe mutation, batch, selector calibration, broad discovery, and post-mutation readback.
 
 ## Contents
 
@@ -39,14 +39,14 @@ Live GUI notes:
 
 ## Open a binary
 
+For detailed context selection and first-time import guidance, read [targets-and-backends.md](targets-and-backends.md).
+
 ```bash
 idac database open "/path/to/binary" --json
 idac targets list --json
 idac database show -c "db:/path/to/binary" --json
 idac decompile "main" -c "db:/path/to/binary" --f5
 ```
-
-For large binaries or first-time autoanalysis, omit `--timeout` so the import can block indefinitely unless the user asked for a deadline. Do not wrap this import in a shell-level timeout or a tool-call timeout; let the command keep running and poll the session if your tool supports incremental output. `targets list --json` should show a `backend: "idalib"` row for the opened path. If the raw import does not name `main`, decompile `start_ea` / `entry_ea` from `database show --json` or an address from `function list --json`. If the target has multiple architectures, provide the intended architecture slice so IDA does not need an interactive loader choice.
 
 ## Work from an existing database file
 
@@ -85,7 +85,7 @@ idac function prototype show "sub_08041337"
 idac preview -o "/tmp/proto_preview.json" function prototype set "sub_08041337" --decl "int __fastcall sub_08041337(void *ctx, const unsigned char *buf, unsigned int len)"
 idac preview -o "/tmp/proto_file_preview.json" function prototype set "sub_08041337" --decl-file "sub_08041337_proto.h"
 idac preview -o "/tmp/local_update_preview.json" function locals update "sub_08041337" "v12" --rename "value_maybe" --decl "unsigned int value_maybe;"
-idac preview -o "/tmp/local_rename_preview.json" function locals rename "sub_08041337" "v12" --new-name "value_maybe"
+idac preview -o "/tmp/local_rename_preview.json" function locals rename "sub_08041337" "v13" --new-name "entry_count"
 idac preview -o "/tmp/local_retype_preview.json" function locals retype "sub_08041337" "v4" --type "unsigned int"
 idac preview -o "/tmp/local_retype_decl_preview.json" function locals retype "sub_08041337" "v4" --decl "unsigned int v4;"
 idac preview -o "/tmp/local_retype_file_preview.json" function locals retype "sub_08041337" "v4" --decl-file "local_v4.h"
@@ -93,6 +93,8 @@ idac preview -o "/tmp/type_preview.json" type declare --decl "typedef struct Exa
 idac preview -o "/tmp/type_replace_preview.json" type declare --replace --decl-file "recovered_classes.h"
 idac preview -o "/tmp/type_clang_preview.json" type declare --clang --decl-file "recovered_templates.hpp"
 ```
+
+The positional local selectors in these previews are for pre-reanalysis one-off checks. After `misc reanalyze`, committed rename or retype batches should switch to `--index` or `--local-id`; see [Selector calibration](#selector-calibration).
 
 Then commit the real change and read it back:
 
@@ -155,7 +157,7 @@ Local rename caution:
 - Split rename work per function, and reread `function locals list --json` between functions
 - Use `--decl` for small one-off edits; prefer `--decl-file` in batch files and other long mutation passes
 - Prefer `jq` or `sed` for shell inspection of JSON artifacts instead of assuming bare `python` exists
-  Example: `idac function locals list "sub_08041337" --json | jq -r '.locals[] | [.index, .local_id, .name, .type] | @tsv'`
+  Example: `idac function locals list "sub_08041337" --json | jq -r '.locals[] | [.index, .local_id, .display_name, .type] | @tsv'`
 
 ## Batch
 
@@ -167,20 +169,21 @@ Batch files should:
 
 - use one `idac` subcommand per line
 - omit the leading `idac`
-- omit `-c`, `--timeout`, `--format`, and `--out`
+- omit `-c`, `--timeout`, and `--format`
+- omit per-command `--out` for mutation logging; use child `--out` only when that specific read command must write its own artifact
 - prefer `--decl-file` for long type or prototype text
 - always pass `--out` to `batch` so the full step log is captured in a stable artifact
-- keep related `--decl-file`, `--file`, and per-line `--out` paths next to the batch file; relative child paths are resolved from the batch file directory
+- keep related `--decl-file`, `--functions-file`, and explicit child artifact paths next to the batch file; relative child paths are resolved from the batch file directory
 - prefer one ordered `batch` file over multiple background `idac` processes for mutation passes
-- include `batch --out` for any persistent mutation; without it, mutating batches are rejected before execution
+- mutating batches without wrapper `batch --out` are rejected before execution
 
 ```text
 # recovery.idac
 type declare --replace --decl-file "recovered_classes.h"
 function prototype set "ExampleDerived__method_1" --decl-file "example_method_1.h"
-function locals update "ExampleDerived__method_1" "v12" --rename "value_maybe" --decl-file "example_local.h"
-function locals rename "ExampleDerived__method_1" "v12" --new-name "value_maybe"
-function locals retype "ExampleDerived__method_1" "value_maybe" --decl-file "example_local.h"
+function locals update "ExampleDerived__method_1" --local-id "stack(16)@0x100000460" --rename "value_maybe" --decl-file "example_local.h"
+function locals rename "ExampleDerived__method_1" --index 6 --new-name "entry_count"
+function locals retype "ExampleDerived__method_1" --index 7 --decl-file "example_local_7.h"
 preview function prototype set "ExampleDerived__method_1" --decl-file "example_method_1.h"
 ```
 

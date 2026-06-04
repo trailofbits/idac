@@ -10,6 +10,7 @@ The command grammar for the `idac` CLI.
 - `function list` text output includes the containing section, such as `.plt` or `.text`
 - `function list --demangle` matches and renders demangled display names
 - `function metadata` and JSON `function list` rows include `display_name` when available; JSON `function list` rows also include `section`
+- function-taking commands can resolve a unique demangled C++ name such as `ExampleClass::method_1`; if multiple functions match, use a mangled name, full signature, or address
 - `segment list` lists database segments
 - setup, maintenance, and utility commands live under `misc`
 
@@ -17,6 +18,7 @@ The command grammar for the `idac` CLI.
 
 ```bash
 idac docs
+idac docs guide
 idac docs workflows
 idac function list
 idac function list --demangle
@@ -30,9 +32,11 @@ idac function metadata "sub_08041337"
 idac function frame "sub_08041337"
 idac function stackvars "sub_08041337"
 idac function callees "sub_08041337"
+idac function callers "sub_08041337"
 idac function prototype show "sub_08042010"
 idac function locals list "sub_08041337"
 idac decompile "sub_08041337"
+idac decompile "ExampleClass::method_1"
 idac decompile "sub_08041337" -o "/tmp/sub_08041337.txt"
 idac decompilemany "sub_08041337" --out-file "/tmp/sub_08041337.c"
 idac decompilemany --functions-file "funcs.txt" --out-dir "/tmp/decomp"
@@ -81,10 +85,10 @@ Example batch file:
 type declare --replace --decl-file "recovered_types.h"
 type declare --clang --decl-file "recovered_templates.hpp"
 function prototype set "sub_08041337" --decl-file "sub_08041337_proto.h"
-function locals update "sub_08041337" "v12" --rename "value_maybe" --decl-file "local_v4.h"
-function locals rename "sub_08041337" "v12" --new-name "value_maybe"
-function locals retype "sub_08041337" "value_maybe" --type "unsigned int"
-function locals retype "sub_08041337" "value_maybe" --decl-file "local_v4.h"
+function locals update "sub_08041337" --local-id "stack(16)@0x100000460" --rename "value_maybe" --decl-file "local_v4.h"
+function locals rename "sub_08041337" --index 6 --new-name "entry_count"
+function locals retype "sub_08041337" --index 7 --type "unsigned int"
+function locals retype "sub_08041337" --index 8 --decl-file "local_v8.h"
 preview function prototype set "sub_08041337" --decl-file "sub_08041337_proto.h"
 ```
 
@@ -107,7 +111,7 @@ Some `misc` commands are intentionally unavailable in `preview` or `batch`.
 ## Bundled docs
 
 `idac docs` prints an agent-oriented index of bundled reference material without needing a live IDA target.
-Use `idac docs TOPIC` for focused guidance, such as `cli`, `workflows`, `targets`, `troubleshooting`, `class-recovery`, `ida-cpp-type-details`, `ida-set-types`, `templates`, or `workspace`.
+Use `idac docs TOPIC` for focused guidance, such as `guide`, `cli`, `workflows`, `targets`, `troubleshooting`, `class-recovery`, `ida-cpp-type-details`, `ida-set-types`, `ida-advanced-type-annotations`, `templates`, or `workspace`.
 Use `idac docs --list` to list every topic and `idac docs --all --out docs.md` to write all bundled docs to a file.
 
 ## Output notes

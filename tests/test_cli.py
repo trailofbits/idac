@@ -211,16 +211,39 @@ def test_docs_default_prints_agent_oriented_index(capsys) -> None:
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "Use `idac docs TOPIC`" in output
+    assert "Start here:" in output
     assert "CLI and operation help:" in output
     assert "IDA reference:" in output
     assert "Workflows:" in output
     assert "Workspace resources:" in output
+    assert "idac docs guide" in output
     assert "idac docs cli" in output
     assert "idac docs workflows" in output
     assert "idac docs class-recovery" in output
+    assert output.index("idac docs guide") < output.index("idac docs troubleshooting")
     assert output.index("idac docs cli") < output.index("idac docs troubleshooting")
     assert output.index("idac docs troubleshooting") < output.index("idac docs ida-cpp-type-details")
     assert output.index("idac docs ida-cpp-type-details") < output.index("idac docs workflows")
+
+
+def test_docs_guide_prints_frontmatter_stripped_skill_body(capsys) -> None:
+    exit_code = main(["docs", "guide"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert output.startswith("# idac")
+    assert "---" not in output.splitlines()[:3]
+    assert "## Critical defaults" in output
+    assert "## Reference index" in output
+
+
+def test_docs_skill_alias_prints_guide(capsys) -> None:
+    exit_code = main(["docs", "skill"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert output.startswith("# idac")
+    assert "## Critical defaults" in output
 
 
 def test_docs_topic_prints_bundled_reference(capsys) -> None:
@@ -246,6 +269,8 @@ def test_docs_list_prints_available_topics(capsys) -> None:
 
     assert exit_code == 0
     output = capsys.readouterr().out
+    assert "Start here:" in output
+    assert "guide" in output
     assert "CLI and operation help:" in output
     assert "IDA reference:" in output
     assert "Workspace resources:" in output
@@ -256,7 +281,8 @@ def test_docs_list_prints_available_topics(capsys) -> None:
     assert "prototype-pass" not in output
     assert "prompt-class-recovery-pass" not in output
     assert "claude-workspace" not in output
-    assert "skill" not in output
+    assert "\n  skill " not in output
+    assert output.index("  guide") < output.index("  cli")
     assert output.index("  cli") < output.index("  troubleshooting")
     assert output.index("  troubleshooting") < output.index("  targets")
     assert output.index("  targets") < output.index("  ida-cpp-type-details")
@@ -647,21 +673,21 @@ def test_workspace_init_runs_on_public_cli(tmp_path: Path, capsys) -> None:
         "prompts/reverse-engineer.md",
         "scripts/",
         "scripts/.gitkeep",
-        "reference/",
-        "reference/class-recovery.md",
-        "reference/cli.md",
-        "reference/ida-advanced-type-annotations.md",
-        "reference/ida-cpp-type-details.md",
-        "reference/ida-set-types.md",
-        "reference/targets-and-backends.md",
-        "reference/templates/",
-        "reference/templates/README.md",
-        "reference/templates/checkpoint-note.md",
-        "reference/templates/locals-jq-snippets.sh",
-        "reference/templates/prototype-pass.idac",
-        "reference/templates/rename-pass.idac",
-        "reference/troubleshooting.md",
-        "reference/workflows.md",
+        "references/",
+        "references/class-recovery.md",
+        "references/cli.md",
+        "references/ida-advanced-type-annotations.md",
+        "references/ida-cpp-type-details.md",
+        "references/ida-set-types.md",
+        "references/targets-and-backends.md",
+        "references/templates/",
+        "references/templates/README.md",
+        "references/templates/checkpoint-note.md",
+        "references/templates/locals-jq-snippets.sh",
+        "references/templates/prototype-pass.idac",
+        "references/templates/rename-pass.idac",
+        "references/troubleshooting.md",
+        "references/workflows.md",
         ".idac/",
         ".idac/tmp/",
     ]
