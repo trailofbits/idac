@@ -26,6 +26,12 @@ class FunctionIdentifierRequest:
 
 
 @dataclass(frozen=True)
+class DisasmRangeRequest:
+    start: str
+    end: str
+
+
+@dataclass(frozen=True)
 class DecompileRequest:
     identifier: str
     no_cache: bool
@@ -219,6 +225,13 @@ def _function_list(context: OperationContext, request: FunctionListRequest) -> t
 
 def _parse_identifier(params: dict[str, object]) -> FunctionIdentifierRequest:
     return FunctionIdentifierRequest(identifier=_require_identifier(params))
+
+
+def _parse_disasm_range(params: dict[str, object]) -> DisasmRangeRequest:
+    return DisasmRangeRequest(
+        start=require_str(params.get("start"), field="range start"),
+        end=require_str(params.get("end"), field="range end"),
+    )
 
 
 def _function_show(context: OperationContext, request: FunctionIdentifierRequest) -> FunctionShowResult:
@@ -419,6 +432,39 @@ def _disasm(context: OperationContext, request: FunctionIdentifierRequest) -> Te
     return TextResult(text="\n".join(lines))
 
 
+def _disasm_range(context: OperationContext, request: DisasmRangeRequest) -> TextResult:
+    runtime = context.runtime
+    start_ea, end_ea = runtime.resolve_range(start=request.start, end=request.end, require_bounds=True)
+    ida_bytes = runtime.mod("ida_bytes")
+    ida_lines = runtime.mod("ida_lines")
+    ida_idaapi = runtime.mod("ida_idaapi")
+    flags = getattr(ida_lines, "GENDSM_FORCE_CODE", 0) | getattr(ida_lines, "GENDSM_REMOVE_TAGS", 0)
+
+    heads = getattr(runtime.idautils, "Heads", None)
+    if callable(heads):
+        eas = [int(ea) for ea in heads(start_ea, end_ea)]
+    else:
+        eas = []
+        ea = start_ea
+        while ea < end_ea:
+            try:
+                if ida_bytes.is_head(ida_bytes.get_flags(ea)):
+                    eas.append(ea)
+            except Exception:
+                pass
+            next_ea = ida_bytes.next_head(ea, end_ea)
+            if next_ea in (None, getattr(ida_idaapi, "BADADDR", -1)) or int(next_ea) <= ea:
+                break
+            ea = int(next_ea)
+
+    lines: list[str] = []
+    for ea in eas:
+        text = _strip_tags(runtime, ida_lines.generate_disasm_line(ea, flags) or "")
+        if text:
+            lines.append(f"{hex(ea)}: {text}")
+    return TextResult(text="\n".join(lines))
+
+
 def _parse_decompile(params: dict[str, object]) -> DecompileRequest:
     return DecompileRequest(
         identifier=_require_identifier(params),
@@ -602,6 +648,11 @@ def function_operations() -> tuple[OperationSpec[object, object], ...]:
             run=_disasm,
         ),
         OperationSpec(
+            name="disasm_range",
+            parse=_parse_disasm_range,
+            run=_disasm_range,
+        ),
+        OperationSpec(
             name="decompile",
             parse=_parse_decompile,
             run=_decompile,
@@ -635,6 +686,7 @@ __all__ = [
     "CtreeRequest",
     "CtreeResult",
     "DecompileRequest",
+    "DisasmRangeRequest",
     "FrameMember",
     "FrameXref",
     "FunctionFrameResult",

@@ -22,6 +22,7 @@ _RENDERER_NAMES = {
     "function_callers": "render_function_relations",
     "function_callees": "render_function_relations",
     "disasm": "render_lines",
+    "disasm_range": "render_lines",
     "decompile": "render_lines",
     "ctree": "render_lines",
     "search_bytes": "render_search_results",

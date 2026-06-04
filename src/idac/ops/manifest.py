@@ -31,6 +31,7 @@ OperationName = Literal[
     "function_callers",
     "function_callees",
     "disasm",
+    "disasm_range",
     "decompile",
     "ctree",
     "search_bytes",

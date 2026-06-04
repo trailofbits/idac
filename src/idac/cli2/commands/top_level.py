@@ -38,6 +38,13 @@ class ArtifactStem:
     truncated: bool
 
 
+@dataclass(frozen=True)
+class DisasmRequest:
+    op: str
+    render_op: str
+    params: dict[str, object]
+
+
 def _decompilemany_request(args: argparse.Namespace) -> DecompileManyRequest:
     patterns = tuple(item for item in args.patterns if item)
     pattern = patterns[0] if patterns else None
@@ -202,8 +209,25 @@ def run_decompile(args: argparse.Namespace) -> CommandResult:
     )
 
 
+def disasm_request(args: argparse.Namespace) -> DisasmRequest:
+    if args.start is not None or args.end is not None:
+        if args.start is None or args.end is None:
+            raise CliUserError("disasm range requires both --start and --end")
+        if args.function:
+            raise CliUserError("disasm range uses --start/--end; omit the function argument")
+        return DisasmRequest(
+            op="disasm_range",
+            render_op="disasm_range",
+            params={"start": args.start, "end": args.end},
+        )
+    if not args.function:
+        raise CliUserError("disasm requires a function or --start/--end")
+    return DisasmRequest(op="disasm", render_op="disasm", params={"identifier": args.function})
+
+
 def run_disasm(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="disasm", params={"identifier": args.function}, render_op="disasm")
+    request = disasm_request(args)
+    return send_op(args, op=request.op, params=request.params, render_op=request.render_op)
 
 
 def run_ctree(args: argparse.Namespace) -> CommandResult:
@@ -490,10 +514,12 @@ def register(
         _mutating_command=False,
     )
 
-    parser = add_command(root_parser, subparsers, "disasm", help_text="Disassemble a function")
+    parser = add_command(root_parser, subparsers, "disasm", help_text="Disassemble a function or address range")
     add_context_options(parser)
     add_output_options(parser, default_format="text")
-    parser.add_argument("function", help="Function name or address")
+    parser.add_argument("function", nargs="?", help="Function name or address")
+    parser.add_argument("--start", help="Range start address or symbol")
+    parser.add_argument("--end", help="Range end address or symbol")
     parser.set_defaults(
         run=run_disasm, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
     )

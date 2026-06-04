@@ -237,6 +237,31 @@ def test_decompilemany_request_captures_extra_positionals(tmp_path: Path) -> Non
     assert request.include_ctree is False
 
 
+def test_disasm_request_accepts_function_identifier() -> None:
+    args = argparse.Namespace(function="main", start=None, end=None)
+
+    request = top_level.disasm_request(args)
+
+    assert request.op == "disasm"
+    assert request.params == {"identifier": "main"}
+
+
+def test_disasm_request_accepts_range() -> None:
+    args = argparse.Namespace(function=None, start="0x1000", end="0x1010")
+
+    request = top_level.disasm_request(args)
+
+    assert request.op == "disasm_range"
+    assert request.params == {"start": "0x1000", "end": "0x1010"}
+
+
+def test_disasm_request_rejects_missing_selector() -> None:
+    args = argparse.Namespace(function=None, start=None, end=None)
+
+    with pytest.raises(top_level.CliUserError, match="disasm requires a function or --start/--end"):
+        top_level.disasm_request(args)
+
+
 def test_python_exec_request_reads_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     args = argparse.Namespace(code=None, stdin=True, script=None, persist=True)
     monkeypatch.setattr("sys.stdin", io.StringIO("print('hi')\n"))
