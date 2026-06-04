@@ -13,26 +13,36 @@ from ..result import CommandResult
 
 @dataclass(frozen=True)
 class PythonExecRequest:
-    script: str
+    script: str | None
+    script_path: str | None
     persist: bool
 
     def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {"script": self.script}
+        params: dict[str, object] = {}
+        if self.script is not None:
+            params["script"] = self.script
+        if self.script_path is not None:
+            params["script_path"] = self.script_path
         if self.persist:
             params["persist"] = True
         return params
 
 
 def _python_exec_request(args: argparse.Namespace) -> PythonExecRequest:
+    script: str | None = None
+    script_path: str | None = None
     if args.code:
         script = str(args.code)
     elif args.stdin:
         script = sys.stdin.read()
     elif args.script:
-        script = args.script.read_text(encoding="utf-8")
+        path = Path(args.script)
+        if not path.is_file():
+            raise CliUserError(f"script file not found: {path}")
+        script_path = str(path.resolve())
     else:
         raise CliUserError("missing Python input")
-    return PythonExecRequest(script=script, persist=bool(args.persist))
+    return PythonExecRequest(script=script, script_path=script_path, persist=bool(args.persist))
 
 
 def _exec(args: argparse.Namespace) -> CommandResult:
