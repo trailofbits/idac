@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(idac)",
-      "Bash(idac:*)"
+      "Bash(idac:*)",
+      "Bash(uv run idac)",
+      "Bash(uv run idac:*)"
     ]
   },
   "sandbox": {

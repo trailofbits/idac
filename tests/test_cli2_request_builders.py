@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -237,6 +238,31 @@ def test_decompilemany_request_captures_extra_positionals(tmp_path: Path) -> Non
     assert request.include_ctree is False
 
 
+def test_disasm_request_accepts_function_identifier() -> None:
+    args = argparse.Namespace(function="main", start=None, end=None)
+
+    request = top_level.disasm_request(args)
+
+    assert request.op == "disasm"
+    assert request.params == {"identifier": "main"}
+
+
+def test_disasm_request_accepts_range() -> None:
+    args = argparse.Namespace(function=None, start="0x1000", end="0x1010")
+
+    request = top_level.disasm_request(args)
+
+    assert request.op == "disasm_range"
+    assert request.params == {"start": "0x1000", "end": "0x1010"}
+
+
+def test_disasm_request_rejects_missing_selector() -> None:
+    args = argparse.Namespace(function=None, start=None, end=None)
+
+    with pytest.raises(top_level.CliUserError, match="disasm requires a function or --start/--end"):
+        top_level.disasm_request(args)
+
+
 def test_python_exec_request_reads_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     args = argparse.Namespace(code=None, stdin=True, script=None, persist=True)
     monkeypatch.setattr("sys.stdin", io.StringIO("print('hi')\n"))
@@ -245,6 +271,52 @@ def test_python_exec_request_reads_stdin(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert request.script == "print('hi')\n"
     assert request.to_params() == {"script": "print('hi')\n", "persist": True}
+
+
+def test_python_exec_request_preserves_script_path(tmp_path: Path) -> None:
+    script = tmp_path / "script.py"
+    script.write_text("result = __file__\n", encoding="utf-8")
+    args = argparse.Namespace(code=None, stdin=False, script=script, persist=False)
+
+    request = python_exec._python_exec_request(args)
+
+    assert request.script is None
+    assert request.script_path == str(script)
+    assert request.to_params() == {"script_path": str(script)}
+
+
+def test_python_exec_request_resolves_relative_script_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    script = tmp_path / "script.py"
+    script.write_text("result = __file__\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    args = argparse.Namespace(code=None, stdin=False, script=Path("script.py"), persist=False)
+
+    request = python_exec._python_exec_request(args)
+
+    assert request.script is None
+    assert request.script_path == str(script.resolve())
+    assert request.to_params() == {"script_path": str(script.resolve())}
+
+
+def test_python_exec_request_rejects_missing_script_path(tmp_path: Path) -> None:
+    args = argparse.Namespace(code=None, stdin=False, script=tmp_path / "missing.py", persist=False)
+
+    with pytest.raises(python_exec.CliUserError, match="script file not found"):
+        python_exec._python_exec_request(args)
+
+
+def test_locals_apply_plan_params_accepts_items_object(tmp_path: Path) -> None:
+    plan_path = tmp_path / "locals.json"
+    plan_path.write_text(
+        json.dumps({"items": [{"local_id": "stack(16)@0x401000", "rename": "count"}]}),
+        encoding="utf-8",
+    )
+    args = argparse.Namespace(function="sub_401000", json_file=plan_path)
+
+    assert function._locals_apply_plan_params(args) == {
+        "identifier": "sub_401000",
+        "items": [{"local_id": "stack(16)@0x401000", "rename": "count"}],
+    }
 
 
 def test_strings_request_switches_between_scan_and_pattern_modes() -> None:

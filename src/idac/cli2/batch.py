@@ -12,9 +12,9 @@ from typing import Any
 from ..output import write_output_result
 from ..transport import BackendError
 from .argparse_utils import add_command, add_context_options, bind_root_handler
-from .context import merge_parent_context
+from .context import merge_parent_context, require_timeout_if_needed
 from .errors import CliUserError
-from .execute import execute_parsed
+from .execute import execute_parsed, reject_unsupported_forwarded_context
 from .path_resolution import resolve_relative_paths
 from .renderers import TEXT_RENDERERS
 from .result import CommandResult
@@ -103,6 +103,14 @@ def _parse_batch_args(root_parser: argparse.ArgumentParser, argv: list[str]) -> 
         raise BatchParseError(message, exit_code=exit_code) from exc
 
 
+def _reject_handlerless_command(parsed: argparse.Namespace) -> None:
+    if getattr(parsed, "run", None) is not None:
+        return
+    selected_parser = parsed._selected_parser
+    message = selected_parser.format_help().strip() or "missing subcommand"
+    raise BatchParseError(message, exit_code=2)
+
+
 def _execute_batch_args(parsed: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> CommandResult:
     stdout_buffer = io.StringIO()
     stderr_buffer = io.StringIO()
@@ -160,9 +168,231 @@ def _reject_mutating_batch_without_out(
             )
 
 
+def _lint_missing_input_paths(parsed: argparse.Namespace) -> list[str]:
+    missing: list[str] = []
+    output_keys = {"out", "out_file", "out_dir"}
+    for key, value in vars(parsed).items():
+        if key in output_keys or not isinstance(value, Path):
+            continue
+        if not value.exists():
+            missing.append(f"{key} path does not exist: {value}")
+    return missing
+
+
+def _lint_local_selector_warning(parsed: argparse.Namespace, *, after_type_or_reanalysis: bool) -> str | None:
+    parsed_map = vars(parsed)
+    if parsed_map.get("function_command") != "locals":
+        return None
+    if parsed_map.get("locals_command") not in {"rename", "retype", "update"}:
+        return None
+    if parsed_map.get("local_id") or parsed_map.get("index") is not None:
+        return None
+    selector = str(parsed_map.get("selector") or "").strip()
+    if not selector:
+        return None
+    if selector.isdigit() or "@" in selector:
+        return None
+    if after_type_or_reanalysis:
+        return "name-only local selector after type/prototype/reanalysis work; prefer --local-id or --index"
+    return "name-only local selector; prefer --local-id or --index for batch updates"
+
+
+def _lint_changes_local_layout(parsed: argparse.Namespace) -> bool:
+    parsed_map = vars(parsed)
+    if parsed_map.get("misc_command") == "reanalyze":
+        return True
+    if parsed_map.get("type_command") == "declare":
+        return True
+    return parsed_map.get("function_command") == "prototype" and parsed_map.get("prototype_command") == "set"
+
+
+def _lint_command_local_errors(parsed: argparse.Namespace) -> list[str]:
+    parsed_map = vars(parsed)
+    try:
+        if parsed_map.get("command") == "disasm":
+            from .commands import top_level
+
+            top_level.disasm_request(parsed)
+        elif parsed_map.get("type_command") == "list":
+            from .commands import type_commands
+
+            type_commands._type_list_guard(parsed)
+        elif parsed_map.get("function_command") == "locals":
+            from .commands import function as function_commands
+            from .commands.common import local_rename_params, local_retype_params, local_update_params
+
+            locals_command = parsed_map.get("locals_command")
+            if locals_command == "rename":
+                local_rename_params(parsed)
+            elif locals_command == "retype":
+                local_retype_params(parsed)
+            elif locals_command == "update":
+                local_update_params(parsed)
+            elif locals_command == "apply":
+                function_commands._locals_apply_plan_params(parsed)
+        elif parsed_map.get("function_command") == "prototype":
+            from .commands import function as function_commands
+
+            if parsed_map.get("prototype_command") == "set":
+                function_commands._prototype_set_params(parsed)
+    except CliUserError as exc:
+        return [str(exc) or exc.__class__.__name__]
+    return []
+
+
+def _lint_preview_wrapped_command(
+    *,
+    root_parser: argparse.ArgumentParser,
+    preview_args: argparse.Namespace,
+    batch_dir: Path,
+) -> tuple[argparse.Namespace, list[str]]:
+    tokens = list(getattr(preview_args, "command_tokens", None) or [])
+    if tokens and tokens[0] == "--":
+        tokens = tokens[1:]
+    if not tokens:
+        raise CliUserError("preview requires a command to wrap")
+
+    wrapped = _parse_batch_args(root_parser, tokens)
+    wrapped_map = vars(wrapped)
+    if wrapped_map.get("_hidden_command", False) or not wrapped_map.get("allow_preview", True):
+        raise CliUserError("command is not available in preview mode")
+    if wrapped_map.get("command") == "preview":
+        raise CliUserError("nested preview is not supported")
+    _reject_handlerless_command(wrapped)
+
+    merge_parent_context(wrapped, preview_args)
+    reject_unsupported_forwarded_context(wrapped._selected_parser, wrapped)
+    require_timeout_if_needed(wrapped)
+    resolve_relative_paths(wrapped, base_dir=batch_dir)
+    line_errors = _lint_missing_input_paths(wrapped)
+    if not line_errors:
+        line_errors.extend(_lint_command_local_errors(wrapped))
+    return wrapped, line_errors
+
+
+def _lint_batch(
+    *,
+    root_parser: argparse.ArgumentParser,
+    batch_path: Path,
+    out_path: Path | None,
+    parent_args: argparse.Namespace,
+) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    batch_dir = batch_path.parent.resolve(strict=False)
+    after_type_or_reanalysis = False
+    for line_number, stripped in _command_lines(batch_path):
+        try:
+            try:
+                argv = _argv_from_batch_line(stripped)
+            except ValueError as exc:
+                raise BatchParseError(str(exc), exit_code=2) from exc
+            if not argv:
+                raise CliUserError("empty command")
+            parsed = _parse_batch_args(root_parser, argv)
+            parsed_map = vars(parsed)
+            if parsed_map.get("_hidden_command", False) or not parsed_map.get("allow_batch", True):
+                raise CliUserError("command is not available in batch mode")
+            _reject_handlerless_command(parsed)
+            merge_parent_context(parsed, parent_args)
+            reject_unsupported_forwarded_context(parsed._selected_parser, parsed)
+            if parsed_map.get("command") == "preview":
+                lint_target, line_errors = _lint_preview_wrapped_command(
+                    root_parser=root_parser,
+                    preview_args=parsed,
+                    batch_dir=batch_dir,
+                )
+            else:
+                lint_target = parsed
+                require_timeout_if_needed(parsed)
+                resolve_relative_paths(parsed, base_dir=batch_dir)
+                line_errors = _lint_missing_input_paths(parsed)
+                if bool(parsed_map.get("_mutating_command", False)) and out_path is None:
+                    line_errors.append("mutating batch command requires wrapper --out")
+                if not line_errors:
+                    line_errors.extend(_lint_command_local_errors(parsed))
+            warning = _lint_local_selector_warning(lint_target, after_type_or_reanalysis=after_type_or_reanalysis)
+            if warning is not None:
+                warnings.append({"line": line_number, "command": stripped, "message": warning})
+            if parsed_map.get("command") != "preview" and _lint_changes_local_layout(parsed):
+                after_type_or_reanalysis = True
+            if line_errors:
+                for message in line_errors:
+                    errors.append({"line": line_number, "command": stripped, "message": message})
+                rows.append(
+                    _line_record(
+                        line=line_number,
+                        command=stripped,
+                        status="failed",
+                        exit_code=1,
+                        stderr="; ".join(line_errors),
+                        timing_ms=0.0,
+                    )
+                )
+                continue
+            rows.append(
+                _line_record(
+                    line=line_number,
+                    command=stripped,
+                    status="ok",
+                    exit_code=0,
+                    result={"lint": "ok"},
+                    timing_ms=0.0,
+                )
+            )
+        except BatchParseError as exc:
+            message = str(exc)
+            errors.append({"line": line_number, "command": stripped, "message": message})
+            rows.append(
+                _line_record(
+                    line=line_number,
+                    command=stripped,
+                    status="failed",
+                    exit_code=exc.exit_code,
+                    stderr=message,
+                    timing_ms=0.0,
+                )
+            )
+        except CliUserError as exc:
+            message = str(exc) or exc.__class__.__name__
+            errors.append({"line": line_number, "command": stripped, "message": message})
+            rows.append(
+                _line_record(
+                    line=line_number,
+                    command=stripped,
+                    status="failed",
+                    exit_code=1,
+                    stderr=message,
+                    timing_ms=0.0,
+                )
+            )
+    return {
+        "ok": not errors,
+        "mode": "lint",
+        "batch_file": str(batch_path),
+        "commands_total": len(rows),
+        "commands_linted": sum(1 for row in rows if row["exit_code"] == 0),
+        "errors_total": len(errors),
+        "warnings_total": len(warnings),
+        "errors": errors,
+        "warnings": warnings,
+        "results": rows,
+    }
+
+
 def failure_lines(payload: Any) -> list[str]:
     if not isinstance(payload, dict):
         return []
+    lint_errors = payload.get("errors")
+    if isinstance(lint_errors, list) and lint_errors:
+        lines: list[str] = []
+        for item in lint_errors:
+            if not isinstance(item, dict):
+                continue
+            lines.append(f"batch line {item.get('line', '?')}: {item.get('command', '<unknown>')}")
+            lines.append(f"  {item.get('message', 'lint failed')}")
+        return lines
     rows = payload.get("results")
     if not isinstance(rows, list):
         return []
@@ -184,6 +414,23 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
     batch_path = Path(args.batch_file)
     batch_dir = batch_path.parent.resolve(strict=False)
     command_lines = _command_lines(batch_path)
+    if args.lint:
+        payload = _lint_batch(root_parser=root_parser, batch_path=batch_path, out_path=args.out, parent_args=args)
+        artifacts: list[dict[str, Any]] = []
+        if args.out is not None:
+            fmt = json_or_jsonl_from_path(args.out, default="json")
+            path = Path(args.out)
+            value = payload["results"] if fmt == "jsonl" else payload
+            output = write_output_result(value, fmt=fmt, out_path=path, stem="batch")
+            if output.artifact is not None:
+                artifacts.append(output.artifact)
+        return CommandResult(
+            render_op="batch",
+            value=payload,
+            exit_code=0 if payload["ok"] else 1,
+            stderr_lines=failure_lines(payload),
+            artifacts=artifacts,
+        )
     _reject_mutating_batch_without_out(root_parser=root_parser, command_lines=command_lines, out_path=args.out)
     for line_number, stripped in command_lines:
         started = time.perf_counter()
@@ -301,6 +548,7 @@ example recovery.idac:
     )
     parser.add_argument("-o", "--out", type=Path, help="Write ordered batch results to a JSON or JSONL file")
     parser.add_argument("--fail-fast", action="store_true", help="Stop after the first failing command")
+    parser.add_argument("--lint", action="store_true", help="Parse and validate batch commands without executing them")
     parser.set_defaults(
         run=bind_root_handler(root_parser, run),
         context_policy="wrapper",

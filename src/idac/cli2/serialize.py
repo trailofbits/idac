@@ -31,6 +31,7 @@ _DICT_COUNT_FIELDS: dict[str, tuple[str, str]] = {
     "local_rename": ("locals", "local"),
     "local_retype": ("locals", "local"),
     "local_update": ("locals", "local"),
+    "local_apply_plan": ("locals", "local"),
     "function_stackvars": ("stackvars", "stack variable"),
     "function_callers": ("edges", "call edge"),
     "function_callees": ("edges", "call edge"),
@@ -143,7 +144,7 @@ def _inline_limit_hint(result: CommandResult, *, out_flag: str) -> str | None:
         return "rerun with `-o <path>` to write the full disassembly to a file"
     if result.render_op == "ctree":
         return "rerun with `-o <path>` to write the full ctree output to a file"
-    if result.render_op in {"local_list", "local_rename", "local_retype", "local_update"}:
+    if result.render_op in {"local_list", "local_rename", "local_retype", "local_update", "local_apply_plan"}:
         return "rerun with `--json --out <path>` to inspect the full locals table"
     if result.render_op == "docs":
         return "rerun with `--out <path>` to write the full docs output to a file"

@@ -4,9 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .paths import skill_reference_source_dir, workspace_template_source_dir
+from .paths import skill_reference_source_dir, skill_source_dir, workspace_template_source_dir
 
 _DOCS_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "Start here",
+        ("guide",),
+    ),
     (
         "CLI and operation help",
         (
@@ -51,8 +55,16 @@ class DocsTopic:
 
 def _topic_map() -> dict[str, DocsTopic]:
     references = skill_reference_source_dir()
+    skill = skill_source_dir()
     workspace = workspace_template_source_dir()
     topics = [
+        DocsTopic(
+            "guide",
+            "Agent Guide",
+            skill / "SKILL.md",
+            "Start here: critical defaults, task routing, and reference index.",
+            aliases=("start", "agents-guide", "skill"),
+        ),
         DocsTopic(
             "cli",
             "CLI Quick Reference",
@@ -176,6 +188,7 @@ def _index_text() -> str:
         "Use `idac docs TOPIC` to print bundled idac and IDA guidance without needing a live IDA target.",
         "",
         "Start here:",
+        "  idac docs guide",
         "  idac docs cli",
         "  idac docs troubleshooting",
         "  idac docs ida-cpp-type-details",
@@ -197,12 +210,22 @@ def _index_text() -> str:
     return "\n".join(lines)
 
 
+def _strip_frontmatter(text: str) -> str:
+    if not text.startswith("---\n"):
+        return text
+    _, sep, rest = text.partition("\n---\n")
+    if not sep:
+        return text
+    return rest.lstrip()
+
+
 def _topic_payload(topic: DocsTopic) -> dict[str, Any]:
     if topic.path is None:
         text = _index_text()
         path = None
     else:
         text = topic.path.read_text(encoding="utf-8")
+        text = _strip_frontmatter(text)
         path = str(topic.path)
     return {
         "topic": topic.name,
@@ -236,7 +259,7 @@ def docs_payload(topic_name: str | None = None, *, list_only: bool = False, all_
         for topic in docs_topics():
             if topic.path is None:
                 continue
-            parts.extend(["", "", f"# {topic.title}", "", topic.path.read_text(encoding="utf-8")])
+            parts.extend(["", "", f"# {topic.title}", "", _topic_payload(topic)["text"]])
         return {
             "topic": "all",
             "topics": [topic.name for topic in docs_topics()],

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -23,6 +24,14 @@ class NamedTypeListRequest:
 @dataclass(frozen=True)
 class NamedTypeShowRequest:
     name: str
+
+
+@dataclass(frozen=True)
+class NamedTypeDepsResult:
+    name: str
+    kind: str
+    decl: str
+    dependencies_included: bool
 
 
 @dataclass(frozen=True)
@@ -394,6 +403,60 @@ def _type_show(
     )
 
 
+def _type_deps(context: OperationContext, request: NamedTypeShowRequest) -> NamedTypeDepsResult:
+    runtime = context.runtime
+    tif = runtime.get_named_type(request.name)
+    kind = runtime.classify_tinfo(tif)
+    decl = _print_type_deps(runtime, tif, request.name)
+    return NamedTypeDepsResult(
+        name=request.name,
+        kind=kind,
+        decl=decl or runtime.tinfo_decl(tif, name=request.name, multi=True),
+        dependencies_included=bool(decl),
+    )
+
+
+def _type_ordinal(runtime: IdaRuntime, tif, name: str) -> int | None:
+    with contextlib.suppress(Exception):
+        ordinal = int(tif.get_ordinal())
+        if ordinal > 0:
+            return ordinal
+    ida_typeinf = runtime.mod("ida_typeinf")
+    getter = getattr(ida_typeinf, "get_type_ordinal", None)
+    if callable(getter):
+        for args in ((None, name), (runtime.ida_typeinf.get_idati(), name), (name,)):
+            with contextlib.suppress(Exception):
+                ordinal = int(getter(*args))
+                if ordinal > 0:
+                    return ordinal
+    return None
+
+
+def _print_type_deps(runtime: IdaRuntime, tif, name: str) -> str:
+    ida_typeinf = runtime.mod("ida_typeinf")
+    print_decls = getattr(ida_typeinf, "print_decls", None)
+    sink_type = getattr(ida_typeinf, "text_sink_t", None)
+    ordinal = _type_ordinal(runtime, tif, name)
+    if not callable(print_decls) or sink_type is None or ordinal is None:
+        return ""
+
+    class Sink(sink_type):
+        def __init__(self) -> None:
+            super().__init__()
+            self.text = ""
+
+        def _print(self, text):
+            self.text += str(text)
+            return 0
+
+    sink = Sink()
+    flags = getattr(ida_typeinf, "PDF_INCL_DEPS", 0) | getattr(ida_typeinf, "PDF_DEF_FWD", 0)
+    with contextlib.suppress(Exception):
+        print_decls(sink, None, [ordinal], flags)
+        return sink.text.strip()
+    return ""
+
+
 def op_type_show(runtime: IdaRuntime, params: dict[str, Any]) -> dict[str, object]:
     return payload_from_model(_type_show(OperationContext(runtime=runtime), _parse_show(params)))
 
@@ -607,6 +670,7 @@ def named_type_operations() -> tuple[OperationSpec[object, object], ...]:
     return (
         OperationSpec(name="type_list", parse=_parse_list, run=_type_list),
         OperationSpec(name="type_show", parse=_parse_show, run=_type_show),
+        OperationSpec(name="type_deps", parse=_parse_show, run=_type_deps),
         OperationSpec(name="struct_list", parse=_parse_list, run=_struct_list),
         OperationSpec(name="struct_show", parse=_parse_struct_show, run=_struct_view),
         OperationSpec(
@@ -688,6 +752,7 @@ __all__ = [
     "EnumMutationResult",
     "EnumTypeView",
     "EnumView",
+    "NamedTypeDepsResult",
     "NamedTypeEntry",
     "NamedTypeListRequest",
     "NamedTypeShowRequest",

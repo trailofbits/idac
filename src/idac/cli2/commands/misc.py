@@ -120,7 +120,7 @@ def register(
     child.add_argument("identifier", help="Function name, symbol, or address")
     child.add_argument("--end", help="Optional end address for range reanalysis")
     child.set_defaults(
-        run=_reanalyze, context_policy="standard", allow_batch=False, allow_preview=False, _mutating_command=True
+        run=_reanalyze, context_policy="standard", allow_batch=True, allow_preview=False, _mutating_command=True
     )
 
     plugin_parser = add_command(parser, misc_subparsers, "plugin", help_text="Plugin operations")

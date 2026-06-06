@@ -1,6 +1,6 @@
 # Targets and Backends
 
-This file documents the current public `idac` surface.
+Read this when choosing a GUI or `idalib` context, opening a binary/database, or resolving target discovery state.
 
 `idac` has two execution contexts:
 
@@ -49,6 +49,7 @@ idac decompile "main" -c "db:/path/to/binary" --f5
 
 For massive binaries or first-time autoanalysis, prefer the indefinite default unless the user asked for a deadline. Do not wrap this import in a shell-level timeout or a tool-call timeout; let the command keep running and poll the session if your tool supports incremental output.
 If the raw import does not name `main`, use `start_ea` / `entry_ea` from `database show --json` or an address from `function list --json`.
+`database open` has no architecture-slice or loader-prompt options today. If a raw binary requires a slice choice, open the intended slice with IDA first, save an `.i64` / `.idb`, then use that database path with `idac database open "sample.i64"` or `-c "db:sample.i64"`.
 
 For an existing `.i64` / `.idb`:
 
@@ -58,7 +59,10 @@ idac doctor
 idac database show -c "db:sample.i64"
 idac decompile "sub_08041337" -c "db:sample.i64"
 idac database save -c "db:sample.i64"
+idac database close -c "db:sample.i64" --discard
 ```
+
+`database save` writes an explicit checkpoint. `database close -c "db:sample.i64"` saves before closing by default; use `database close -c "db:sample.i64" --discard` to abandon pending changes.
 
 
 ## Selection rules

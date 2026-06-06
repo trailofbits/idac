@@ -1,6 +1,6 @@
 # Class Recovery
 
-This file documents the current public `idac` recovery flow.
+Read this for C++ class recovery, vtable evidence, class-layout imports, prototype propagation, and verification.
 
 Use `type class` as the primary entry point for C++ recovery work.
 If the local type system is still opaque, start with `type list`, then use `type class candidates` before importing recovered types. After a local class/vtable type exists, use `type class vtable --runtime` for the combined local/runtime view.
@@ -12,6 +12,7 @@ If the local type system is still opaque, start with `type list`, then use `type
 - [Adjacent-class workflow](#adjacent-class-workflow)
 - [Vtable guidance](#vtable-guidance)
 - [C++ declaration guidance](#c-declaration-guidance)
+- [Stop conditions](#stop-conditions)
 - [Verification checklist](#verification-checklist)
 - [Practical caveat](#practical-caveat)
 
@@ -22,14 +23,18 @@ idac type list "Example"
 idac function list "Example_" --json --out "/tmp/class_family_functions.json"
 idac decompilemany "Example_" --out-dir "/tmp/class_family_decompile_discovery"
 idac type class candidates "Example" --json --out "/tmp/class_candidates.json"
+idac type check --decl-file "support_types.h"
 idac type declare --replace --decl-file "support_types.h"
+idac type check --decl-file "recovered_classes.h"
 idac type declare --replace --decl-file "recovered_classes.h"
+idac type deps "ExampleDerived"
 idac type class list "Example"
 idac type class show "ExampleDerived"
 idac type class fields "ExampleDerived" --derived-only
 idac type class hierarchy "ExampleBase"
 idac type class vtable "ExampleDerived" --runtime
 idac function prototype show "0x100012340"
+idac function prototype check "0x100012340" --decl "bool __fastcall ExampleDerived__method_1(ExampleDerived *__hidden this, const unsigned char *buf, u64 len, const char *arg3, u32 flags)"
 idac preview -o "/tmp/proto_preview.json" function prototype set "0x100012340" --decl "bool __fastcall ExampleDerived__method_1(ExampleDerived *__hidden this, const unsigned char *buf, u64 len, const char *arg3, u32 flags)"
 idac misc reanalyze "ExampleDerived__method_1"
 idac decompilemany "Example_" --f5 --out-dir "/tmp/class_family_decompile_verify"
@@ -37,14 +42,7 @@ idac decompile "CreateExampleDerived" --f5
 idac decompile "ExampleDerived__method_1" --f5
 ```
 
-Use the safe mutation loop from [workflows.md](workflows.md#safe-mutation-loop). For class-recovery work on one target, keep the phases distinct:
-
-1. discovery
-2. read-only audit
-3. mutations
-4. explicit reanalyze
-5. local renames
-6. final readback
+Use the safe mutation loop from [workflows.md](workflows.md#safe-mutation-loop). For class-recovery work on one target, keep the phases distinct and leave local renames or retypes until after prototype/type changes and reanalysis.
 
 Start narrow from confirmed family members, then widen to callers or adjacent helpers only when readback or propagation requires it.
 
@@ -59,6 +57,8 @@ Raw runtime slot inspection is not exposed as a first-class CLI command. Use `ty
   Use `--kind` when you want only one subset, such as `--kind function_symbol`.
 - Skip `type class candidates` when clean demangled symbols and RTTI already identify the family. It is most useful for opaque targets.
 - `type declare --replace`: re-import a recovered class header without leaving stale local types behind.
+- `type check`: validate recovered declaration text without importing it. Run it before large class headers or parser-risky C++ syntax.
+- `type deps`: print an existing local type with IDA dependency expansion when available; use it for audit artifacts after import.
 - `type class list`: find the classes materialized in local types.
   Use the positional class-filter form `type class list [CLASS_FILTER]`.
 - `type class show`: read the flattened object layout, including inherited fields.
@@ -76,6 +76,7 @@ Raw runtime slot inspection is not exposed as a first-class CLI command. Use `ty
 - During discovery, stop decompiling once constructor, destructor, one accessor, and one serializer or parser have already proven the layout.
 - `function prototype set`: apply corrected function types to the runtime virtual targets after the class layout is in place.
   Use `function prototype show` first so the current signature is recorded before the update.
+  Use `function prototype check` before applying high-risk target signatures.
   Use `preview -o /tmp/proto_preview.json function prototype set ...`; the command-specific preview readback carries richer before/after data when supported.
   Clean up the shared helpers that dominate many callers before spending time on local renames. Once helper prototypes are correct and callers are reanalyzed, the remaining rename work is usually much smaller and more trustworthy.
 - Treat return-type changes as higher risk than parameter-name changes. If the body does not clearly prove the returned semantic type, keep the return generic.
@@ -92,7 +93,7 @@ Confidence and naming conventions:
 - When semantics are inferred rather than proven, note that explicitly in the issue log
 - Apply the same rule to field and member names. If a recovered member name is only probable, keep it explicitly inferred until stronger proof appears.
 
-Adjacent-class workflow:
+## Adjacent-class workflow
 
 - recover support structs first
 - recover directly referenced neighbor classes next
@@ -103,37 +104,22 @@ Adjacent-class workflow:
 - rename locals last
 - recover support types before cosmetic renames; early support-type recovery usually improves output more than local-name cleanup
 - For large local-variable sets, read `function locals list --json --out <path>` and calibrate selectors from the JSON artifact before renaming.
+- For many local edits in one function, prefer `function locals apply --json-file <plan.json>` after a fresh locals dump.
 - For rename previews on large functions, write the preview to disk with `preview -o <path>` and inspect the artifact with `jq` instead of trusting inline output.
 
 For selector calibration before rename-heavy phases, read [workflows.md](workflows.md#selector-calibration).
 
-Vtable guidance:
+## Vtable guidance
 
 - Prefer `type class vtable` once the local vtable type exists
 - If you need raw slot evidence before a local type exists, use `type class candidates --kind vtable_symbol` to find the symbol first, then use `py exec` as the escape hatch for one-off raw slot inspection
 - Treat raw-vtable lookup failures as evidence about symbol availability, not as proof that the class family is unrecoverable
 - Before writing or importing C++ declarations, review [ida-cpp-type-details.md](ida-cpp-type-details.md) so the local type text matches IDA's naming and layout rules
-- On Itanium-style ABIs, keep the distinction between the raw virtual-table symbol and the virtual-table address point clear. The address stored in objects may point past header fields such as `offset_to_top` and `typeinfo`, so the first callable slot can begin after the symbol base instead of at it. See the Itanium C++ ABI's [virtual table layout](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#vtable) rules.
 - When you want the class helpers to recognize the layout reliably, prefer IDA-friendly naming and formatting:
   - name the vtable type `ClassName_vtbl`
   - declare it as `struct /*VFT*/ ClassName_vtbl { ... };`
   - attach it to the object as `ClassName_vtbl *__vftable;`
-- If the runtime symbol looks "off" by one or two pointer-sized entries, do not rename the helper-facing vtable type to match the raw symbol base. Keep `ClassName_vtbl` as the callable-slot type and, when needed for scratch analysis, wrap it in a separate raw-layout type such as:
-
-```c
-struct /*VFT*/ ClassName_vtbl {
-  void (*dtor)(ClassName *__hidden this);
-  void (*method_1)(ClassName *__hidden this);
-};
-
-struct ClassName_vtbl_layout {
-  ptrdiff_t offset_to_top;
-  void *typeinfo;
-  ClassName_vtbl vtbl;
-};
-```
-
-- Use that wrapper pattern when the raw symbol resolves cleanly but the first function pointer does not start at the symbol address. On common 64-bit Itanium-style layouts, the callable slots then start at `+0x10` because the `offset_to_top` and `typeinfo` header fields come first.
+- For Itanium-style ABIs, address-point offsets, or `ClassName_vtbl_layout` scratch wrappers, read [ida-cpp-type-details.md](ida-cpp-type-details.md).
 - For multiple inheritance or secondary-base overrides, use the IDA-specific `ClassName_XXXX_vtbl` pattern described in [ida-cpp-type-details.md](ida-cpp-type-details.md) instead of inventing an ad hoc secondary vtable name
 - Avoid alternate suffixes or ad hoc member spellings when helper compatibility matters
 
@@ -178,8 +164,9 @@ Practical rules:
 - for secondary-base virtual tables, use the IDA-specific `ClassName_XXXX_vtbl` pattern
 - use `--alias old=new` during import when namespace-qualified names need flattening for local-type parsing
 - if import errors suggest parser trouble, simplify the declaration and retry with preview first
+- run `type check --decl-file ...` before importing the simplified declaration
 
-## Stop Conditions
+## Stop conditions
 
 Stop a recovery pass when:
 

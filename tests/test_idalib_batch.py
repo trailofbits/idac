@@ -118,6 +118,123 @@ def test_batch_defaults_to_stdout_json_without_out(
     assert payload["results"][0]["result"]["address"] == "0x1000004b0"
 
 
+def test_batch_lint_fixture_context_accepts_valid_batch(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    batch_path = tmp_path / "lint_valid.idac"
+    batch_path.write_text("function prototype show add\n", encoding="utf-8")
+
+    proc = run_cli(
+        idac_cmd,
+        idac_env,
+        "batch",
+        str(batch_path),
+        "--lint",
+        "-c",
+        f"db:{database}",
+    )
+
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is True
+    assert payload["commands_total"] == 1
+    assert payload["commands_linted"] == 1
+    assert payload["results"][0]["status"] == "ok"
+
+
+def test_batch_lint_fixture_context_reports_command_local_errors(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    batch_path = tmp_path / "lint_invalid.idac"
+    out_path = tmp_path / "lint_invalid.json"
+    batch_path.write_text("function locals update main v1\n", encoding="utf-8")
+
+    proc = run_cli(
+        idac_cmd,
+        idac_env,
+        "batch",
+        str(batch_path),
+        "--lint",
+        "--out",
+        str(out_path),
+        "-c",
+        f"db:{database}",
+    )
+
+    assert proc.returncode == 1
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["ok"] is False
+    assert payload["errors_total"] == 1
+    assert payload["results"][0]["status"] == "failed"
+    assert "at least one of --rename or declaration input is required" in payload["results"][0]["stderr"]
+
+
+def test_batch_lint_fixture_context_reports_disasm_validation_error(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    batch_path = tmp_path / "lint_disasm_invalid.idac"
+    batch_path.write_text("disasm\n", encoding="utf-8")
+
+    proc = run_cli(
+        idac_cmd,
+        idac_env,
+        "batch",
+        str(batch_path),
+        "--lint",
+        "-c",
+        f"db:{database}",
+    )
+
+    assert proc.returncode == 1
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is False
+    assert payload["errors_total"] == 1
+    assert "disasm requires a function or --start/--end" in payload["results"][0]["stderr"]
+
+
+def test_batch_lint_fixture_context_rejects_forwarded_context_for_no_context_command(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    batch_path = tmp_path / "lint_docs_no_context.idac"
+    batch_path.write_text("docs cli\n", encoding="utf-8")
+
+    proc = run_cli(
+        idac_cmd,
+        idac_env,
+        "batch",
+        str(batch_path),
+        "--lint",
+        "-c",
+        f"db:{database}",
+    )
+
+    assert proc.returncode == 1
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is False
+    assert payload["errors_total"] == 1
+    assert "`idac docs` does not accept -c/--context" in payload["results"][0]["stderr"]
+
+
 def test_batch_writes_per_line_output_artifacts(
     idac_cmd: list[str],
     idac_env: dict[str, str],

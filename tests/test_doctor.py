@@ -379,9 +379,7 @@ def test_doctor_reports_missing_ida_eula_acceptance(monkeypatch) -> None:
 
     assert check["status"] == "error"
     assert check["name"] == "eula"
-    assert check["summary"] == (
-        "IDA EULA acceptance was not found in the registry. Run `hcli ida accept-eula`."
-    )
+    assert check["summary"] == ("IDA EULA acceptance was not found in the registry. Run `hcli ida accept-eula`.")
     assert check["details"]["remediation"] == "Run `hcli ida accept-eula`."
 
 

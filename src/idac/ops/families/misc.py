@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import optional_str, require_str
@@ -35,7 +36,8 @@ class ReanalyzeFunctionResult:
 
 @dataclass(frozen=True)
 class PythonExecRequest:
-    script: str
+    script: str | None = None
+    script_path: str | None = None
     persist: bool = False
 
 
@@ -62,10 +64,14 @@ def _json_payload_result(value: object) -> tuple[object, str]:
 
 
 def _parse_python_exec(params: dict[str, object]) -> PythonExecRequest:
-    script = str(params.get("script") or "")
-    if not script.strip():
-        raise IdaOperationError("python_exec requires non-empty script")
-    return PythonExecRequest(script=script, persist=bool(params.get("persist")))
+    raw_script = str(params.get("script") or "")
+    script = raw_script if raw_script.strip() else None
+    script_path = str(params.get("script_path") or "").strip() or None
+    if script is None and script_path is None:
+        raise IdaOperationError("python_exec requires non-empty script or script_path")
+    if script is not None and script_path is not None:
+        raise IdaOperationError("python_exec accepts either script or script_path, not both")
+    return PythonExecRequest(script=script, script_path=script_path, persist=bool(params.get("persist")))
 
 
 def _reanalyze(
@@ -106,11 +112,39 @@ def _python_exec(context: OperationContext, request: PythonExecRequest) -> Pytho
     scope = runtime.python_exec_scope(persist=request.persist)
     try:
         with contextlib.redirect_stdout(stdout):
-            exec(request.script, scope, scope)
+            if request.script_path is not None:
+                _exec_script_file(runtime, request.script_path, scope)
+            else:
+                exec(str(request.script), scope, scope)
     except Exception as exc:
         raise IdaOperationError(f"python_exec failed: {exc.__class__.__name__}: {exc}") from exc
     payload_result, result_repr = _json_payload_result(scope.get("result"))
     return PythonExecResult(stdout=stdout.getvalue(), result=payload_result, result_repr=result_repr)
+
+
+def _exec_script_file(runtime, script_path: str, scope: dict[str, object]) -> None:
+    path = Path(script_path).expanduser()
+    if not path.exists():
+        raise IdaOperationError(f"python_exec script not found: {script_path}")
+    ida_idaapi = runtime.mod("ida_idaapi")
+    exec_script = getattr(ida_idaapi, "IDAPython_ExecScript", None)
+    if callable(exec_script):
+        error = exec_script(str(path), scope, False)
+        if error:
+            raise IdaOperationError(str(error).strip() or f"script failed: {path}")
+        return
+
+    code = path.read_text(encoding="utf-8")
+    previous_file_marker = object()
+    previous_file = scope.get("__file__", previous_file_marker)
+    scope["__file__"] = str(path)
+    try:
+        exec(compile(code, str(path), "exec"), scope, scope)
+    finally:
+        if previous_file is previous_file_marker:
+            scope.pop("__file__", None)
+        else:
+            scope["__file__"] = previous_file
 
 
 def misc_operations() -> tuple[OperationSpec[object, object], ...]:

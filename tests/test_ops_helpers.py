@@ -1256,6 +1256,88 @@ def test_type_declare_clang_uses_srclang_parser_ext() -> None:
     assert calls == [("clang", None, "struct ns::Widget { int value; };", 0x280400)]
 
 
+def test_type_declare_check_uses_parse_decls_test_flag() -> None:
+    calls: list[tuple[object, str, object, int]] = []
+
+    class FakeIdaTypeInf:
+        HTI_DCL = 0x400
+        HTI_SEMICOLON = 0x200000
+        HTI_RELAXED = 0x80000
+        HTI_TST = 0x20
+
+        @staticmethod
+        def parse_decls(til: object, decl: str, printer: object, flags: int) -> int:
+            calls.append((til, decl, printer, flags))
+            return 0
+
+    class FakeRuntime:
+        def mod(self, name: str):
+            if name == "ida_typeinf":
+                return FakeIdaTypeInf()
+            raise AssertionError(name)
+
+    errors = type_declare._test_type_declarations(
+        FakeRuntime(),
+        "struct ns::Widget { int value; };",
+        replace=False,
+        clang=False,
+    )
+
+    assert errors == 0
+    assert calls == [(None, "struct ns::Widget { int value; };", None, 0x280420)]
+
+
+def test_type_declare_check_clang_runs_parser_under_undo() -> None:
+    calls: list[tuple[object, ...]] = []
+
+    class FakeUndo:
+        @staticmethod
+        def create_undo_point(**kwargs) -> bool:
+            calls.append(("undo_create", kwargs["action_name"], kwargs["label"]))
+            return True
+
+        @staticmethod
+        def perform_undo() -> bool:
+            calls.append(("undo",))
+            return True
+
+    class FakeIdaTypeInf:
+        HTI_DCL = 0x400
+        HTI_SEMICOLON = 0x200000
+        HTI_RELAXED = 0x80000
+        HTI_TST = 0x20
+
+    class FakeIdaSrclang:
+        @staticmethod
+        def parse_decls_with_parser_ext(parser_name: str, til: object, decl: str, flags: int) -> int:
+            calls.append(("parse", parser_name, til, decl, flags))
+            return 0
+
+    class FakeRuntime:
+        def mod(self, name: str):
+            if name == "ida_undo":
+                return FakeUndo()
+            if name == "ida_typeinf":
+                return FakeIdaTypeInf()
+            if name == "ida_srclang":
+                return FakeIdaSrclang()
+            raise AssertionError(name)
+
+    errors = type_declare._test_type_declarations(
+        FakeRuntime(),
+        "struct ns::Widget { int value; };",
+        replace=False,
+        clang=True,
+    )
+
+    assert errors == 0
+    assert calls == [
+        ("undo_create", "idac_type_check_clang", "idac type check clang"),
+        ("parse", "clang", None, "struct ns::Widget { int value; };", 0x280420),
+        ("undo",),
+    ]
+
+
 def test_type_declare_clang_reports_unavailable_parser() -> None:
     class FakeIdaTypeInf:
         HTI_DCL = 0x400
@@ -1708,6 +1790,25 @@ def test_local_update_allows_unnamed_local_selected_by_stable_selector(monkeypat
     assert payload["changed"] is True
 
 
+def test_local_apply_plan_parser_accepts_stable_selector_items() -> None:
+    request = locals._parse_local_apply_plan(
+        {
+            "identifier": "main",
+            "items": [
+                {"local_id": "stack(16)@0x401000", "rename": "count", "decl": "unsigned int count;"},
+                {"selector": {"index": "3"}, "type": "uint64_t"},
+            ],
+        }
+    )
+
+    assert request.identifier == "main"
+    assert request.items[0].selector.local_id == "stack(16)@0x401000"
+    assert request.items[0].new_name == "count"
+    assert request.items[0].decl == "unsigned int count;"
+    assert request.items[1].selector.index == 3
+    assert request.items[1].type_text == "uint64_t"
+
+
 def test_proto_set_parses_silently_and_applies_tinfo() -> None:
     calls: list[tuple[object, ...]] = []
     tif = object()
@@ -1850,6 +1951,61 @@ def test_proto_set_retries_with_relaxed_namespace_parse() -> None:
         ("ns::Type *__fastcall target(ns::Type *value);", 0x4009),
         ("ns::Type *__fastcall target(ns::Type *value);", 0x5009),
     ]
+
+
+def test_proto_check_allows_successful_parse_with_heuristic_unknowns() -> None:
+    class FakeTif:
+        @staticmethod
+        def is_func() -> bool:
+            return True
+
+    tif = FakeTif()
+
+    class FakeIdaTypeInf:
+        PT_SIL = 0x1
+        PT_VAR = 0x8
+        PT_SEMICOLON = 0x4000
+
+        @staticmethod
+        def tinfo_t() -> object:
+            return tif
+
+        @staticmethod
+        def parse_decl(out_tif: object, til: object, decl: str, flags: int) -> bool:
+            assert out_tif is tif
+            assert til is None
+            assert decl == "void __fastcall target(void (*cb)(int));"
+            assert flags == 0x4009
+            return True
+
+    class FakeRuntime(IdaRuntime):
+        def function_ea(self, identifier: str) -> int:
+            assert identifier == "target"
+            return 0x401000
+
+        def mod(self, name: str) -> object:
+            if name == "ida_typeinf":
+                return FakeIdaTypeInf()
+            raise AssertionError(name)
+
+        def find_named_type(self, name: str):
+            assert name == "cb"
+            return None
+
+    result = prototypes._proto_check(
+        OperationContext(runtime=FakeRuntime()),
+        prototypes.PrototypeCheckRequest(
+            identifier="target",
+            decl="void __fastcall target(void (*cb)(int))",
+        ),
+    )
+
+    assert result.success is True
+    assert result.parsed is True
+    assert result.is_function is True
+    assert result.arglocs_calculated is None
+    assert result.unknown_types == ("cb",)
+    assert result.diagnostics == ()
 
 
 def test_proto_set_optionally_propagates_to_callers() -> None:

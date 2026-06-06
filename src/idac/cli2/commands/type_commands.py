@@ -261,6 +261,10 @@ def run_type_show(args: argparse.Namespace) -> CommandResult:
     return send_op(args, op="type_show", params=_name_request(args).to_params(), render_op="type_show")
 
 
+def run_type_deps(args: argparse.Namespace) -> CommandResult:
+    return send_op(args, op="type_deps", params=_name_request(args).to_params(), render_op="type_deps")
+
+
 def run_type_declare(args: argparse.Namespace) -> CommandResult:
     result = send_op(args, op="type_declare", params=_type_declare_request(args).to_params(), render_op="type_declare")
     exit_code = 0
@@ -269,7 +273,7 @@ def run_type_declare(args: argparse.Namespace) -> CommandResult:
         result.value.get("success") is False or int(result.value.get("errors") or 0) > 0
     ):
         exit_code = 1
-        stderr_lines = _type_declare_failure_lines(result.value)
+        stderr_lines = _type_declare_failure_lines(result.value, action="type declare")
     return CommandResult(
         render_op=result.render_op,
         value=result.value,
@@ -280,9 +284,33 @@ def run_type_declare(args: argparse.Namespace) -> CommandResult:
     )
 
 
-def _type_declare_failure_lines(payload: dict[str, Any]) -> list[str]:
+def run_type_check(args: argparse.Namespace) -> CommandResult:
+    result = send_op(
+        args,
+        op="type_declare_check",
+        params=_type_declare_request(args).to_params(),
+        render_op="type_declare_check",
+    )
+    exit_code = 0
+    stderr_lines: list[str] = []
+    if isinstance(result.value, dict) and (
+        result.value.get("success") is False or int(result.value.get("errors") or 0) > 0
+    ):
+        exit_code = 1
+        stderr_lines = _type_declare_failure_lines(result.value, action="type check")
+    return CommandResult(
+        render_op=result.render_op,
+        value=result.value,
+        exit_code=exit_code,
+        warnings=list(result.warnings),
+        stderr_lines=stderr_lines,
+        artifacts=list(result.artifacts),
+    )
+
+
+def _type_declare_failure_lines(payload: dict[str, Any], *, action: str = "type declare") -> list[str]:
     errors = int(payload.get("errors") or 0)
-    lines = [f"type declare failed: {errors} parser error(s)" if errors else "type declare failed"]
+    lines = [f"{action} failed: {errors} parser error(s)" if errors else f"{action} failed"]
     bisect = payload.get("bisect")
     if isinstance(bisect, dict):
         failing = bisect.get("failing_declaration")
@@ -459,6 +487,42 @@ def register(
     child.add_argument("name", help="Type name")
     child.set_defaults(
         run=run_type_show, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
+    )
+
+    child = add_command(parser, type_subparsers, "deps", help_text="Show a type with IDA-printed dependencies")
+    add_context_options(child)
+    add_output_options(child, default_format="text")
+    child.add_argument("name", help="Type name")
+    child.set_defaults(
+        run=run_type_deps, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
+    )
+
+    child = add_command(parser, type_subparsers, "check", help_text="Validate declarations without importing them")
+    add_context_options(child)
+    add_output_options(child, default_format="json")
+    add_decl_input(
+        child,
+        help_text="C/C++ declaration text to validate with IDA's parser",
+        file_help="Read C/C++ declarations from this header/source file",
+    )
+    child.add_argument("--replace", action="store_true", help="Check using replace-mode parser behavior if needed")
+    child.add_argument(
+        "--alias", action="append", default=[], metavar="OLD=NEW", help="Rewrite identifiers before validation"
+    )
+    child.add_argument(
+        "--bisect",
+        "--diagnose",
+        dest="bisect",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    child.add_argument(
+        "--clang",
+        action="store_true",
+        help="Use IDA's clang source parser for more complex C/C++ declarations",
+    )
+    child.set_defaults(
+        run=run_type_check, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
     )
 
     child = add_command(parser, type_subparsers, "declare", help_text="Import declarations into local types")

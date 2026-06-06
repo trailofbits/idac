@@ -39,11 +39,11 @@ def merge_parent_context(inner_args: argparse.Namespace, outer_args: argparse.Na
 
 
 def require_timeout_if_needed(args: argparse.Namespace) -> None:
-    if not args._require_timeout:
+    if not getattr(args, "_require_timeout", False):
         return
     if getattr(args, "timeout", None) is not None:
         return
-    label = str(args._timeout_requirement_label or "this command")
+    label = str(getattr(args, "_timeout_requirement_label", None) or "this command")
     raise CliUserError(f"{label} requires --timeout")
 
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..base import OperationContext, OperationSpec
-from ..helpers.params import optional_param_int, require_str
+from ..helpers.params import optional_param_int, parse_int_text, require_str
 from ..models import payload_from_model
 from ..preview import PreviewSpec
 from ..runtime import (
@@ -59,6 +59,20 @@ class LocalUpdateRequest:
 
 
 @dataclass(frozen=True)
+class LocalPlanItem:
+    selector: LocalSelector
+    new_name: str | None = None
+    decl: str | None = None
+    type_text: str | None = None
+
+
+@dataclass(frozen=True)
+class LocalApplyPlanRequest:
+    identifier: str
+    items: tuple[LocalPlanItem, ...]
+
+
+@dataclass(frozen=True)
 class LocalRow:
     index: int
     local_id: str
@@ -89,10 +103,30 @@ class LocalMutationResult:
 
 
 @dataclass(frozen=True)
+class AppliedLocalPlanItem:
+    index: int
+    local_id: str
+    old_name: str
+    new_name: str | None
+    decl: str | None
+
+
+@dataclass(frozen=True)
+class LocalApplyPlanResult:
+    function: str
+    address: str
+    locals: tuple[LocalRow, ...]
+    changed: bool
+    applied: tuple[AppliedLocalPlanItem, ...]
+
+
+@dataclass(frozen=True)
 class SelectedLocal:
     name: str
     locator: Any
     display_name: str | None = None
+    index: int | None = None
+    local_id: str | None = None
 
     def label(self) -> str:
         return self.display_name or self.name or "<unnamed local>"
@@ -162,6 +196,65 @@ def _parse_local_update(params: dict[str, object]) -> LocalUpdateRequest:
     )
 
 
+def _local_plan_selector(raw: dict[str, Any], *, index: int) -> LocalSelector:
+    selector_value = raw.get("selector")
+    selector_map: dict[str, Any] = selector_value if isinstance(selector_value, dict) else {}
+    name = (
+        str(
+            selector_map.get("name")
+            or selector_map.get("local_name")
+            or raw.get("name")
+            or raw.get("local_name")
+            or raw.get("old_name")
+            or (selector_value if isinstance(selector_value, str) else "")
+            or ""
+        ).strip()
+        or None
+    )
+    local_id = str(selector_map.get("local_id") or raw.get("local_id") or "").strip() or None
+    raw_index = selector_map.get("index", raw.get("index"))
+    try:
+        local_index = None if raw_index in (None, "") else parse_int_text(raw_index, label="local index", minimum=0)
+    except ValueError as exc:
+        raise IdaOperationError(f"local apply item {index}: {exc}") from exc
+    stable_count = sum(value is not None for value in (local_id, local_index))
+    if name is None and stable_count == 0:
+        raise IdaOperationError(f"local apply item {index}: selector is required via local_id, index, or name")
+    if stable_count > 1:
+        raise IdaOperationError(f"local apply item {index}: local_id and index are mutually exclusive")
+    if name is not None and stable_count > 0:
+        raise IdaOperationError(f"local apply item {index}: do not combine name with local_id or index")
+    return LocalSelector(name=name, local_id=local_id, index=local_index)
+
+
+def _parse_local_apply_plan(params: dict[str, object]) -> LocalApplyPlanRequest:
+    raw_items = params.get("items")
+    if not isinstance(raw_items, list):
+        raise IdaOperationError("local apply requires a JSON list of item objects")
+    if not raw_items:
+        raise IdaOperationError("local apply requires at least one item")
+    items: list[LocalPlanItem] = []
+    for item_index, raw in enumerate(raw_items, start=1):
+        if not isinstance(raw, dict):
+            raise IdaOperationError(f"local apply item {item_index}: expected object")
+        new_name = str(raw.get("new_name") or raw.get("rename") or "").strip() or None
+        decl = str(raw.get("decl") or "").strip() or None
+        type_text = str(raw.get("type") or raw.get("type_text") or "").strip() or None
+        if decl is not None and type_text is not None:
+            raise IdaOperationError(f"local apply item {item_index}: use either decl or type, not both")
+        if new_name is None and decl is None and type_text is None:
+            raise IdaOperationError(f"local apply item {item_index}: at least one of rename, decl, or type is required")
+        items.append(
+            LocalPlanItem(
+                selector=_local_plan_selector(raw, index=item_index),
+                new_name=new_name,
+                decl=decl,
+                type_text=type_text,
+            )
+        )
+    return LocalApplyPlanRequest(identifier=_require_identifier(params), items=tuple(items))
+
+
 def _vdloc_text(location) -> str:
     if location.is_stkoff():
         return f"stack({location.stkoff()})"
@@ -176,6 +269,15 @@ def _local_identity(lvar) -> tuple[str, str, str]:
     definition_address = hex(lvar.defea)
     location = _vdloc_text(lvar.location)
     return definition_address, location, f"{location}@{definition_address}"
+
+
+def _safe_local_id(lvar) -> str:
+    try:
+        return _local_identity(lvar)[2]
+    except Exception as exc:
+        if not is_recoverable_ida_error(exc):
+            raise
+        return ""
 
 
 def _normalize_local_location_text(text: str) -> str:
@@ -354,6 +456,42 @@ def _select_local(runtime: IdaRuntime, func_ea: int, selector: LocalSelector) ->
         name=resolved_name,
         locator=_lvar_locator(runtime, lvar),
         display_name=resolved_name or f"<unnamed_{index}>",
+        index=index,
+        local_id=_safe_local_id(lvar),
+    )
+
+
+def _select_local_from_lvars(
+    runtime: IdaRuntime,
+    func_ea: int,
+    lvars: list[Any],
+    selector: LocalSelector,
+) -> SelectedLocal:
+    stable = selector.stable_selector()
+    if stable is None:
+        if selector.name is None:
+            raise IdaOperationError("local selector name is required")
+        name = selector.name.strip()
+        matches = [(index, lvar) for index, lvar in enumerate(lvars) if str(lvar.name or "") == name]
+        label = f"local name `{name}`"
+    else:
+        selector_name, selector_value = stable
+        matches, label = _stable_local_matches(lvars, selector_name=selector_name, selector_value=selector_value)
+    if not matches:
+        raise IdaOperationError(
+            f"local variable not found for {label}; {_LOCAL_SELECTOR_GUIDANCE}"
+            f"{_available_locals_suffix(runtime, func_ea)}"
+        )
+    if len(matches) > 1:
+        raise IdaOperationError(f"multiple locals matched {label}; use local_id or index instead")
+    index, lvar = matches[0]
+    name = str(lvar.name or "")
+    return SelectedLocal(
+        name=name,
+        locator=_lvar_locator(runtime, lvar),
+        display_name=name or f"<unnamed_{index}>",
+        index=index,
+        local_id=_safe_local_id(lvar),
     )
 
 
@@ -408,6 +546,13 @@ def _readback_local_change(runtime: IdaRuntime, func_ea: int, *, success_message
     )
 
 
+def _dirty_local_cfunc(runtime: IdaRuntime, func_ea: int) -> None:
+    ida_hexrays = runtime.require_hexrays()
+    with suppress_recoverable_ida_errors():
+        ida_hexrays.mark_cfunc_dirty(func_ea, False)
+        ida_hexrays.clear_cached_cfuncs()
+
+
 def _rename_local_by_name(
     runtime: IdaRuntime,
     func_ea: int,
@@ -422,6 +567,7 @@ def _rename_local_by_name(
         return None
     if not rename_lvar(func_ea, current_name, new_name):
         raise IdaOperationError(failure_message)
+    _dirty_local_cfunc(runtime, func_ea)
     return _readback_local_change(runtime, func_ea, success_message=success_message)
 
 
@@ -436,15 +582,18 @@ def _apply_local_change(
 ) -> LocalMutationResult:
     if not runtime.require_hexrays().modify_user_lvar_info(func_ea, modify_flag, info):
         raise IdaOperationError(failure_message)
+    _dirty_local_cfunc(runtime, func_ea)
     return _readback_local_change(runtime, func_ea, success_message=success_message)
 
 
-def _cleanup_local_preview(context: OperationContext, request: LocalRenameRequest | LocalRetypeRequest) -> None:
+def _cleanup_local_preview(
+    context: OperationContext,
+    request: LocalRenameRequest | LocalRetypeRequest | LocalUpdateRequest | LocalApplyPlanRequest,
+) -> None:
     runtime = context.runtime
     try:
         func_ea = runtime.function_ea(request.identifier)
-        runtime.require_hexrays().mark_cfunc_dirty(func_ea, False)
-        runtime.require_hexrays().clear_cached_cfuncs()
+        _dirty_local_cfunc(runtime, func_ea)
     except Exception as exc:
         if not is_recoverable_ida_error(exc):
             raise
@@ -458,7 +607,7 @@ def _local_list(context: OperationContext, request: LocalListRequest) -> LocalLi
 
 def _local_list_for_change(
     context: OperationContext,
-    request: LocalRenameRequest | LocalRetypeRequest | LocalUpdateRequest,
+    request: LocalRenameRequest | LocalRetypeRequest | LocalUpdateRequest | LocalApplyPlanRequest,
 ) -> LocalListResult:
     runtime = context.runtime
     func_ea = runtime.function_ea(request.identifier)
@@ -549,6 +698,70 @@ def _local_update(context: OperationContext, request: LocalUpdateRequest) -> Loc
     )
 
 
+def _decl_for_plan_item(item: LocalPlanItem, selected: SelectedLocal) -> str | None:
+    if item.decl is not None:
+        return item.decl
+    if item.type_text is None:
+        return None
+    name = item.new_name or selected.name
+    if not name:
+        raise IdaOperationError("local apply type entries for unnamed locals require a rename or full decl")
+    return f"{item.type_text.rstrip(';')} {name};"
+
+
+def _local_apply_plan(context: OperationContext, request: LocalApplyPlanRequest) -> LocalApplyPlanResult:
+    runtime = context.runtime
+    ida_hexrays = runtime.require_hexrays()
+    func_ea = runtime.function_ea(request.identifier)
+    cfunc = _decompile_locals(runtime, func_ea, action="inspect locals")
+    lvars = list(cfunc.get_lvars())
+    prepared: list[tuple[SelectedLocal, Any, int, LocalPlanItem, str | None]] = []
+    for item in request.items:
+        selected = _select_local_from_lvars(runtime, func_ea, lvars, item.selector)
+        info = _local_saved_info(runtime, selected.locator)
+        modify_flag = 0
+        if item.new_name is not None:
+            info.name = item.new_name
+            modify_flag |= ida_hexrays.MLI_NAME
+        decl = _decl_for_plan_item(item, selected)
+        if decl is not None:
+            info.name = item.new_name or selected.name
+            info.type = _parse_var_decl(
+                runtime,
+                decl,
+                error_message=f"failed to parse local variable declaration: {decl}",
+            )
+            modify_flag |= ida_hexrays.MLI_TYPE
+        prepared.append((selected, info, modify_flag, item, decl))
+
+    applied: list[AppliedLocalPlanItem] = []
+    for selected, info, modify_flag, item, decl in prepared:
+        if not ida_hexrays.modify_user_lvar_info(func_ea, modify_flag, info):
+            raise IdaOperationError(f"failed to apply local plan item for `{selected.label()}`")
+        applied.append(
+            AppliedLocalPlanItem(
+                index=-1 if selected.index is None else selected.index,
+                local_id=selected.local_id or "",
+                old_name=selected.name,
+                new_name=item.new_name,
+                decl=decl,
+            )
+        )
+    _dirty_local_cfunc(runtime, func_ea)
+    try:
+        refreshed = _local_list_result(runtime, func_ea)
+    except Exception as exc:
+        detail = str(exc) or exc.__class__.__name__
+        raise IdaOperationError(f"applied local plan but failed to read back locals: {detail}") from exc
+    return LocalApplyPlanResult(
+        function=refreshed.function,
+        address=refreshed.address,
+        locals=refreshed.locals,
+        changed=True,
+        applied=tuple(applied),
+    )
+
+
 def local_operations() -> tuple[OperationSpec[object, object], ...]:
     return (
         OperationSpec(
@@ -592,6 +805,18 @@ def local_operations() -> tuple[OperationSpec[object, object], ...]:
                 use_undo=True,
             ),
         ),
+        OperationSpec(
+            name="local_apply_plan",
+            parse=_parse_local_apply_plan,
+            run=_local_apply_plan,
+            mutating=True,
+            preview=PreviewSpec(
+                capture_before=_local_list_for_change,
+                capture_after=_local_list_for_change,
+                cleanup=_cleanup_local_preview,
+                use_undo=True,
+            ),
+        ),
     )
 
 
@@ -611,6 +836,8 @@ def op_local_update(runtime: IdaRuntime, params: dict[str, object]) -> dict[str,
 
 
 __all__ = [
+    "LocalApplyPlanRequest",
+    "LocalApplyPlanResult",
     "LocalListRequest",
     "LocalListResult",
     "LocalMutationResult",

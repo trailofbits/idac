@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from tests.helpers import preview_round_trip_cli2, run_idalib, run_idalib_json, run_idalib_text
@@ -218,6 +219,58 @@ def test_proto_set_preview_decompile_opt_in_captures_before_after_pseudocode(
     assert isinstance(preview["after"]["decompile"], str)
     assert preview["after"]["decompile"] != preview["before"]["decompile"]
     assert "add(" in preview["after"]["decompile"]
+
+
+def test_proto_check_accepts_valid_fixture_declaration(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+) -> None:
+    payload = run_idalib_json(
+        idac_cmd,
+        idac_env,
+        copy_database(tiny_database),
+        "function",
+        "prototype",
+        "check",
+        "add",
+        "--decl",
+        "long long __cdecl add(long long a, long long b)",
+    )
+
+    assert payload["address"] == "0x1000004b0"
+    assert payload["success"] is True
+    assert payload["parsed"] is True
+    assert payload["is_function"] is True
+    assert payload["diagnostics"] == []
+
+
+def test_proto_check_rejects_invalid_fixture_declaration(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+) -> None:
+    proc = run_idalib(
+        idac_cmd,
+        idac_env,
+        copy_database(tiny_database),
+        "function",
+        "prototype",
+        "check",
+        "add",
+        "--decl",
+        "int __cdecl add(",
+        use_json=True,
+    )
+
+    assert proc.returncode == 1
+    assert "function prototype check failed:" in proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["address"] == "0x1000004b0"
+    assert payload["success"] is False
+    assert payload["parsed"] is False
 
 
 def test_proto_set_reports_unknown_named_types(

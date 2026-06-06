@@ -1,6 +1,6 @@
 # Common Workflows
 
-This file documents the current public `idac` workflows.
+Read this for safe mutation, batch, selector calibration, broad discovery, and post-mutation readback.
 
 ## Contents
 
@@ -39,14 +39,14 @@ Live GUI notes:
 
 ## Open a binary
 
+For detailed context selection and first-time import guidance, read [targets-and-backends.md](targets-and-backends.md).
+
 ```bash
 idac database open "/path/to/binary" --json
 idac targets list --json
 idac database show -c "db:/path/to/binary" --json
 idac decompile "main" -c "db:/path/to/binary" --f5
 ```
-
-For large binaries or first-time autoanalysis, omit `--timeout` so the import can block indefinitely unless the user asked for a deadline. Do not wrap this import in a shell-level timeout or a tool-call timeout; let the command keep running and poll the session if your tool supports incremental output. `targets list --json` should show a `backend: "idalib"` row for the opened path. If the raw import does not name `main`, decompile `start_ea` / `entry_ea` from `database show --json` or an address from `function list --json`. If the target has multiple architectures, provide the intended architecture slice so IDA does not need an interactive loader choice.
 
 ## Work from an existing database file
 
@@ -67,6 +67,7 @@ idac function locals list "sub_08041337"
 idac function locals list "sub_08041337" --json --out "/tmp/locals.json"
 idac preview -o "/tmp/local_rename_preview.json" function locals rename "sub_08041337" "v12" --new-name "value_maybe"
 idac type list "example"
+idac type deps "ExampleStruct"
 idac type struct show "ExampleStruct"
 idac type enum show "ExampleEnum"
 ```
@@ -85,14 +86,19 @@ idac function prototype show "sub_08041337"
 idac preview -o "/tmp/proto_preview.json" function prototype set "sub_08041337" --decl "int __fastcall sub_08041337(void *ctx, const unsigned char *buf, unsigned int len)"
 idac preview -o "/tmp/proto_file_preview.json" function prototype set "sub_08041337" --decl-file "sub_08041337_proto.h"
 idac preview -o "/tmp/local_update_preview.json" function locals update "sub_08041337" "v12" --rename "value_maybe" --decl "unsigned int value_maybe;"
-idac preview -o "/tmp/local_rename_preview.json" function locals rename "sub_08041337" "v12" --new-name "value_maybe"
+idac preview -o "/tmp/local_rename_preview.json" function locals rename "sub_08041337" "v13" --new-name "entry_count"
 idac preview -o "/tmp/local_retype_preview.json" function locals retype "sub_08041337" "v4" --type "unsigned int"
 idac preview -o "/tmp/local_retype_decl_preview.json" function locals retype "sub_08041337" "v4" --decl "unsigned int v4;"
 idac preview -o "/tmp/local_retype_file_preview.json" function locals retype "sub_08041337" "v4" --decl-file "local_v4.h"
+idac type check --decl "typedef struct ExampleStruct { int field_0; } ExampleStruct;"
+idac type check --decl-file "recovered_classes.h"
 idac preview -o "/tmp/type_preview.json" type declare --decl "typedef struct ExampleStruct { int field_0; } ExampleStruct;"
 idac preview -o "/tmp/type_replace_preview.json" type declare --replace --decl-file "recovered_classes.h"
 idac preview -o "/tmp/type_clang_preview.json" type declare --clang --decl-file "recovered_templates.hpp"
+idac function prototype check "sub_08041337" --decl "int __fastcall sub_08041337(void *ctx, const unsigned char *buf, unsigned int len)"
 ```
+
+The positional local selectors in these previews are for pre-reanalysis one-off checks. After `misc reanalyze`, committed rename or retype batches should switch to `--index` or `--local-id`; see [Selector calibration](#selector-calibration).
 
 Then commit the real change and read it back:
 
@@ -103,6 +109,8 @@ idac decompile "sub_08041337"
 ```
 
 Add `--propagate-callers` when you want `function prototype set` to also apply the new callee type at matching caller call sites.
+Use `function prototype check` first when the declaration uses custom calling conventions, usercall annotations, or newly imported support types.
+Use `type check` before large imports; use `type deps <name>` after import when the dependency-expanded declaration is the clearest audit artifact.
 
 Post-mutation readback commands:
 
@@ -134,6 +142,7 @@ idac function locals list "sub_08041337" --json
 idac function locals list "sub_08041337" --json --out "/tmp/locals.json"
 idac preview -o "/tmp/local_rename_index_preview.json" function locals rename "sub_08041337" "3" --new-name "value_maybe"
 idac preview -o "/tmp/local_rename_id_preview.json" function locals rename "sub_08041337" --local-id "stack(16)@0x100000460" --new-name "value_maybe"
+idac preview -o "/tmp/local_plan_preview.json" function locals apply "sub_08041337" --json-file "locals-plan.json"
 ```
 
 Keep whichever stable selector readbacks cleanly, then use that selector style for the rest of the pass.
@@ -142,11 +151,21 @@ When using `--local-id` or `--index`, do not combine them with a positional sele
 `function locals list --json` emits the canonical `local_id` string in `<location>@<defea>` form. Copy that exact text for stable-selector mode.
 If the locals list is too large to inspect inline, add `--out` and read the JSON artifact locally instead of forcing the terminal buffer.
 
+Example `locals-plan.json` for `function locals apply`:
+
+```json
+[
+  {"local_id": "stack(16)@0x100000460", "rename": "value_count", "decl": "unsigned int value_count;"},
+  {"index": 7, "type": "ExampleStruct *"}
+]
+```
+
 Local rename caution:
 
 - After major prototype or reanalysis changes, reread `function locals list` before more renames
 - Before a rename batch, capture `function locals list --json` and copy exact `local_id` or `index` values instead of guessing local names from stale pseudocode
 - Prefer `function locals update` when one local needs both a recovered name and a recovered type in the same pass
+- Prefer `function locals apply --json-file` when several locals in one function need coordinated renames or retypes from one fresh locals snapshot
 - Prefer current local name for straightforward one-off renames. Prefer `--local-id` or `--index` once prototypes or reanalysis may have shifted the local set.
 - For `function locals retype`, use `--type` for simple spellings such as `unsigned int` or `ExampleStruct *`. Use `--decl` or `--decl-file` when the retype needs a full declaration, such as arrays or function pointers.
 - Do not queue large rename batches by name alone across major mutation phases
@@ -155,38 +174,45 @@ Local rename caution:
 - Split rename work per function, and reread `function locals list --json` between functions
 - Use `--decl` for small one-off edits; prefer `--decl-file` in batch files and other long mutation passes
 - Prefer `jq` or `sed` for shell inspection of JSON artifacts instead of assuming bare `python` exists
-  Example: `idac function locals list "sub_08041337" --json | jq -r '.locals[] | [.index, .local_id, .name, .type] | @tsv'`
+  Example: `idac function locals list "sub_08041337" --json | jq -r '.locals[] | [.index, .local_id, .display_name, .type] | @tsv'`
 
 ## Batch
 
 ```bash
 idac batch "recovery.idac" --out "/tmp/recovery_batch.json"
+idac batch "recovery.idac" --lint --out "/tmp/recovery_batch_lint.json"
 ```
 
 Batch files should:
 
 - use one `idac` subcommand per line
 - omit the leading `idac`
-- omit `-c`, `--timeout`, `--format`, and `--out`
+- omit `-c`, `--timeout`, and `--format`
+- omit per-command `--out` for mutation logging; use child `--out` only when that specific read command must write its own artifact
 - prefer `--decl-file` for long type or prototype text
 - always pass `--out` to `batch` so the full step log is captured in a stable artifact
-- keep related `--decl-file`, `--file`, and per-line `--out` paths next to the batch file; relative child paths are resolved from the batch file directory
+- keep related `--decl-file`, `--functions-file`, and explicit child artifact paths next to the batch file; relative child paths are resolved from the batch file directory
 - prefer one ordered `batch` file over multiple background `idac` processes for mutation passes
-- include `batch --out` for any persistent mutation; without it, mutating batches are rejected before execution
+- mutating batches without wrapper `batch --out` are rejected before execution
+- run `batch --lint --out <path>` before executing mutation batches; lint resolves relative paths, catches parse errors, rejects unsupported batch commands, and warns on risky name-only local selectors after type/prototype/reanalysis phases
 
 ```text
 # recovery.idac
+type check --decl-file "recovered_classes.h"
 type declare --replace --decl-file "recovered_classes.h"
+function prototype check "ExampleDerived__method_1" --decl-file "example_method_1.h"
 function prototype set "ExampleDerived__method_1" --decl-file "example_method_1.h"
-function locals update "ExampleDerived__method_1" "v12" --rename "value_maybe" --decl-file "example_local.h"
-function locals rename "ExampleDerived__method_1" "v12" --new-name "value_maybe"
-function locals retype "ExampleDerived__method_1" "value_maybe" --decl-file "example_local.h"
+misc reanalyze "ExampleDerived__method_1"
+function locals update "ExampleDerived__method_1" --local-id "stack(16)@0x100000460" --rename "value_maybe" --decl-file "example_local.h"
+function locals apply "ExampleDerived__method_1" --json-file "example_method_1_locals.json"
+function locals rename "ExampleDerived__method_1" --index 6 --new-name "entry_count"
+function locals retype "ExampleDerived__method_1" --index 7 --decl-file "example_local_7.h"
 preview function prototype set "ExampleDerived__method_1" --decl-file "example_method_1.h"
 ```
 
 For `idalib`, `batch` keeps ordered logging while reusing the same open database state for the shared `-c db:<path>` locator. Each step is still a separate request.
 For larger prototype and rename passes, prefer `batch` so the mutation order is explicit and the run leaves behind a stable ordered log.
-Maintenance `misc` commands such as `misc reanalyze` are intentionally rejected from `batch`, so keep maintenance steps outside the saved batch file.
+Setup-only `misc` commands such as `misc plugin install` and `misc skill install` are intentionally rejected from `batch`. `misc reanalyze` is batch-safe and belongs between type/prototype mutations and local cleanup in full recovery batches.
 
 ## Broad discovery defaults
 

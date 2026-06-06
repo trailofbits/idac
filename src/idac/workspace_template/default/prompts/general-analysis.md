@@ -1,54 +1,43 @@
 # General Analysis
 
-Use the `$idac` skill for this reverse-engineering task.
+Use this for a light reverse-engineering pass or one incremental cleanup.
 
-## Target
+## Setup
 
-- Work only on this IDA target: `<BACKEND/TARGET OR DATABASE>`
-- Scope this pass to: `<class | type | symbol family>`
-- Current objective: `<what needs to become readable or recoverable>`
+- **Context**: <!-- -c db:/path/to/file.i64, -c pid:1234, or blank to use AGENTS.md default -->
+- **Target**: <!-- symbol, function, type, class, or family under analysis -->
+- **Scope**: <!-- exact boundary for this pass -->
+- **Objective**: <!-- what should become more readable or better evidenced -->
+- **Prior work**: <!-- audit entry, recovered header, artifact path, or "none" -->
 
-## Working Mode
+If any required placeholder is still blank at runtime, ask instead of guessing.
 
-- Prefer first-class `idac` commands over ad hoc shell guesses or raw IDAPython. Use `py exec` only when no first-class command fits the job.
-- Work from the binary first. Do not search the web or external source trees unless the user explicitly asks for that or the task is specifically about external correlation.
-- Use the `idac` command grammar from `reference/cli.md`. List commands take a positional filter, bulk decompiles use `decompilemany`, mutations are previewed via the `preview` wrapper, string discovery lives under `search strings`, and rename/reanalyze/install flows live under `misc`.
-- Read the existing workspace state before changing anything: `AGENTS.md`, `audit/`, `headers/recovered/`, and any prior artifacts for this family.
-- If C++ class recovery is in scope, review `reference/class-recovery.md` and `reference/ida-cpp-type-details.md` before writing declarations or vtable layouts.
-- Keep the pass phased: discovery, read-only audit, mutations, explicit reanalyze, local rename/retype, final readback.
-- Unix socket access is required for all live GUI operations (read-only and mutating). If read-only commands succeed but a mutation fails, troubleshoot the underlying IDA/database error rather than assuming a socket permission split.
-- Preview supported mutations before committing them with the wrapper form `preview -o <path> <command...>`.
-- After meaningful type or prototype changes, run `reanalyze` before more rename-heavy cleanup.
-- During type or prototype recovery, run `decompile` and `decompilemany` with `--f5` so each pass reflects the latest imported types and prototype changes. During ordinary exploration and routine readback, `--f5` is usually not necessary.
-- For a single large decompile, use `-o/--out` on `decompile`; reserve `--out-file` and `--out-dir` for `decompilemany`.
-- Before `function prototype set`, run `function prototype show` to capture the current signature and confirm the intended delta.
-- Before batch local renames, run `function locals list --json --out <path>`, prefer `--local-id` or `--index` after reanalysis drift, and stop on the first rename miss to recalibrate.
-- For large rename previews, write the preview to disk with `preview -o <path>` and inspect the JSON artifact with `jq` instead of relying on inline output.
-- Prefer minimal `struct` declarations first, then grow them from proven offsets and access patterns. Use blob padding for unknown regions instead of guessed scalar fields.
-- Treat inferred semantics as provisional. Use neutral offset-based names or `_maybe` suffixes until the evidence is strong.
+## References
 
-## Reverse-Engineering Goals
+If the idac guide is not already in context, run `idac docs guide` first. Use focused topics as needed:
 
-- Read and understand representative decompiled output for the scoped family.
-- Recover structs, classes, enums, typedefs, vtables, and support types by using field offsets, field usage, constructors, callers, callees, xrefs, debug strings, defined strings, RTTI, demangled names, and runtime vtable data when available.
-- Include adjacent support structs or enums only when they are directly needed to make the scoped family readable.
-- Build or refine reusable recovered headers in `headers/recovered/`, favoring one family header per area instead of scattered throwaway declarations.
-- Apply recovered headers with `type declare --replace --decl-file ...` when the declarations are strong enough to improve the database.
-- Update function prototypes, local variable names, local types, and related support types so the decompiler output becomes materially easier to read.
-- Redecompile representative constructors, destructors, overrides, parsers, helpers, and important callers to verify that the changes actually improved output.
-- Make one incremental pass that leaves the next agent with a cleaner database and better recorded context.
+- `idac docs cli` for command grammar and output behavior
+- `idac docs targets` for context/backend selection
+- `idac docs workflows` for preview, batch, mutation, reanalysis, and locals selectors
+- `idac docs troubleshooting` for socket, backend, stale-result, or mutation failures
 
-## Durable Log And Handoff
+## Pass Contract
 
-- Keep an append-only audit trail. Add a new dated section instead of rewriting prior notes.
-- Record durable notes in `audit/journal.md` and open questions in `audit/open-questions.md`. Create them if missing.
-- For each pass, log the exact target and scope, functions and types reviewed, evidence used for recovered fields and names, mutations attempted, what improved, what failed, tool rough edges, and recommended next steps.
-- Keep machine-readable mutation logs, JSON outputs, and decompile dumps you want to preserve in `audit/`. Use `.idac/tmp/` for transient outputs that do not need to be kept.
-- For larger mutation passes, prefer a saved `recovery.idac` batch file plus its `batch --out` log so future agents can audit the exact mutation order and results.
+- Read existing workspace state before changing anything: `AGENTS.md`, relevant `audit/` entries, `headers/recovered/`, and prior artifacts.
+- Work from the binary/database first; do external correlation only when the user asks or the task requires it.
+- Keep durable notes in `audit/<target>-recovery.md`; use `.idac/tmp/` for transient JSON, decompile, or preview artifacts.
+- If you mutate the database or headers, record what changed, what evidence justified it, what failed, and what remains inferred.
+- Before any mutation batch, run `idac batch <file> --lint --out .idac/tmp/<name>.lint.json`.
+- Use `type check`, `function prototype check`, and `type deps` when parser behavior or type dependencies are part of the risk.
 
-## Completion Requirements
+## Audit Entry
 
-- Summarize what changed in the database and which headers were updated or applied.
-- State what remains uncertain and which names, types, or semantics are still inferred.
-- Call out failed commands, parser limitations, or places where `idac` workflow and tooling could be improved.
-- Leave the workspace in a state where another agent can continue incrementally without redoing discovery from scratch.
+Append to `audit/<target>-recovery.md` using `references/templates/checkpoint-note.md` inside this workspace or `idac docs templates`.
+
+## Done When
+
+- Representative readback for the scoped target has been inspected.
+- Any committed mutation has been reanalyzed and reread when required by the guide.
+- Local cleanup after reanalysis used fresh `function locals list --json` data, stable selectors, or `function locals apply`.
+- The audit entry names changed database state, updated headers, uncertainty, failed commands, and next steps.
+- The final response summarizes only the material outcome and remaining risk.
