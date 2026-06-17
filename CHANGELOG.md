@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.0
+
+This release adds preflight validation and safer batch mutation workflows, improves IDA discovery diagnostics, and refreshes the bundled agent guidance around current recovery practices.
+
+- Added `type deps`, `type check`, and `function prototype check` so recovered declarations and prototypes can be validated before import or mutation, including parser diagnostics for missing or invalid support types.
+- Added `batch --lint` and made `misc reanalyze` batch-safe, giving mutation batches a no-execute preflight that catches parse errors, missing input files, missing timeouts, unsupported wrapper commands, and risky local-selector usage.
+- Added `function locals apply --json-file` for applying multi-local rename/retype plans from one locals snapshot, with preview support and structured readback.
+- Added `disasm --start/--end` for bounded address-range disassembly and improved `py exec --script` so script-file execution preserves path semantics such as `__file__`.
+- Improved headless IDA discovery and diagnostics by reading newer `hcli` IDA config, accepting macOS `.app` install roots, and checking IDA EULA acceptance in `doctor`.
+- Refreshed README, bundled docs, workspace templates, and the packaged `idac` skill around `idac docs guide`, current workspace paths, batch linting, validation commands, and recovery workflows.
+- Updated locked dependencies, including the `idna` security bump.
+
 ## 0.16.1
 
 This patch release fixes the bundled Codex workspace template permissions for routine `idac` development workflows.

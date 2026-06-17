@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import shutil
+import signal
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,6 +33,33 @@ def short_runtime_dir(monkeypatch):
     try:
         yield runtime_dir
     finally:
+        for registry_path in runtime_dir.glob("idac-idalib-*.json"):
+            try:
+                pid = int(json.loads(registry_path.read_text(encoding="utf-8")).get("pid", 0))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pid = 0
+            if pid > 0:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGTERM)
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            live = False
+            for registry_path in runtime_dir.glob("idac-idalib-*.json"):
+                try:
+                    pid = int(json.loads(registry_path.read_text(encoding="utf-8")).get("pid", 0))
+                except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    pid = 0
+                if pid <= 0:
+                    continue
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    continue
+                live = True
+                break
+            if not live:
+                break
+            time.sleep(0.05)
         shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
