@@ -16,16 +16,23 @@ from typing import Any
 from ..metadata import WIRE_PROTOCOL_VERSION
 from ..paths import (
     ensure_user_runtime_dir,
+    idalib_open_lock_path,
     idalib_registry_path,
     idalib_registry_paths,
 )
-from .common import normalize_timeout, pid_is_live, recv_all, require_timeout_for_operation
+from .common import normalize_timeout, pid_command_line, pid_is_live, recv_all, require_timeout_for_operation
 from .idalib_common import build_target_row, load_registry, normalize_database_path
 from .schema import RequestEnvelope, response_ok
 
 IDALIB_CONNECT_RETRIES = 3
 IDALIB_READY_MAX_BYTES = 65_536
 IDALIB_STARTUP_ATTEMPTS = 2
+# A liveness probe is a trivial status check that a healthy daemon answers in
+# milliseconds. Cap how long it waits so a blocking-mode command (no --timeout)
+# never hangs indefinitely on the probe: a daemon that accepts the connection
+# but does not reply within this window is treated as busy/reachable, and the
+# real request then honors the caller's own (possibly blocking) timeout.
+IDALIB_PROBE_TIMEOUT_CAP = 5.0
 IDALIB_STARTUP_HINT = (
     "idalib exited before reporting readiness; this usually means IDA failed during startup, "
     "license validation, or Python initialization. Run `idac doctor` to check the local IDA/idalib runtime."
@@ -109,6 +116,28 @@ def _find_instance_for_database(database_path: str) -> IdaLibInstance | None:
     return None
 
 
+def _has_registry_for_database(database_path: str) -> bool:
+    """Return whether any registry file references this database, without purging.
+
+    A registry that survives while no live daemon answers indicates the daemon
+    died without a clean close (a clean close removes its registry), which is how
+    ``db_close`` detects that unsaved changes may have been lost.
+    """
+
+    requested = normalize_database_path(database_path)
+    for registry_path in idalib_registry_paths():
+        payload = load_registry(registry_path)
+        if payload is None:
+            continue
+        try:
+            candidate = normalize_database_path(str(payload["database_path"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if candidate == requested:
+            return True
+    return False
+
+
 def _socket_request(
     socket_path: Path,
     payload: dict[str, Any],
@@ -122,43 +151,93 @@ def _socket_request(
         try:
             if timeout is not None:
                 sock.settimeout(timeout)
-            sock.connect(str(socket_path))
-            sock.sendall(encoded)
-            sock.shutdown(socket.SHUT_WR)
-            chunks = recv_all(sock)
-            response = json.loads(b"".join(chunks).decode("utf-8"))
+            try:
+                sock.connect(str(socket_path))
+            except socket.timeout:
+                raise
+            except OSError as exc:
+                # Only connect-phase failures are retried; nothing has been
+                # sent yet, so a retry cannot re-execute the operation.
+                last_error = exc
+                time.sleep(0.05)
+                continue
+            try:
+                sock.sendall(encoded)
+                sock.shutdown(socket.SHUT_WR)
+                chunks = recv_all(sock)
+            except socket.timeout:
+                raise
+            except OSError as exc:
+                # The request may already be executing in the daemon;
+                # re-sending it could run a mutation twice.
+                raise RuntimeError(str(exc) or exc.__class__.__name__) from exc
+            if not chunks:
+                raise RuntimeError("idalib daemon returned an empty response")
+            try:
+                response = json.loads(b"".join(chunks).decode("utf-8"))
+            except ValueError as exc:
+                # Partial/corrupt payload, e.g. the daemon died mid-write.
+                raise RuntimeError(f"idalib daemon returned a malformed response: {exc}") from exc
             if not isinstance(response, dict):
                 raise RuntimeError("idalib daemon returned a non-object JSON payload")
             return response
-        except OSError as exc:
-            last_error = exc
-            time.sleep(0.05)
         finally:
             sock.close()
     detail = "idalib daemon is not running" if last_error is None else str(last_error)
     raise RuntimeError(detail)
 
 
+def _live_pid_is_foreign(pid: int) -> bool:
+    """Return whether a live pid is provably not an idalib worker process.
+
+    Used to distinguish a genuinely busy daemon (keep its files) from a stale
+    registry whose pid was recycled by an unrelated process (purge and restart).
+    A pid whose command line cannot be read is treated as possibly-ours, so its
+    files are never purged on that uncertainty.
+    """
+
+    command_line = pid_command_line(pid)
+    return command_line is not None and "idac.transport.idalib_server" not in command_line
+
+
+def _probe_timeout(timeout: float | None) -> float:
+    if timeout is None:
+        return IDALIB_PROBE_TIMEOUT_CAP
+    return min(timeout, IDALIB_PROBE_TIMEOUT_CAP)
+
+
 def _probe_instance(
     instance: IdaLibInstance,
     *,
     timeout: float | None,
-    purge_on_failure: bool = True,
 ) -> bool:
     try:
         response = _socket_request(
             instance.socket_path,
             {"version": WIRE_PROTOCOL_VERSION, "op": "daemon_status", "params": {}},
-            timeout=timeout,
+            timeout=_probe_timeout(timeout),
         )
-    except TimeoutError:
-        raise
-    except RuntimeError:
-        if purge_on_failure:
-            _purge_instance_files(
-                registry_path=instance.registry_path,
-                socket_path=instance.socket_path,
-            )
+    except socket.timeout:
+        # The daemon accepted the connection but did not reply within the probe
+        # cap: it is alive but busy (or wedged). Treat it as reachable and never
+        # purge it - the real request that follows honors the caller's own
+        # timeout, so a blocking-mode command still waits for a busy daemon.
+        return True
+    except RuntimeError as exc:
+        if pid_is_live(instance.pid) and not _live_pid_is_foreign(instance.pid):
+            # A genuine idalib worker is alive but its socket refused the
+            # connection: it is shutting down or wedged. Never purge it, so a
+            # second daemon cannot open the same database.
+            raise RuntimeError(
+                f"idalib daemon (pid {instance.pid}) for `{instance.database_path}` "
+                f"is not answering on its socket ({exc}); it may be shutting down - retry shortly"
+            ) from exc
+        # The process is gone, or the pid was recycled by an unrelated process:
+        # purge the stale files so a fresh daemon can start.
+        _purge_instance_files(
+            registry_path=instance.registry_path,
+            socket_path=instance.socket_path,
+        )
         return False
     return bool(response.get("ok"))
 
@@ -197,7 +276,7 @@ def _read_ready_payload(read_fd: int, *, timeout: float | None) -> dict[str, Any
             selector.register(read_fd, selectors.EVENT_READ)
             events = selector.select(timeout)
             if not events:
-                raise TimeoutError()
+                raise socket.timeout()
             raw = os.read(read_fd, IDALIB_READY_MAX_BYTES + 1)
     finally:
         with contextlib.suppress(OSError):
@@ -257,17 +336,7 @@ def _start_daemon_for_database(
             expected_registry = idalib_registry_path(proc.pid)
             try:
                 payload = _read_ready_payload(read_fd, timeout=startup_timeout)
-                if not bool(payload.get("ok")):
-                    raise RuntimeError(_format_startup_failure(database_path, str(payload.get("error") or "")))
-                instance = _instance_from_registry(expected_registry)
-                if instance is None:
-                    raise RuntimeError("idalib daemon reported readiness but registry was unavailable")
-                if instance.database_path != database_path:
-                    raise RuntimeError(
-                        f"idalib daemon opened `{instance.database_path}` while `{database_path}` was requested"
-                    )
-                return instance
-            except TimeoutError as exc:
+            except socket.timeout as exc:
                 _terminate_process(proc)
                 raise RuntimeError(
                     f"timed out after {_timeout_text(startup_timeout)} waiting for idalib daemon "
@@ -285,8 +354,56 @@ def _start_daemon_for_database(
                 if attempt + 1 < IDALIB_STARTUP_ATTEMPTS:
                     continue
                 raise RuntimeError(_format_startup_failure(database_path)) from exc
+            except Exception as exc:
+                _terminate_process(proc)
+                raise RuntimeError(_format_startup_failure(database_path, str(exc))) from exc
+            except BaseException:
+                # KeyboardInterrupt during the (possibly minutes-long) readiness
+                # wait must still reap the daemon, or it lingers holding the
+                # database lock after the CLI exits.
+                _terminate_process(proc)
+                raise
+            try:
+                if not bool(payload.get("ok")):
+                    raise RuntimeError(_format_startup_failure(database_path, str(payload.get("error") or "")))
+                instance = _instance_from_registry(expected_registry)
+                if instance is None:
+                    raise RuntimeError("idalib daemon reported readiness but registry was unavailable")
+                if instance.database_path != database_path:
+                    raise RuntimeError(
+                        f"idalib daemon opened `{instance.database_path}` while `{database_path}` was requested"
+                    )
+            except BaseException:
+                # The daemon is running but failed validation; without this it
+                # would survive as an orphan holding the database lock.
+                _terminate_process(proc)
+                raise
+            return instance
 
     raise RuntimeError(_format_startup_failure(database_path))
+
+
+@contextlib.contextmanager
+def _database_start_lock(database_path: str):
+    """Serialize daemon starts for one database across concurrent idac processes.
+
+    Without this, two processes that both find no instance would each spawn a
+    daemon on the same database; the loser fails with `rc=4 (database busy or
+    locked)`. The advisory `flock` is released when the fd closes, including on
+    process death, so it cannot go stale.
+    """
+
+    import fcntl  # Unix-only, imported lazily so non-idalib platforms can import this module.
+
+    ensure_user_runtime_dir()
+    fd = os.open(str(idalib_open_lock_path(database_path)), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        # Do not unlink the lock file: another waiter may hold this inode, and a
+        # fresh file would defeat the lock. The tiny per-database file is reused.
+        os.close(fd)
 
 
 def _ensure_instance_for_database(
@@ -298,22 +415,26 @@ def _ensure_instance_for_database(
 ) -> tuple[IdaLibInstance, bool]:
     normalized = normalize_database_path(database_path)
     instance = _find_instance_for_database(normalized)
-    if instance is not None:
-        if _probe_instance(instance, timeout=timeout):
-            return instance, True
-        instance = None
+    if instance is not None and _probe_instance(instance, timeout=timeout):
+        return instance, True
     if not start_if_missing:
         raise RuntimeError(
             f"idalib database is not open: {normalized}; use `idac database open {shlex_quote(normalized)}`"
         )
-    return (
-        _start_daemon_for_database(
-            normalized,
-            startup_timeout=timeout,
-            run_auto_analysis=run_auto_analysis,
-        ),
-        False,
-    )
+    with _database_start_lock(normalized):
+        # Re-check under the lock: another process may have started the daemon
+        # while we waited to acquire it.
+        instance = _find_instance_for_database(normalized)
+        if instance is not None and _probe_instance(instance, timeout=timeout):
+            return instance, True
+        return (
+            _start_daemon_for_database(
+                normalized,
+                startup_timeout=timeout,
+                run_auto_analysis=run_auto_analysis,
+            ),
+            False,
+        )
 
 
 def _already_closed_result(database: str) -> dict[str, Any]:
@@ -346,15 +467,12 @@ class IdaLibBackend:
             raw_path = str(request.params.get("path") or "").strip()
             if not raw_path:
                 raise RuntimeError("database open requires a path")
-            try:
-                instance, already_open = _ensure_instance_for_database(
-                    raw_path,
-                    timeout=timeout,
-                    run_auto_analysis=bool(request.params.get("run_auto_analysis", True)),
-                    start_if_missing=True,
-                )
-            except TimeoutError as exc:
-                raise _timeout_error("db_open", timeout) from exc
+            instance, already_open = _ensure_instance_for_database(
+                raw_path,
+                timeout=timeout,
+                run_auto_analysis=bool(request.params.get("run_auto_analysis", True)),
+                start_if_missing=True,
+            )
             return response_ok(
                 {
                     "opened": True,
@@ -371,24 +489,28 @@ class IdaLibBackend:
             raise RuntimeError("idalib commands require a database context")
 
         if request.op == "db_close":
+            had_registry = _has_registry_for_database(database)
             instance = _find_instance_for_database(database)
-            if instance is None:
-                return response_ok(_already_closed_result(database), backend="idalib")
-            try:
-                if not _probe_instance(instance, timeout=timeout):
-                    return response_ok(_already_closed_result(database), backend="idalib")
-            except TimeoutError as exc:
-                raise _timeout_error(request.op, timeout) from exc
+            if instance is None or not _probe_instance(instance, timeout=timeout):
+                result = _already_closed_result(database)
+                warnings: list[str] = []
+                if had_registry:
+                    # A registry existed but no live daemon answered: the daemon
+                    # died without a clean close, so anything not persisted by an
+                    # explicit save is gone.
+                    result["unclean"] = True
+                    warnings.append(
+                        f"idalib daemon for `{result['database']}` exited without a clean close; "
+                        "changes not persisted by an explicit `database save` may have been lost"
+                    )
+                return response_ok(result, backend="idalib", warnings=warnings)
         else:
-            try:
-                instance, _ = _ensure_instance_for_database(
-                    database,
-                    timeout=timeout,
-                    run_auto_analysis=True,
-                    start_if_missing=True,
-                )
-            except TimeoutError as exc:
-                raise _timeout_error(request.op, timeout) from exc
+            instance, _ = _ensure_instance_for_database(
+                database,
+                timeout=timeout,
+                run_auto_analysis=True,
+                start_if_missing=True,
+            )
 
         payload = {
             "version": WIRE_PROTOCOL_VERSION,
@@ -397,5 +519,5 @@ class IdaLibBackend:
         }
         try:
             return _socket_request(instance.socket_path, payload, timeout=timeout)
-        except TimeoutError as exc:
+        except socket.timeout as exc:
             raise _timeout_error(request.op, timeout) from exc

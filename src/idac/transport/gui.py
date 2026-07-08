@@ -4,17 +4,16 @@ import contextlib
 import errno
 import json
 import socket
-import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..metadata import WIRE_PROTOCOL_VERSION
 from ..paths import bridge_registry_paths, bridge_socket_filename, user_runtime_dir
 from ..version import VERSION
-from .common import normalize_timeout, pid_is_live, recv_all, require_timeout_for_operation
+from .common import normalize_timeout, pid_command_line, pid_is_live, recv_all, require_timeout_for_operation
 from .schema import RequestEnvelope, response_ok
 
 TRANSIENT_SOCKET_ERRNOS = {
@@ -33,7 +32,7 @@ class StaleBridgeInstanceError(RuntimeError):
     pass
 
 
-def _format_discovery_warning(message: str, *, registry_path: Optional[Path] = None) -> str:
+def _format_discovery_warning(message: str, *, registry_path: Path | None = None) -> str:
     """Attach registry context to a GUI discovery warning when available."""
 
     if registry_path is None:
@@ -42,10 +41,10 @@ def _format_discovery_warning(message: str, *, registry_path: Optional[Path] = N
 
 
 def _append_discovery_warning(
-    warnings: Optional[list[str]],
+    warnings: list[str] | None,
     message: str,
     *,
-    registry_path: Optional[Path] = None,
+    registry_path: Path | None = None,
 ) -> None:
     if warnings is not None:
         warnings.append(_format_discovery_warning(message, registry_path=registry_path))
@@ -60,8 +59,8 @@ class BridgeInstance:
     registry_path: Path
     plugin_name: str
     plugin_version: str
-    started_at: Optional[str] = None
-    instance_id: Optional[str] = None
+    started_at: str | None = None
+    instance_id: str | None = None
     state: str = "ready"
     meta: dict[str, Any] = field(default_factory=dict)
 
@@ -107,13 +106,13 @@ class GuiBackend:
         return response
 
 
-def _list_targets_request(*, timeout: Optional[float] = None) -> RequestEnvelope:
+def _list_targets_request(*, timeout: float | None = None) -> RequestEnvelope:
     """Build the internal ``list_targets`` request used during discovery."""
 
     return RequestEnvelope(op="list_targets", backend="gui", timeout=timeout)
 
 
-def _bridge_status_request(*, timeout: Optional[float] = None) -> RequestEnvelope:
+def _bridge_status_request(*, timeout: float | None = None) -> RequestEnvelope:
     """Build the internal ``bridge_status`` probe request used during discovery."""
 
     return RequestEnvelope(op="bridge_status", backend="gui", timeout=timeout)
@@ -134,7 +133,7 @@ def _is_expected_bridge_socket_path(*, pid: int, socket_path: Path) -> bool:
     return candidate == expected
 
 
-def _purge_stale_instance_files(*, registry_path: Path, socket_path: Optional[Path] = None) -> None:
+def _purge_stale_instance_files(*, registry_path: Path, socket_path: Path | None = None) -> None:
     """Best-effort removal of stale GUI bridge registry/socket files."""
 
     _purge_stale_registry(registry_path)
@@ -151,30 +150,10 @@ def _purge_stale_instance_files(*, registry_path: Path, socket_path: Optional[Pa
         socket_path.unlink()
 
 
-def _pid_command_line(pid: int) -> Optional[str]:
-    """Return the process command line for ``pid`` when it can be queried safely."""
-
-    try:
-        proc = subprocess.run(
-            ["ps", "-o", "args=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return None
-    if proc.returncode != 0:
-        return None
-    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    if not lines:
-        return None
-    return lines[0]
-
-
-def _pid_non_gui_bridge_reason(pid: int) -> Optional[str]:
+def _pid_non_gui_bridge_reason(pid: int) -> str | None:
     """Return a rejection reason when a live pid clearly is not an IDA GUI host."""
 
-    command_line = _pid_command_line(pid)
+    command_line = pid_command_line(pid)
     if not command_line:
         return None
     if "idac.transport.idalib_server" in command_line:
@@ -185,8 +164,8 @@ def _pid_non_gui_bridge_reason(pid: int) -> Optional[str]:
 def _load_instance(
     path: Path,
     *,
-    warnings: Optional[list[str]] = None,
-) -> Optional[BridgeInstance]:
+    warnings: list[str] | None = None,
+) -> BridgeInstance | None:
     """Load one registry file, purging obviously stale entries on the way."""
 
     try:
@@ -242,7 +221,7 @@ def _load_instance(
     )
 
 
-def _is_stale_instance(instance: BridgeInstance, *, error: Optional[OSError] = None) -> bool:
+def _is_stale_instance(instance: BridgeInstance, *, error: OSError | None = None) -> bool:
     """Classify a bridge instance as stale using both pid and socket state."""
 
     socket_exists = instance.socket_path.exists()
@@ -262,10 +241,6 @@ def _ensure_instance_version_match(instance: BridgeInstance) -> None:
         f"pid {instance.pid}: plugin={instance.plugin_version}, cli={VERSION}. "
         "Reinstall the plugin so the versions match."
     )
-
-
-def _probe_timeout(timeout: Optional[float]) -> Optional[float]:
-    return timeout
 
 
 def _validate_instance_status(instance: BridgeInstance, status: dict[str, Any]) -> BridgeInstance:
@@ -316,7 +291,7 @@ def _validate_instance_status(instance: BridgeInstance, status: dict[str, Any]) 
     )
 
 
-def _probe_instance_status(instance: BridgeInstance, *, timeout: Optional[float]) -> BridgeInstance:
+def _probe_instance_status(instance: BridgeInstance, *, timeout: float | None) -> BridgeInstance:
     """Probe a bridge instance over the socket and confirm its identity/state."""
 
     response = _send_request_to_instance(instance, _bridge_status_request(timeout=timeout))
@@ -341,7 +316,7 @@ def _probe_instance_status(instance: BridgeInstance, *, timeout: Optional[float]
 
 def _discovered_instances(
     *,
-    warnings: Optional[list[str]] = None,
+    warnings: list[str] | None = None,
 ) -> list[BridgeInstance]:
     """Return GUI bridge instances discovered from registry files only."""
 
@@ -356,14 +331,13 @@ def _discovered_instances(
 def _probe_discovered_instance(
     instance: BridgeInstance,
     *,
-    timeout: Optional[float] = None,
-    warnings: Optional[list[str]] = None,
-) -> Optional[BridgeInstance]:
+    timeout: float | None = None,
+    warnings: list[str] | None = None,
+) -> BridgeInstance | None:
     """Validate one registry-discovered bridge instance over the socket."""
 
-    probe_timeout = _probe_timeout(timeout)
     try:
-        return _probe_instance_status(instance, timeout=probe_timeout)
+        return _probe_instance_status(instance, timeout=timeout)
     except StaleBridgeInstanceError:
         _append_discovery_warning(
             warnings,
@@ -383,8 +357,8 @@ def _probe_discovered_instance(
 
 def _live_instances(
     *,
-    timeout: Optional[float] = None,
-    warnings: Optional[list[str]] = None,
+    timeout: float | None = None,
+    warnings: list[str] | None = None,
 ) -> list[BridgeInstance]:
     """Return registry-discovered instances that also pass live bridge probing."""
 
@@ -398,8 +372,8 @@ def _live_instances(
 
 def list_instances(
     *,
-    timeout: Optional[float] = None,
-    warnings: Optional[list[str]] = None,
+    timeout: float | None = None,
+    warnings: list[str] | None = None,
 ) -> list[BridgeInstance]:
     """Return all currently discoverable live GUI bridge instances."""
 
@@ -408,7 +382,7 @@ def list_instances(
 
 def list_discovered_instances(
     *,
-    warnings: Optional[list[str]] = None,
+    warnings: list[str] | None = None,
 ) -> list[BridgeInstance]:
     """Return registry-discovered GUI bridge instances before socket probing."""
 
@@ -439,7 +413,7 @@ def _normalize_target_row(instance: BridgeInstance, item: dict[str, Any]) -> dic
     }
 
 
-def _pid_selector_match(instance: BridgeInstance, selector_text: str) -> Optional[str]:
+def _pid_selector_match(instance: BridgeInstance, selector_text: str) -> str | None:
     """Match selectors that name an instance without naming a subtarget."""
 
     if selector_text in {str(instance.pid), _instance_selector(instance)}:
@@ -464,9 +438,9 @@ def _select_instance_target(
     instance: BridgeInstance,
     selector_text: str,
     *,
-    timeout: Optional[float] = None,
-    warnings: Optional[list[str]] = None,
-) -> Optional[str]:
+    timeout: float | None = None,
+    warnings: list[str] | None = None,
+) -> str | None:
     """Return the local target id selected within a single GUI instance."""
 
     pid_match = _pid_selector_match(instance, selector_text)
@@ -481,8 +455,8 @@ def _select_instance_target(
 def _instance_target_rows(
     instance: BridgeInstance,
     *,
-    timeout: Optional[float] = None,
-    warnings: Optional[list[str]] = None,
+    timeout: float | None = None,
+    warnings: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch and normalize ``list_targets`` rows for one GUI instance."""
 
@@ -505,7 +479,7 @@ def _instance_target_rows(
     return [_normalize_target_row(instance, item) for item in result]
 
 
-def _selection_error(message: str, *, warnings: Optional[list[str]] = None) -> RuntimeError:
+def _selection_error(message: str, *, warnings: list[str] | None = None) -> RuntimeError:
     detail_parts = [f"runtime_dir={user_runtime_dir()}"]
     if warnings:
         detail_parts.append("diagnostics=" + " | ".join(warnings[:3]))
@@ -514,8 +488,8 @@ def _selection_error(message: str, *, warnings: Optional[list[str]] = None) -> R
 
 def list_targets(
     *,
-    timeout: Optional[float] = None,
-    warnings: Optional[list[str]] = None,
+    timeout: float | None = None,
+    warnings: list[str] | None = None,
     require_matching_version: bool = False,
 ) -> list[dict[str, Any]]:
     """List all GUI targets currently exposed across running bridge instances."""
@@ -539,11 +513,11 @@ def _explicit_instance_match(instance: BridgeInstance, selector_text: str) -> bo
 
 
 def choose_instance(
-    selector: Optional[str],
+    selector: str | None,
     *,
-    timeout: Optional[float] = None,
-    warnings: Optional[list[str]] = None,
-) -> tuple[BridgeInstance, Optional[str]]:
+    timeout: float | None = None,
+    warnings: list[str] | None = None,
+) -> tuple[BridgeInstance, str | None]:
     """Resolve a user selector to a specific GUI bridge instance and target."""
 
     discovered = _discovered_instances(warnings=warnings)
@@ -664,7 +638,7 @@ def _send_request_to_instance(
 
     encoded = (json.dumps(_request_payload(request)) + "\n").encode("utf-8")
     chunks: list[bytes] = []
-    last_error: Optional[OSError] = None
+    last_error: OSError | None = None
     timeout = normalize_timeout(request.timeout)
     for attempt in range(connect_retries):
         try:
