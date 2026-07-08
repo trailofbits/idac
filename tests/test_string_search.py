@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import pytest
 
+from idac.ops import OperationContext, payload_from_model
 from idac.ops.families import search
 from idac.ops.runtime import IdaOperationError, IdaRuntime, SegmentRange
+
+
+def _op_strings(runtime: IdaRuntime, params: dict[str, object]):
+    """Parse and run the `strings` operation the way production dispatch does."""
+    request = search._parse_strings(params)
+    return payload_from_model(search._strings(OperationContext(runtime=runtime), request))
 
 
 class _FakeIdaBytes:
@@ -193,7 +200,7 @@ def test_op_strings_lists_defined_strings_without_global_string_list() -> None:
         }
     )
 
-    rows = search.op_strings(runtime, {"query": "tiny", "segment": "__TEXT"})
+    rows = _op_strings(runtime, {"query": "tiny", "segment": "__TEXT"})
 
     assert rows == [{"address": "0x1020", "text": "Tiny token"}]
     assert runtime._ida_strlist.build_calls == 2
@@ -211,7 +218,7 @@ def test_op_strings_includes_termchr_string_literals() -> None:
         }
     )
 
-    rows = search.op_strings(runtime, {"query": "term", "segment": "__TEXT"})
+    rows = _op_strings(runtime, {"query": "term", "segment": "__TEXT"})
 
     assert rows == [{"address": "0x1010", "text": "term text"}]
 
@@ -223,7 +230,7 @@ def test_op_strings_returns_empty_list_when_no_matches_are_found() -> None:
         }
     )
 
-    rows = search.op_strings(runtime, {"query": "missing", "segment": "__TEXT"})
+    rows = _op_strings(runtime, {"query": "missing", "segment": "__TEXT"})
 
     assert rows == []
 
@@ -240,7 +247,7 @@ def test_op_strings_scan_walks_addresses_and_finds_strings() -> None:
         },
     )
 
-    rows = search.op_strings(
+    rows = _op_strings(
         runtime,
         {
             "scan": True,
@@ -258,7 +265,7 @@ def test_op_strings_scan_rejects_invalid_range() -> None:
     runtime = _FakeRuntime()
 
     with pytest.raises(IdaOperationError, match="range end must be greater than the start"):
-        search.op_strings(runtime, {"scan": True, "segment": "__TEXT", "start": "0x1020", "end": "0x1020"})
+        _op_strings(runtime, {"scan": True, "segment": "__TEXT", "start": "0x1020", "end": "0x1020"})
 
 
 def test_op_strings_rejects_defined_string_listing_on_dsc() -> None:
@@ -268,7 +275,7 @@ def test_op_strings_rejects_defined_string_listing_on_dsc() -> None:
     )
 
     with pytest.raises(IdaOperationError, match="defined string listing is disabled for dyld shared caches"):
-        search.op_strings(runtime, {"query": "alpha", "segment": "__TEXT"})
+        _op_strings(runtime, {"query": "alpha", "segment": "__TEXT"})
 
     assert runtime._ida_strlist.build_calls == 0
 
@@ -279,7 +286,7 @@ def test_op_strings_does_not_treat_dsc_substring_as_shared_cache() -> None:
         items={0x1010: (0, 5, b"alpha")},
     )
 
-    rows = search.op_strings(runtime, {"query": "alpha", "segment": "__TEXT"})
+    rows = _op_strings(runtime, {"query": "alpha", "segment": "__TEXT"})
 
     assert rows == [{"address": "0x1010", "text": "alpha"}]
 
@@ -288,7 +295,7 @@ def test_op_strings_dsc_scan_requires_bounded_range() -> None:
     runtime = _FakeRuntime(input_path="/System/Library/dyld/dyld_shared_cache_arm64e")
 
     with pytest.raises(IdaOperationError, match="requires both start and end addresses"):
-        search.op_strings(runtime, {"scan": True, "segment": "__TEXT"})
+        _op_strings(runtime, {"scan": True, "segment": "__TEXT"})
 
 
 def test_op_strings_dsc_scan_rejects_large_ranges() -> None:
@@ -296,7 +303,7 @@ def test_op_strings_dsc_scan_rejects_large_ranges() -> None:
     runtime._segment_ranges = (SegmentRange(name="__TEXT:__cstring", start_ea=0x1000, end_ea=0x1201000),)
 
     with pytest.raises(IdaOperationError, match="limited to 16 MiB"):
-        search.op_strings(
+        _op_strings(
             runtime,
             {
                 "scan": True,
@@ -323,6 +330,6 @@ def test_op_strings_filters_to_selected_segment_ranges() -> None:
     )
     runtime._segment_ranges = (SegmentRange(name="__TEXT:__cstring", start_ea=0x2000, end_ea=0x2100),)
 
-    rows = search.op_strings(runtime, {"query": "tiny", "segment": "__TEXT"})
+    rows = _op_strings(runtime, {"query": "tiny", "segment": "__TEXT"})
 
     assert rows == [{"address": "0x2010", "text": "Tiny token"}]

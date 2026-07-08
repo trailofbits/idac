@@ -13,7 +13,7 @@ import traceback
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, cast
 
 import ida_kernwin  # type: ignore
 
@@ -72,7 +72,7 @@ class IdacBridge:
 
     def __init__(
         self,
-        handlers: Optional[dict[str, HandlerFn]] = None,
+        handlers: dict[str, HandlerFn] | None = None,
         *,
         validate_target: TargetValidator | None = None,
         status_provider: Callable[[], dict[str, Any]] | None = None,
@@ -85,7 +85,7 @@ class IdacBridge:
         self.validate_target = validate_target
         self.status_provider = status_provider
 
-    def _dispatch(self, op_name: str, params: dict[str, Any], *, target: Optional[str]) -> Any:
+    def _dispatch(self, op_name: str, params: dict[str, Any], *, target: str | None) -> Any:
         if op_name == "bridge_status":
             if self.status_provider is None:
                 raise UnsupportedOperationError("bridge status is unavailable")
@@ -99,7 +99,7 @@ class IdacBridge:
         return handler(params)
 
     def handle_request(self, payload: Any) -> dict[str, Any]:
-        request_id: Optional[str] = None
+        request_id: str | None = None
         op_name = "<unknown>"
         try:
             envelope = parse_request_envelope(payload)
@@ -138,7 +138,7 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
         )
 
     def handle(self) -> None:
-        service = self.server.service  # type: ignore[attr-defined]
+        service = cast("_ThreadedUnixBridgeServer", self.server).service
         try:
             raw = self._read_request()
         except TimeoutError:
@@ -162,6 +162,7 @@ class _ThreadedUnixBridgeServer(socketserver.ThreadingMixIn, socketserver.UnixSt
     allow_reuse_address = True
     daemon_threads = True
     request_queue_size = 64
+    service: BridgeService
 
 
 def _run_on_main_thread(fn: Any) -> Any:
@@ -182,7 +183,7 @@ def _run_on_main_thread(fn: Any) -> Any:
 class BridgeService:
     """Minimal Unix-socket service wrapper for the GUI bridge."""
 
-    def __init__(self, bridge: Optional[IdacBridge] = None) -> None:
+    def __init__(self, bridge: IdacBridge | None = None) -> None:
         self._instance_id = str(uuid.uuid4())
         self._started_at: str | None = None
         self._state = "stopped"
@@ -193,8 +194,8 @@ class BridgeService:
             runner=_run_on_main_thread,
             max_pending=BRIDGE_MAX_PENDING_CALLS,
         )
-        self._server: Optional[_ThreadedUnixBridgeServer] = None
-        self._thread: Optional[threading.Thread] = None
+        self._server: _ThreadedUnixBridgeServer | None = None
+        self._thread: threading.Thread | None = None
         self.request_logging_enabled = False
         self.response_logging_enabled = False
 
@@ -208,7 +209,7 @@ class BridgeService:
         self._state = "starting"
         self._dispatcher.start()
         server = _ThreadedUnixBridgeServer(str(path), _BridgeRequestHandler)
-        server.service = self  # type: ignore[attr-defined]
+        server.service = self
         self._server = server
         self._write_registry(path)
         thread = threading.Thread(target=server.serve_forever, name="idac-bridge", daemon=True)
@@ -304,15 +305,9 @@ class BridgeService:
         self.request_logging_enabled = bool(enabled)
         return self.request_logging_enabled
 
-    def toggle_request_logging(self) -> bool:
-        return self.set_request_logging_enabled(not self.request_logging_enabled)
-
     def set_response_logging_enabled(self, enabled: bool) -> bool:
         self.response_logging_enabled = bool(enabled)
         return self.response_logging_enabled
-
-    def toggle_response_logging(self) -> bool:
-        return self.set_response_logging_enabled(not self.response_logging_enabled)
 
     def _write_registry(self, sock_path: Path) -> None:
         payload = bridge_registry_payload(
@@ -326,7 +321,7 @@ class BridgeService:
         atomic_write_json(destination, payload)
 
 
-def _best_effort_request_info(raw: bytes) -> tuple[Optional[str], str]:
+def _best_effort_request_info(raw: bytes) -> tuple[str | None, str]:
     try:
         payload = json.loads(raw.decode("utf-8"))
     except Exception:

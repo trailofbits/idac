@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import require_str
-from ..models import payload_from_model
 from ..preview import PreviewSpec
 from ..runtime import (
     IdaOperationError,
@@ -130,15 +131,15 @@ class PrototypeCheckResult:
     diagnostics: tuple[str, ...]
 
 
-def _require_identifier(params: dict[str, object]) -> str:
+def _require_identifier(params: Mapping[str, Any]) -> str:
     return require_str(params.get("identifier"), field="address or identifier")
 
 
-def _parse_proto_get(params: dict[str, object]) -> PrototypeGetRequest:
+def _parse_proto_get(params: Mapping[str, Any]) -> PrototypeGetRequest:
     return PrototypeGetRequest(identifier=_require_identifier(params))
 
 
-def _parse_proto_set(params: dict[str, object]) -> PrototypeSetRequest:
+def _parse_proto_set(params: Mapping[str, Any]) -> PrototypeSetRequest:
     decl = str(params.get("decl") or "")
     if not decl:
         raise IdaOperationError("prototype declaration is required")
@@ -150,7 +151,7 @@ def _parse_proto_set(params: dict[str, object]) -> PrototypeSetRequest:
     )
 
 
-def _parse_proto_check(params: dict[str, object]) -> PrototypeCheckRequest:
+def _parse_proto_check(params: Mapping[str, Any]) -> PrototypeCheckRequest:
     decl = str(params.get("decl") or "")
     if not decl:
         raise IdaOperationError("prototype declaration is required")
@@ -375,7 +376,7 @@ def _proto_set(context: OperationContext, request: PrototypeSetRequest) -> Proto
     )
 
 
-def prototype_operations() -> tuple[OperationSpec[object, object], ...]:
+def prototype_operations() -> tuple[OperationSpec[Any, Any], ...]:
     return (
         OperationSpec(
             name="proto_get",
@@ -401,11 +402,6 @@ def prototype_operations() -> tuple[OperationSpec[object, object], ...]:
     )
 
 
-def op_proto_set(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_proto_set(params)
-    return payload_from_model(_proto_set(OperationContext(runtime=runtime), request))
-
-
 __all__ = [
     "PrototypeCheckRequest",
     "PrototypeCheckResult",
@@ -415,6 +411,5 @@ __all__ = [
     "PrototypePreviewView",
     "PrototypeSetRequest",
     "PrototypeView",
-    "op_proto_set",
     "prototype_operations",
 ]

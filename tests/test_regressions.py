@@ -13,9 +13,10 @@ import pytest
 from idac import doctor
 from idac.cli import build_parser
 from idac.metadata import WIRE_PROTOCOL_VERSION, bridge_registry_payload
+from idac.ops import OperationContext
 from idac.ops.families import classes
-from idac.ops.families.classes import op_class_vtable
-from idac.ops.families.type_declare import _apply_type_aliases, _normalize_aliases, _split_declarations
+from idac.ops.families.type_declare import _apply_type_aliases, _split_declarations
+from idac.ops.helpers.params import parse_aliases
 from idac.ops.runtime import IdaOperationError, IdaRuntime
 from idac.ops.runtime_classes import find_vtable_symbol
 from idac.transport import idalib, idalib_common, idalib_server
@@ -422,7 +423,10 @@ def test_class_vtable_runtime_prefers_ida_metadata_before_symbol_scan(monkeypatc
         },
     )
 
-    payload = op_class_vtable(runtime, {"name": "Handler_Stream", "runtime": True})
+    payload = classes._class_vtable(
+        OperationContext(runtime=runtime),
+        classes._parse_class_vtable({"name": "Handler_Stream", "runtime": True}),
+    )
 
     assert payload["runtime_vtable"] == {"identifier": "0x401000", "slot_limit": 64}
 
@@ -463,10 +467,10 @@ def test_cli_and_backend_share_alias_validation_contract() -> None:
     args = parser.parse_args(["type", "declare", "--decl", "typedef int value_t;", "--alias", "bad"])
 
     with pytest.raises(ValueError, match="invalid alias `bad`; expected OLD=NEW"):
-        _normalize_aliases(args.alias)
+        parse_aliases(args.alias)
 
     with pytest.raises(ValueError, match="invalid alias `bad`; expected OLD=NEW"):
-        _normalize_aliases(["bad"])
+        parse_aliases(["bad"])
 
 
 def test_apply_type_aliases_preserves_namespace_qualified_names() -> None:

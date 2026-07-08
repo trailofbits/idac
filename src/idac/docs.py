@@ -170,10 +170,6 @@ def docs_topics() -> list[DocsTopic]:
     return unique
 
 
-def _topic_rows() -> list[str]:
-    return [f"  {topic.name:<30} {topic.description}" for topic in docs_topics()]
-
-
 def _grouped_topic_rows() -> list[str]:
     topics = _topic_map()
     lines: list[str] = []

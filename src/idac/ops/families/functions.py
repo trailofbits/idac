@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.matching import pattern_from_params, text_matches
 from ..helpers.params import optional_param_int, optional_str, require_str
-from ..models import payload_from_model
 from ..runtime import IdaOperationError, IdaRuntime, _ea_text, _strip_tags
 
 
@@ -171,11 +172,11 @@ def _function_header(runtime: IdaRuntime, func) -> tuple[str, str]:
     return runtime.function_identity(func)
 
 
-def _require_identifier(params: dict[str, object], *, key: str = "identifier") -> str:
+def _require_identifier(params: Mapping[str, Any], *, key: str = "identifier") -> str:
     return require_str(params.get(key), field="address or identifier")
 
 
-def _parse_function_list(params: dict[str, object]) -> FunctionListRequest:
+def _parse_function_list(params: Mapping[str, Any]) -> FunctionListRequest:
     pattern, glob, regex, ignore_case = pattern_from_params(params)
     return FunctionListRequest(
         pattern=pattern,
@@ -223,11 +224,11 @@ def _function_list(context: OperationContext, request: FunctionListRequest) -> t
     return tuple(rows)
 
 
-def _parse_identifier(params: dict[str, object]) -> FunctionIdentifierRequest:
+def _parse_identifier(params: Mapping[str, Any]) -> FunctionIdentifierRequest:
     return FunctionIdentifierRequest(identifier=_require_identifier(params))
 
 
-def _parse_disasm_range(params: dict[str, object]) -> DisasmRangeRequest:
+def _parse_disasm_range(params: Mapping[str, Any]) -> DisasmRangeRequest:
     return DisasmRangeRequest(
         start=require_str(params.get("start"), field="range start"),
         end=require_str(params.get("end"), field="range end"),
@@ -465,7 +466,7 @@ def _disasm_range(context: OperationContext, request: DisasmRangeRequest) -> Tex
     return TextResult(text="\n".join(lines))
 
 
-def _parse_decompile(params: dict[str, object]) -> DecompileRequest:
+def _parse_decompile(params: Mapping[str, Any]) -> DecompileRequest:
     return DecompileRequest(
         identifier=_require_identifier(params),
         no_cache=bool(params.get("no_cache")),
@@ -483,7 +484,7 @@ def _decompile(context: OperationContext, request: DecompileRequest) -> TextResu
     return TextResult(text=runtime.pseudocode_text(cfunc))
 
 
-def _parse_ctree(params: dict[str, object]) -> CtreeRequest:
+def _parse_ctree(params: Mapping[str, Any]) -> CtreeRequest:
     return CtreeRequest(
         identifier=_require_identifier(params),
         level=str(params.get("level") or "ctree").lower(),
@@ -610,7 +611,7 @@ def _ctree(context: OperationContext, request: CtreeRequest) -> CtreeResult | Mi
     raise IdaOperationError(f"unsupported ctree level: {request.level}")
 
 
-def function_operations() -> tuple[OperationSpec[object, object], ...]:
+def function_operations() -> tuple[OperationSpec[Any, Any], ...]:
     return (
         OperationSpec(
             name="function_list",
@@ -665,20 +666,6 @@ def function_operations() -> tuple[OperationSpec[object, object], ...]:
     )
 
 
-def _direct_context(runtime: IdaRuntime) -> OperationContext:
-    return OperationContext(runtime=runtime)
-
-
-def op_decompile(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_decompile(params)
-    return payload_from_model(_decompile(_direct_context(runtime), request))
-
-
-def op_function_frame(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_identifier(params)
-    return payload_from_model(_function_frame(_direct_context(runtime), request))
-
-
 __all__ = [
     "CalleeEdge",
     "CallerEdge",
@@ -700,6 +687,4 @@ __all__ = [
     "OutgoingEdgesResult",
     "TextResult",
     "function_operations",
-    "op_decompile",
-    "op_function_frame",
 ]

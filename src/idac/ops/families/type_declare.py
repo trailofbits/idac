@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional, TypedDict, cast
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import parse_aliases
@@ -191,24 +192,6 @@ class TypeDeclarePreviewSnapshot:
     type_names_sample: tuple[str, ...]
 
 
-ChunkLike = DeclarationChunk | DeclarationChunkDict
-
-
-def _coerce_chunk(chunk: ChunkLike) -> DeclarationChunk:
-    if isinstance(chunk, DeclarationChunk):
-        return chunk
-    return DeclarationChunk(
-        text=str(chunk.get("text") or ""),
-        start_line=int(chunk.get("start_line") or 1),
-        end_line=int(chunk.get("end_line") or 1),
-        terminated=bool(chunk.get("terminated")),
-    )
-
-
-def _coerce_chunks(chunks: list[ChunkLike]) -> list[DeclarationChunk]:
-    return [_coerce_chunk(chunk) for chunk in chunks]
-
-
 def _named_type_map(rows: list[dict[str, Any]]) -> NamedTypeSnapshot:
     return {item["name"]: item.get("decl") for item in rows}
 
@@ -287,12 +270,12 @@ def _sanitize_declaration_text(text: str) -> str:
     return _strip_preprocessor_lines(_strip_comments_preserve_lines(text))
 
 
-def _parse_request(params: dict[str, object]) -> TypeDeclareRequest:
+def _parse_request(params: Mapping[str, Any]) -> TypeDeclareRequest:
     decl = _sanitize_declaration_text(str(params.get("decl") or ""))
     if not decl:
         raise IdaOperationError("type declarations are required via --decl or --file")
     try:
-        aliases = tuple(parse_aliases(params.get("aliases") or []))
+        aliases = cast("tuple[TypeAlias, ...]", tuple(parse_aliases(params.get("aliases") or [])))
     except ValueError as exc:
         raise IdaOperationError(str(exc)) from exc
     return TypeDeclareRequest(
@@ -302,10 +285,6 @@ def _parse_request(params: dict[str, object]) -> TypeDeclareRequest:
         bisect=bool(params.get("bisect")),
         clang=bool(params.get("clang")),
     )
-
-
-def _normalize_aliases(raw_aliases: Any) -> list[TypeAlias]:
-    return parse_aliases(raw_aliases)
 
 
 def _join_declaration_chunks(chunks: list[DeclarationChunk]) -> str:
@@ -674,7 +653,7 @@ def _delete_named_types(runtime: IdaRuntime, type_names: set[str]) -> None:
 
 
 def _parse_type_declarations_with_clang_replace(runtime: IdaRuntime, decl: str) -> int:
-    type_names = _declared_type_names(_coerce_chunks(_parse_declaration_chunks(decl)[0]))
+    type_names = _declared_type_names(_parse_declaration_chunks(decl)[0])
     if not type_names:
         return _parse_type_declarations_with_clang(runtime, decl)
 
@@ -736,12 +715,10 @@ def _concrete_type_names(text: str) -> set[str]:
 
 
 def _opaque_by_value_members(
-    failing_chunk: ChunkLike,
+    failing_chunk: DeclarationChunk,
     *,
-    earlier_chunks: list[ChunkLike],
+    earlier_chunks: list[DeclarationChunk],
 ) -> list[BlockingMember]:
-    failing_chunk = _coerce_chunk(failing_chunk)
-    earlier_chunks = _coerce_chunks(earlier_chunks)
     concrete: set[str] = set()
     forward: set[str] = set()
     for chunk in [*earlier_chunks, failing_chunk]:
@@ -800,12 +777,11 @@ def _trial_type_parse_errors(
 
 def _bisect_type_declarations(
     runtime: IdaRuntime,
-    chunks: list[ChunkLike],
+    chunks: list[DeclarationChunk],
     *,
     replace: bool,
     clang: bool,
 ) -> TypeDeclareBisectResult:
-    chunks = _coerce_chunks(chunks)
     result: TypeDeclareBisectResult = {
         "requested": True,
         "supported": True,
@@ -860,7 +836,7 @@ def _bisect_type_declarations(
         return result
 
     failing_chunk = chunks[failing_index]
-    diagnostics: list[dict[str, Any]] = [
+    diagnostics: list[TypeDiagnosticDict] = [
         {
             "kind": "bisect_culprit",
             "message": "ordered bisect isolated the first failing declaration",
@@ -1059,11 +1035,7 @@ def _type_declare_check(context: OperationContext, request: TypeDeclareRequest) 
     return result
 
 
-def op_type_declare(runtime: IdaRuntime, params: dict[str, Any]) -> TypeDeclareResult:
-    return _type_declare(OperationContext(runtime=runtime), _parse_request(params))
-
-
-def type_declare_operations() -> tuple[OperationSpec[object, object], ...]:
+def type_declare_operations() -> tuple[OperationSpec[Any, Any], ...]:
     return (
         OperationSpec(
             name="type_declare",
@@ -1095,13 +1067,5 @@ __all__ = [
     "TypeDeclarePreviewSnapshot",
     "TypeDeclareRequest",
     "TypeDeclareResult",
-    "_apply_type_aliases",
-    "_bisect_type_declarations",
-    "_normalize_aliases",
-    "_opaque_by_value_members",
-    "_split_declarations",
-    "_test_type_declarations",
-    "_type_declare_diagnostics",
-    "op_type_declare",
     "type_declare_operations",
 ]
