@@ -9,12 +9,12 @@
 
 Most implementation lives under `src/idac`:
 
-- `src/idac/cli.py`: command registration and argument parsing
+- `src/idac/cli2/`: command registration and argument parsing
 - `src/idac/ops/`: typed operation families, manifest, dispatch, preview execution, runtime helpers, and shared helper modules
 - `src/idac/cli2/renderers/`: text rendering
 - `src/idac/transport/schema.py`: wire request/response schema
 - `src/idac/transport/`: GUI bridge transport and `idalib` worker transport
-- `plugin/`: IDA GUI bridge plugin code
+- `src/idac/ida_plugin/`: IDA GUI bridge plugin code
 - `tests/`: CLI and backend coverage
 - `fixtures/`: committed binaries, databases, logs, and source used by tests
 - `docs/` and `src/idac/skills/idac/`: user-facing command docs and agent-oriented usage guidance
@@ -26,7 +26,7 @@ Most implementation lives under `src/idac`:
 - Treat committed fixture artifacts as part of the product surface. If you change fixture symbols, fixture source, or docs/examples that depend on them, regenerate the fixture outputs too.
 - Do not revert unrelated worktree changes. This repo may contain user-owned untracked recovery artifacts and local editor files.
 - In `src/idac/cli2`, keep `argparse.Namespace` at the parser boundary. Use direct `args.foo` access for fields guaranteed by that subcommand, and reserve `vars(args).get(...)` for wrapper or `argparse.SUPPRESS` cases.
-- For command-local argument normalization in `src/idac/cli2/commands/`, prefer `_foo_request(args) -> FooRequest` plus `FooRequest.to_params()` rather than spreading selector/default coercion through handlers.
+- For command-local argument normalization in `src/idac/cli2/commands/`, prefer a focused `_foo_params(args) -> dict[str, object]` builder rather than spreading selector/default coercion through handlers.
 - When request-building logic becomes nontrivial, add a focused unit test for the builder itself in addition to end-to-end CLI coverage.
 
 ## Reverse-Engineering Defaults

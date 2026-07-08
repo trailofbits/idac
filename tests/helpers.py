@@ -124,55 +124,6 @@ def run_idalib_text(
     return proc.stdout
 
 
-def preview_snapshot(
-    idac_cmd: list[str],
-    idac_env: dict[str, str],
-    database: Path,
-    *,
-    read_args: list[object] | tuple[object, ...],
-    preview_args: list[object] | tuple[object, ...],
-) -> dict[str, object]:
-    before = run_idalib_json(idac_cmd, idac_env, database, *read_args)
-    preview = run_idalib_json(idac_cmd, idac_env, database, *preview_args, "--preview")
-    after_preview = run_idalib_json(idac_cmd, idac_env, database, *read_args)
-    return {
-        "before": before,
-        "preview": preview,
-        "after_preview": after_preview,
-    }
-
-
-def preview_round_trip(
-    idac_cmd: list[str],
-    idac_env: dict[str, str],
-    database: Path,
-    *,
-    read_args: list[object] | tuple[object, ...],
-    preview_args: list[object] | tuple[object, ...] | None = None,
-    persist_args: list[object] | tuple[object, ...],
-    after_persist_args: list[object] | tuple[object, ...] | None = None,
-) -> dict[str, object]:
-    preview_result = preview_snapshot(
-        idac_cmd,
-        idac_env,
-        database,
-        read_args=read_args,
-        preview_args=persist_args if preview_args is None else preview_args,
-    )
-    persisted = run_idalib_json(idac_cmd, idac_env, database, *persist_args)
-    after_persist = run_idalib_json(
-        idac_cmd,
-        idac_env,
-        database,
-        *(read_args if after_persist_args is None else after_persist_args),
-    )
-    return {
-        **preview_result,
-        "persisted": persisted,
-        "after_persist": after_persist,
-    }
-
-
 def run_preview_json(
     idac_cmd: list[str],
     idac_env: dict[str, str],
@@ -243,9 +194,7 @@ def preview_round_trip_cli2(
 
 __all__ = [
     "normalize_pseudocode_call_arguments",
-    "preview_round_trip",
     "preview_round_trip_cli2",
-    "preview_snapshot",
     "preview_snapshot_cli2",
     "run_cli",
     "run_cli_json",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Optional, TypedDict, cast
+from typing import Any, TypedDict, cast
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import parse_aliases
@@ -132,7 +132,7 @@ class TypeDeclareResult(TypedDict, total=False):
 
 
 TypeDeclareDiagnostic = TypeDiagnosticDict
-NamedTypeSnapshot = dict[str, Optional[str]]
+NamedTypeSnapshot = dict[str, str | None]
 
 
 @dataclass(frozen=True)

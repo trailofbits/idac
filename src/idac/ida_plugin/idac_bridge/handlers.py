@@ -6,14 +6,14 @@ import contextlib
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from idac.ops.dispatch import build_operation_registry
 from idac.ops.manifest import SUPPORTED_OPERATIONS
 from idac.ops.runtime import IdaRuntime
 
 HandlerFn = Callable[[dict[str, Any]], Any]
-TargetValidator = Callable[[Optional[str]], None]
+TargetValidator = Callable[[str | None], None]
 
 
 class DefaultHandlers:

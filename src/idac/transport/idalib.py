@@ -153,7 +153,7 @@ def _socket_request(
                 sock.settimeout(timeout)
             try:
                 sock.connect(str(socket_path))
-            except socket.timeout:
+            except TimeoutError:
                 raise
             except OSError as exc:
                 # Only connect-phase failures are retried; nothing has been
@@ -165,7 +165,7 @@ def _socket_request(
                 sock.sendall(encoded)
                 sock.shutdown(socket.SHUT_WR)
                 chunks = recv_all(sock)
-            except socket.timeout:
+            except TimeoutError:
                 raise
             except OSError as exc:
                 # The request may already be executing in the daemon;
@@ -217,7 +217,7 @@ def _probe_instance(
             {"version": WIRE_PROTOCOL_VERSION, "op": "daemon_status", "params": {}},
             timeout=_probe_timeout(timeout),
         )
-    except socket.timeout:
+    except TimeoutError:
         # The daemon accepted the connection but did not reply within the probe
         # cap: it is alive but busy (or wedged). Treat it as reachable and never
         # purge it - the real request that follows honors the caller's own
@@ -276,7 +276,7 @@ def _read_ready_payload(read_fd: int, *, timeout: float | None) -> dict[str, Any
             selector.register(read_fd, selectors.EVENT_READ)
             events = selector.select(timeout)
             if not events:
-                raise socket.timeout()
+                raise TimeoutError()
             raw = os.read(read_fd, IDALIB_READY_MAX_BYTES + 1)
     finally:
         with contextlib.suppress(OSError):
@@ -336,7 +336,7 @@ def _start_daemon_for_database(
             expected_registry = idalib_registry_path(proc.pid)
             try:
                 payload = _read_ready_payload(read_fd, timeout=startup_timeout)
-            except socket.timeout as exc:
+            except TimeoutError as exc:
                 _terminate_process(proc)
                 raise RuntimeError(
                     f"timed out after {_timeout_text(startup_timeout)} waiting for idalib daemon "
@@ -519,5 +519,5 @@ class IdaLibBackend:
         }
         try:
             return _socket_request(instance.socket_path, payload, timeout=timeout)
-        except socket.timeout as exc:
+        except TimeoutError as exc:
             raise _timeout_error(request.op, timeout) from exc

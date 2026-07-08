@@ -338,7 +338,7 @@ def test_idalib_probe_timeout_treats_busy_daemon_as_reachable_without_resend(mon
             while not stop.is_set():
                 try:
                     conn, _ = server.accept()
-                except (socket.timeout, TimeoutError):
+                except TimeoutError:
                     continue
                 except OSError:
                     return
@@ -351,7 +351,7 @@ def test_idalib_probe_timeout_treats_busy_daemon_as_reachable_without_resend(mon
                         if not data:
                             break
                         chunks.append(data)
-                except (socket.timeout, TimeoutError, OSError):
+                except (TimeoutError, OSError):
                     pass
                 if chunks:
                     received.append(b"".join(chunks))
@@ -402,7 +402,7 @@ def test_idalib_socket_request_does_not_resend_after_connection_reset() -> None:
             while not stop.is_set():
                 try:
                     conn, _ = server.accept()
-                except (socket.timeout, TimeoutError):
+                except TimeoutError:
                     continue
                 except OSError:
                     return

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import require_str
@@ -52,7 +52,7 @@ def _parse_scope(params: Mapping[str, Any]) -> CommentScope:
     scope = str(params.get("scope") or "line").strip().lower()
     if scope not in {"line", "function", "anterior", "posterior"}:
         raise IdaOperationError(f"unsupported comment scope: {scope}")
-    return cast(CommentScope, scope)
+    return scope
 
 
 def _parse_repeatable(params: Mapping[str, Any], *, scope: CommentScope) -> bool:

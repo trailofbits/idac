@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 import shutil
@@ -15,13 +16,42 @@ import pytest
 
 _LIVE_GUI_ENV = "IDAC_RUN_LIVE_GUI_TESTS"
 
+# Modules whose tests all talk to a real idalib daemon and therefore need a
+# local IDA install; individual tests elsewhere use @pytest.mark.requires_ida.
+_REQUIRES_IDA_MODULE_PREFIX = "test_idalib_"
+_REQUIRES_IDA_MODULES = {"test_preview", "test_output_limits"}
+
+
+@functools.lru_cache(maxsize=1)
+def _idalib_available() -> bool:
+    # Mirror bootstrap_idapro's search order: idapro may already be importable
+    # from the venv/site-packages, otherwise it is discovered from an install
+    # dir. Checking only install dirs would skip integration tests that would
+    # actually run.
+    import importlib.util
+
+    if importlib.util.find_spec("idapro") is not None:
+        return True
+    from idac.transport.idalib_common import candidate_ida_dirs
+
+    try:
+        return any((ida_dir / "idalib" / "python").exists() for ida_dir in candidate_ida_dirs())
+    except OSError:
+        return False
+
 
 def pytest_collection_modifyitems(config, items) -> None:
-    if os.environ.get(_LIVE_GUI_ENV) == "1":
-        return
+    requires_ida = pytest.mark.requires_ida
+    skip_no_ida = pytest.mark.skip(reason="no local IDA install with idalib found; integration tests skipped")
     skip_live = pytest.mark.skip(reason=f"set {_LIVE_GUI_ENV}=1 to run gui_live integration tests")
+    run_gui_live = os.environ.get(_LIVE_GUI_ENV) == "1"
     for item in items:
-        if "gui_live" in item.keywords:
+        module_name = item.module.__name__.rpartition(".")[2]
+        if module_name.startswith(_REQUIRES_IDA_MODULE_PREFIX) or module_name in _REQUIRES_IDA_MODULES:
+            item.add_marker(requires_ida)
+        if "requires_ida" in item.keywords and not _idalib_available():
+            item.add_marker(skip_no_ida)
+        if "gui_live" in item.keywords and not run_gui_live:
             item.add_marker(skip_live)
 
 
@@ -37,16 +67,6 @@ def fixtures_dir() -> Path:
 @pytest.fixture(scope="session")
 def tiny_source(fixtures_dir: Path) -> Path:
     return fixtures_dir / "src" / "tiny.c"
-
-
-@pytest.fixture(scope="session")
-def tiny_binary(fixtures_dir: Path) -> Path:
-    return fixtures_dir / "build" / "tiny"
-
-
-@pytest.fixture(scope="session")
-def tiny_stripped_binary(fixtures_dir: Path) -> Path:
-    return fixtures_dir / "build" / "tiny.stripped"
 
 
 @pytest.fixture(scope="session")
