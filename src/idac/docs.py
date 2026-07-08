@@ -51,6 +51,7 @@ class DocsTopic:
     path: Path | None
     description: str
     aliases: tuple[str, ...] = ()
+    extra_paths: tuple[Path, ...] = ()
 
 
 def _topic_map() -> dict[str, DocsTopic]:
@@ -109,9 +110,9 @@ def _topic_map() -> dict[str, DocsTopic]:
         ),
         DocsTopic(
             "ida-set-types",
-            "IDA Set Types",
+            "IDA Type Declaration Syntax",
             references / "ida-set-types.md",
-            "IDA SetType behavior and type application details.",
+            "IDA C declaration syntax: calling conventions, usercall locations, and attribute/type keywords.",
             aliases=("set-types",),
         ),
         DocsTopic(
@@ -125,8 +126,14 @@ def _topic_map() -> dict[str, DocsTopic]:
             "templates",
             "Reusable Templates",
             references / "templates" / "README.md",
-            "Index of reusable batch, audit, and jq template files.",
+            "Reusable batch, audit, and jq template files, printed in full.",
             aliases=("template",),
+            extra_paths=(
+                references / "templates" / "checkpoint-note.md",
+                references / "templates" / "prototype-pass.idac",
+                references / "templates" / "rename-pass.idac",
+                references / "templates" / "locals-jq-snippets.sh",
+            ),
         ),
         DocsTopic(
             "workspace",
@@ -227,6 +234,11 @@ def _topic_payload(topic: DocsTopic) -> dict[str, Any]:
         text = topic.path.read_text(encoding="utf-8")
         text = _strip_frontmatter(text)
         path = str(topic.path)
+        for extra in topic.extra_paths:
+            body = extra.read_text(encoding="utf-8").rstrip()
+            if extra.suffix != ".md":
+                body = f"```\n{body}\n```"
+            text = f"{text.rstrip()}\n\n---\n\n`{extra.name}`:\n\n{body}\n"
     return {
         "topic": topic.name,
         "title": topic.title,

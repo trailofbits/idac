@@ -14,16 +14,11 @@ Prefer first-class `idac` commands, then `idac py exec`, then external or ad hoc
 - Run one `idac` command at a time for each target. Use `batch`, `decompilemany`, and `--out` artifacts for broad work instead of background parallel commands.
 - Use `decompile --f5` or `decompilemany --f5` during type or prototype recovery. `--f5` is an alias for `--no-cache`.
 - Preview supported persistent mutations first, then commit only after the preview confirms the intended change. Outside batch mode, `preview` requires `-o/--out`.
-- Before `function prototype set`, run `function prototype show`; use `function prototype check` for high-risk declarations; declare missing support types before dependent prototypes.
-- Before importing large headers, validate with `type check --decl-file ...`. Use `type deps <name>` when an existing local type needs IDA-printed dependencies.
-- After type or prototype mutations, run `misc reanalyze`, then reread pseudocode or locals before rename-heavy cleanup.
-- Before batch local renames or retypes, capture `function locals list --json --out <path>` and prefer `--local-id` or `--index` after prototypes or reanalysis may have shifted locals.
-- For many local edits in one function, prefer `function locals apply --json-file ...` over a long name-only rename sequence.
-- Before executing mutation batches, run `batch --lint -o <lint.json> <batch.idac>` and fix reported parse, path, selector, or logging issues.
-- Stop a rename batch on the first miss. Reread locals, recalibrate selectors, and only then continue.
+- Before `function prototype set`, run `function prototype show`. Run `function prototype check` first when the declaration uses a custom calling convention (`__usercall`, `__userpurge`, `__spoils`) or references newly imported types; declare missing support types before dependent prototypes.
+- Before importing large headers, validate with `type check --decl-file ...`.
+- After type or prototype mutations, run `misc reanalyze`, then reread pseudocode or locals before rename-heavy cleanup. Calibrate local renames from fresh `function locals list --json` output using `--local-id` or `--index`; see `idac docs workflows` for selector calibration.
+- Before executing a mutation batch, run `batch <batch.idac> --lint --out <lint.json>` and fix reported issues.
 - Context selection: omit `-c` for one live GUI session, use `-c pid:<pid>` for multiple GUI sessions, and use `-c "db:/path"` for headless work.
-- Prefer minimal `struct` declarations first, then grow them from observed offsets and access patterns. Use blob padding for unknown regions instead of guessed scalar fields.
-- If observed field offsets prove a compiler-packed layout, declare the struct or union with `__attribute__((packed))`; do not use packed as a shortcut for unknown gaps.
 - When working in an idac workspace, keep audit notes append-only and factual. Distinguish proven facts from inferred names, types, and semantics.
 
 When this guide is installed as a skill, the reference files sit alongside it; otherwise use `idac docs TOPIC` for the same material. For CLI syntax, prefer targeted help such as `idac type class --help`; use `idac --full-help` only when the command surface itself is unclear.
@@ -83,8 +78,8 @@ idac disasm --start "0x100000460" --end "0x1000004a0"
 Use `idac docs workflows` (`workflows.md`) for exact syntax.
 
 1. Discovery and read-only audit.
-2. Preview supported persistent mutations with `preview -o <path> <command...>`.
-3. For batches, run `batch --lint -o <lint.json> <batch.idac>` before the real run.
+2. Preview each persistent mutation.
+3. Lint mutation batches before running them.
 4. Commit the mutation.
 5. Run `misc reanalyze` after type or prototype changes.
 6. Reread pseudocode or locals; calibrate local selectors from fresh JSON.
@@ -95,11 +90,6 @@ For headless `db:` work, checkpoint with `database save`; `database close` saves
 ## Class recovery outline
 
 Use `idac docs class-recovery` (`class-recovery.md`) for the full workflow and `idac docs ida-cpp-type-details` (`ida-cpp-type-details.md`) before importing C++ class or vtable declarations.
-
-- Start with `type list`; opaque structs can exist before they qualify as classes.
-- Use `type class candidates` for opaque targets, but skip exploratory RTTI scripting when symbols and RTTI already identify the family.
-- Import minimal class/vtable types first, then redecompile with `--f5`, refine, and re-import until readback stops revealing new structural facts.
-- Apply prototypes to runtime virtual targets, not just local vtable slot types.
 
 ## Python escape hatch
 
@@ -121,7 +111,7 @@ The execution scope includes the core `ida*` modules that `idac` imports itself,
 | `references/workflows.md` | `workflows` | Safe mutation loop, batch, selector calibration, post-mutation readback |
 | `references/class-recovery.md` | `class-recovery` | C++ class recovery workflow, naming rules, vtable guidance, verification |
 | `references/ida-cpp-type-details.md` | `ida-cpp-type-details` | IDA C++ parser expectations, `__vftable`, `*_vtbl`, multiple inheritance |
-| `references/ida-set-types.md` | `ida-set-types` | IDA SetType behavior and type application details |
-| `references/ida-advanced-type-annotations.md` | `ida-advanced-type-annotations` | IDA-specific advanced declaration annotations |
+| `references/ida-set-types.md` | `ida-set-types` | IDA C declaration syntax: calling conventions, usercall locations, attribute and type keywords |
+| `references/ida-advanced-type-annotations.md` | `ida-advanced-type-annotations` | Scattered argument locations and other advanced IDA declaration annotations |
 | `references/troubleshooting.md` | `troubleshooting` | Bridge, backend, mutation, stale-result, or sandbox problems |
-| `references/templates/README.md` | `templates` | Reusable prototype, rename, checkpoint, and locals-JSON templates |
+| `references/templates/README.md` | `templates` | Reusable prototype-pass, rename-pass, checkpoint-note, and locals-jq templates (printed in full) |

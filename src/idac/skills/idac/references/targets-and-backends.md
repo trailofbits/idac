@@ -32,7 +32,7 @@ idac targets cleanup
 If multiple GUI instances are open, pass `-c pid:<pid>`.
 `targets list` reports both live GUI bridge targets and already-open headless `idalib` targets. In JSON output, check `backend`: GUI rows use `backend: "gui"` and headless rows use `backend: "idalib"`. If a binary was opened with `database open`, keep using `-c "db:/path/to/binary"` even when no GUI target is present.
 If the runtime dir contains stale GUI bridge or `idalib` daemon files, run `idac targets cleanup` and then rerun `targets list`. Use `--out <path>` when you want to keep the full cleanup result.
-If the bridge plugin is missing from the current IDA session, run `idac misc plugin install` and reload the plugin in IDA before retrying discovery.
+If the bridge plugin is missing from the current IDA session, run `idac misc plugin install` (`--force` replaces an existing install), then ask the user to reload the plugin in IDA — idac cannot reload it — before retrying discovery.
 
 ## Database context
 

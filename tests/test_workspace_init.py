@@ -35,7 +35,7 @@ def test_workspace_init_creates_expected_tree(idac_cmd: list[str], idac_env: dic
     assert (dest / "headers" / "vendor").is_dir()
     assert (dest / "scripts").is_dir()
     assert not any(path.is_file() and path.name != ".gitkeep" for path in (dest / "scripts").iterdir())
-    assert (dest / "prompts" / "general-analysis.md").is_file()
+    assert (dest / "prompts" / "recovery-pass.md").is_file()
     assert (dest / "references" / "cli.md").is_file()
     assert (dest / "references" / "class-recovery.md").is_file()
     assert (dest / ".git").is_dir()
@@ -44,7 +44,7 @@ def test_workspace_init_creates_expected_tree(idac_cmd: list[str], idac_env: dic
     assert ".claude/" in proc.stdout
     assert ".codex/rules/" in proc.stdout
     assert "audit/.gitkeep" in proc.stdout
-    assert "prompts/general-analysis.md" in proc.stdout
+    assert "prompts/recovery-pass.md" in proc.stdout
     assert "references/cli.md" in proc.stdout
     assert "references/workflows.md" in proc.stdout
     assert ".idac/" in proc.stdout
@@ -86,7 +86,7 @@ def test_workspace_init_force_overwrites_config_but_preserves_content(
     assert proc.returncode == 0, proc.stderr or proc.stdout
 
     claude_path = dest / "CLAUDE.md"
-    prompt_path = dest / "prompts" / "general-analysis.md"
+    prompt_path = dest / "prompts" / "recovery-pass.md"
     reference_path = dest / "references" / "cli.md"
     custom_audit_note = dest / "audit" / "finding.txt"
     original_claude = claude_path.read_text(encoding="utf-8")

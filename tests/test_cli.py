@@ -295,6 +295,20 @@ def test_docs_large_topic_prints_inline(capsys) -> None:
     assert "## Practical caveat" in output
 
 
+def test_docs_templates_prints_template_files(capsys) -> None:
+    exit_code = main(["docs", "templates"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "# Template Files" in output
+    assert "`checkpoint-note.md`:" in output
+    assert "### Open Questions" in output
+    assert "`prototype-pass.idac`:" in output
+    assert "function prototype check" in output
+    assert "`rename-pass.idac`:" in output
+    assert "`locals-jq-snippets.sh`:" in output
+
+
 def test_docs_list_prints_available_topics(capsys) -> None:
     exit_code = main(["docs", "--list"])
 
@@ -699,9 +713,7 @@ def test_workspace_init_runs_on_public_cli(tmp_path: Path, capsys) -> None:
         "headers/vendor/",
         "headers/vendor/.gitkeep",
         "prompts/",
-        "prompts/class-recovery-pass.md",
-        "prompts/general-analysis.md",
-        "prompts/reverse-engineer.md",
+        "prompts/recovery-pass.md",
         "scripts/",
         "scripts/.gitkeep",
         "references/",
@@ -723,7 +735,7 @@ def test_workspace_init_runs_on_public_cli(tmp_path: Path, capsys) -> None:
         ".idac/tmp/",
     ]
     assert (dest / "AGENTS.md").exists()
-    assert (dest / "prompts" / "general-analysis.md").exists()
+    assert (dest / "prompts" / "recovery-pass.md").exists()
     assert (dest / ".codex" / "config.toml").exists()
 
 

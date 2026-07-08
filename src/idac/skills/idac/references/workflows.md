@@ -33,7 +33,6 @@ Live GUI notes:
 
 - if a command will be parsed, use `--json`
 - for parsed-read and `--out` defaults, read [cli.md](cli.md)
-- when you want cross-references, use the top-level `xrefs` command rather than looking for a `function xrefs` subcommand
 - for a single large decompile, use `-o/--out` on `decompile`; reserve `--out-file` and `--out-dir` for `decompilemany`
 - run one `idac` command at a time per GUI target; the bridge serializes requests internally, and background parallel commands can fill the queue or make mutation ordering unclear
 
@@ -108,6 +107,7 @@ idac function prototype show "sub_08041337"
 idac decompile "sub_08041337"
 ```
 
+Symbol renames go through `misc rename <identifier> <new_name>`, which is rejected from both `batch` and `preview`: check the current name first (`function metadata`), commit the rename one-off, and confirm with readback.
 Add `--propagate-callers` when you want `function prototype set` to also apply the new callee type at matching caller call sites.
 Use `function prototype check` first when the declaration uses custom calling conventions, usercall annotations, or newly imported support types.
 Use `type check` before large imports; use `type deps <name>` after import when the dependency-expanded declaration is the clearest audit artifact.
@@ -128,8 +128,7 @@ When you need pseudocode for a whole family, prefer bulk decompile over many one
 - Use `decompilemany "<function-filter>" --out-dir ...` for name-filtered discovery.
 - For multiple explicit functions, write one function name or address per line and use `decompilemany --functions-file ... --out-dir ...`.
 The command writes one `.c` artifact per function plus `manifest.json`. Add `--disasm` or `--ctree` when the same selected functions also need disassembly or Hex-Rays tree artifacts. Treat `manifest.json` as the source of truth for full function names, exact addresses, and artifact paths when long names need shortened filenames. Use `.functions[].address` as the stable exact lookup key.
-For symbol-rich families, one early discovery capture can be worthwhile before mutations so you can grep every constructor, destructor, parser, and helper locally.
-After type import and reanalysis, rerun a narrower verification capture only if the broad artifact is still useful.
+For symbol-rich families, run one `decompilemany "<family>" --out-dir ...` capture before the first mutation so you can grep every constructor, destructor, parser, and helper locally. After import and reanalysis, redecompile only the functions you must verify (with `--f5`); do not redo the family-wide dump.
 During type or prototype recovery, prefer `decompile --f5` and `decompilemany --f5` so discovery and verification artifacts reflect the latest imported types and prototype changes.
 For ordinary exploration and routine readback, rerun a one-off decompile with `--f5` or `--no-cache` only when the output looks stale after reanalysis.
 If legacy `type declare` import rejects template-heavy or newer C++ syntax, retry the same import with `--clang`.
@@ -162,16 +161,11 @@ Example `locals-plan.json` for `function locals apply`:
 
 Local rename caution:
 
-- After major prototype or reanalysis changes, reread `function locals list` before more renames
-- Before a rename batch, capture `function locals list --json` and copy exact `local_id` or `index` values instead of guessing local names from stale pseudocode
+- The current local name is an acceptable selector only for a one-off rename before anything has shifted. For rename batches, and for any rename after a prototype change or reanalysis, capture fresh `function locals list --json` output and select by the exact `local_id` or `index` values it reports — never queue name-only rename batches across mutation phases.
+- After each committed rename, reread `function locals list --json` and confirm the intended `index` or `local_id` now shows the new name. Work one function at a time, with a fresh reread between functions.
 - Prefer `function locals update` when one local needs both a recovered name and a recovered type in the same pass
 - Prefer `function locals apply --json-file` when several locals in one function need coordinated renames or retypes from one fresh locals snapshot
-- Prefer current local name for straightforward one-off renames. Prefer `--local-id` or `--index` once prototypes or reanalysis may have shifted the local set.
 - For `function locals retype`, use `--type` for simple spellings such as `unsigned int` or `ExampleStruct *`. Use `--decl` or `--decl-file` when the retype needs a full declaration, such as arrays or function pointers.
-- Do not queue large rename batches by name alone across major mutation phases
-- After each committed rename, reread `function locals list --json` and confirm the specific `index` or `local_id` moved to the expected name
-- After reanalysis, use `--local-id` or `--index` for every committed rename
-- Split rename work per function, and reread `function locals list --json` between functions
 - Use `--decl` for small one-off edits; prefer `--decl-file` in batch files and other long mutation passes
 - Prefer `jq` or `sed` for shell inspection of JSON artifacts instead of assuming bare `python` exists
   Example: `idac function locals list "sub_08041337" --json | jq -r '.locals[] | [.index, .local_id, .display_name, .type] | @tsv'`
@@ -211,8 +205,8 @@ preview function prototype set "ExampleDerived__method_1" --decl-file "example_m
 ```
 
 For `idalib`, `batch` keeps ordered logging while reusing the same open database state for the shared `-c db:<path>` locator. Each step is still a separate request.
-For larger prototype and rename passes, prefer `batch` so the mutation order is explicit and the run leaves behind a stable ordered log.
-Setup-only `misc` commands such as `misc plugin install` and `misc skill install` are intentionally rejected from `batch`. `misc reanalyze` is batch-safe and belongs between type/prototype mutations and local cleanup in full recovery batches.
+For larger prototype and local-rename passes, prefer `batch` so the mutation order is explicit and the run leaves behind a stable ordered log.
+Setup-only `misc` commands such as `misc plugin install` and `misc skill install` are intentionally rejected from `batch`, and so is `misc rename` — commit symbol renames one-off. `misc reanalyze` is batch-safe and belongs between type/prototype mutations and local cleanup in full recovery batches.
 
 ## Broad discovery defaults
 
@@ -223,12 +217,9 @@ Setup-only `misc` commands such as `misc plugin install` and `misc skill install
 - For large `function locals list` runs, prefer `--json --out <path>` so the canonical `local_id` data stays readable after reanalysis drift
 - For rename previews on large functions, write the preview to disk with `preview -o ...`, then inspect the JSON with `jq` instead of trusting the inline summary alone
 - The equivalent family reads are `function list [NAME_FILTER]`, `type list [TYPE_FILTER]`, and `type class candidates [CANDIDATE_FILTER]` with optional `--regex` and `-i`
-- For strings, always pass both `--timeout` and `--segment`, and scan the relevant segment first with `search strings --scan --segment ...`
-- After a scan identifies the relevant region or token, use `search strings [TEXT_FILTER] --segment ... --timeout 30` for defined-string readback
-- For dyld shared caches, skip defined-string readback and keep `search strings --scan` ranges at 16 MiB or smaller
+- For strings, scan the relevant segment first with `search strings --scan --segment ...`, then read defined strings back with `search strings [TEXT_FILTER] --segment ... --timeout 30`; see [cli.md](cli.md) for the required flags and dyld-shared-cache limits
 - Use `--out <path>` by default for wide string scans on real binaries
-- Start with confirmed family members first, then widen to callers or adjacent helpers only when the readback requires it
-- If symbols and RTTI already identify the family clearly, skip `type class candidates` and go straight to direct family reads
+- For scoping class-family discovery, read [class-recovery.md](class-recovery.md)
 
 Binary-only analysis mode: bias toward strings, RTTI, vtables, demangled symbols, local types, and call behavior. Do not assume external source, headers, or online lookup.
 
@@ -243,11 +234,9 @@ idac decompile "sub_08041337"
 
 Mandatory checkpoint:
 
-- after major type or prototype mutations, run `reanalyze`
+- after major type or prototype mutations, run `misc reanalyze`
 - do that before local renames
 - then reread pseudocode or locals instead of assuming propagation
 - if callers still show stale casts or bad `this` propagation, reanalyze those callers too and reread them before declaring the pass done
 - treat return-type changes as higher risk than parameter-name or local-name changes; if the body does not clearly prove the return value, leave it generic
-- for embedded opaque members, use field-offset subtraction first to estimate size and only then use constructor decompilation as confirmation
-- if large-stack AArch64 functions still show suspicious top-of-function value flow after prototype cleanup and reanalysis, treat that as a likely decompiler artifact rather than a reason to keep forcing types
 - stop when the structure, call behavior, and safety-relevant data flow are readable; do not chase perfect pseudocode once the remaining problems are clearly presentation-only

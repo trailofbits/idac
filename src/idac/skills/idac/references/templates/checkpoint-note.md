@@ -1,35 +1,28 @@
-## <target> - Recovery Pass <N> - <date>
+## {{TARGET}} - Recovery Pass {{N}} - {{DATE}}
+
+<!-- Fill every {{...}} slot with evidence from the current pass. Delete sections with
+     nothing to report. Never leave template text or invented findings in the audit log. -->
 
 ### Scope
-- `ExampleFamily`
-- `ExampleClass`
-- `ExampleClass::methodA`
-- `ExampleClass::methodB`
+- {{classes, functions, or types this pass covered}}
 
 ### Types Recovered
-- Added or refined recovered structs/classes/enums.
-- Imported `headers/recovered/<target>.h` after preview.
+- {{types added or refined, and the header they were imported from}}
 
 ### Prototypes Fixed
-- Corrected helper prototypes to match the current function bodies.
-- Reanalyzed touched functions and reread the most relevant callers.
+- {{prototypes changed, with the caller or body evidence that justified each}}
 
 ### Locals Renamed Or Retyped
-- Renamed only the highest-signal locals after refreshing the locals table.
+- {{functions whose locals changed, and the selector style used}}
 
 ### What Worked
-- Constructor, serializer, or small accessor evidence was enough to justify the applied types.
-- Address-based targeting avoided overload ambiguity.
+- {{evidence or approach that proved out}}
 
 ### What Didn't Work
-- Inline decompile output was too small for the largest helper.
-- Remaining locals were mostly spill state, not strong rename candidates.
+- {{failed commands with their errors, parser limits, dead ends}}
 
 ### Open Questions
-- One or more trailing fields still need a stronger callsite before renaming.
-- One branch still carries generic scratch state that is not yet worth forcing into names.
+- {{uncertainty the next pass must resolve before building on this one}}
 
 ### TODO for Next Pass
-- [ ] Recheck callers after propagation from the new prototypes.
-- [ ] Only rename more locals if a stronger decompile or callsite appears.
-- [ ] Save or checkpoint before moving to the next family.
+- [ ] {{next concrete step}}

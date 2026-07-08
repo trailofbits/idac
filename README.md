@@ -265,7 +265,7 @@ A bundled skill in [src/idac/skills/idac](src/idac/skills/idac) teaches Claude C
 idac misc skill install
 ```
 
-This installs into both `~/.claude/skills/idac` and `~/.codex/skills/idac`; both agents auto-discover skills from their `skills/` directories. Once installed, the skill loads automatically when relevant. For starter prompts (general analysis, class-recovery passes, full reverse-engineering passes), run `idac workspace init <dir>` to scaffold a workspace whose `prompts/` directory contains ready-to-edit templates.
+This installs into both `~/.claude/skills/idac` and `~/.codex/skills/idac`; both agents auto-discover skills from their `skills/` directories. Once installed, the skill loads automatically when relevant. For a ready-to-fill task prompt covering anything from a light analysis pass to class-family recovery, run `idac workspace init <dir>` to scaffold a workspace containing `prompts/recovery-pass.md`.
 
 ## Development
 

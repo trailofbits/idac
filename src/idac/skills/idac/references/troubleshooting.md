@@ -4,16 +4,16 @@ Read this when bridge/backend state, mutation failures, stale decompiler output,
 
 ## No GUI targets found
 
-Run:
+Diagnose before installing anything:
 
 ```bash
-idac misc plugin install
 idac doctor
 idac targets list
 idac targets cleanup
+idac targets list
 ```
 
-If no targets appear, either the IDA plugin bridge is not loaded in the current GUI session or stale bridge runtime files are masking the live session. Run `idac targets cleanup --out <path>` when you need the full cleanup result, then rerun `targets list`.
+If no targets appear, either the `idac_bridge` plugin is not loaded in the current GUI session or stale bridge runtime files were masking it (`targets cleanup` removes those; add `--out <path>` to keep the full result). If `doctor` reports the plugin missing, run `idac misc plugin install` (add `--force` to replace an existing install). idac cannot reload the plugin itself — ask the user to reload the `idac_bridge` plugin in the IDA GUI, or restart IDA, then rerun `targets list`.
 
 This section is only about GUI rows. Headless targets opened through `database open` appear in `targets list --json` with `backend: "idalib"` and should be used with `-c "db:/path"`.
 
@@ -72,19 +72,7 @@ Preview performs the real mutation before undoing it, so the readback reflects t
 For `function locals update`, `function locals rename`, and `function locals retype`, preview always returns the full before/after local list.
 For `function locals apply`, preview also returns before/after local lists, so use it when a single function has many coordinated local changes.
 
-Preview payloads are structured JSON or JSONL objects with these top-level keys:
-
-- `command`
-- `status`
-- `before`
-- `after`
-- `result`
-- `readback`
-- `undo`
-- `artifacts`
-- `stderr`
-
-For mutating commands, `before` and `after` capture the temporary state around the undo cycle, and `result` contains the command-specific return payload.
+Preview payloads are structured JSON or JSONL objects; see [cli.md](cli.md#preview) for the top-level key list. For mutating commands, `before` and `after` capture the temporary state around the undo cycle, and `result` contains the command-specific return payload.
 
 For `type declare` previews, `replaced_types` is the list of local types whose declarations changed in the preview. It is informational, not a failure signal. If a familiar framework typedef such as `CFDateRef` appears there, verify the local type directly with `type show` before treating it as a regression.
 

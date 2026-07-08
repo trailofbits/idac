@@ -56,7 +56,7 @@ def test_workspace_template_assets_exist_in_single_packaged_location() -> None:
         "audit/.gitkeep",
         "headers/recovered/.gitkeep",
         "headers/vendor/.gitkeep",
-        "prompts/general-analysis.md",
+        "prompts/recovery-pass.md",
         "scripts/.gitkeep",
     }
 

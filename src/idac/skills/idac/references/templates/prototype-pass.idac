@@ -6,8 +6,8 @@
 #   idac function prototype show <function>
 #   idac function prototype check <function> --decl "..."
 # Then run:
-#   idac batch prototype-pass.idac --lint -o /tmp/prototype-pass.lint.json
-#   idac batch prototype-pass.idac -o /tmp/prototype-pass.json
+#   idac batch prototype-pass.idac --lint --out /tmp/prototype-pass.lint.json
+#   idac batch prototype-pass.idac --out /tmp/prototype-pass.json
 #   idac decompile <function> --f5
 
 function prototype check 0x100000000 --decl "int __fastcall ExampleClass__parseHeader(ExampleClass *__hidden this, const unsigned __int8 *buf, unsigned int len)"
