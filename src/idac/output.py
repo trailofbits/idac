@@ -7,7 +7,7 @@ import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 DEFAULT_INLINE_CHAR_LIMIT = 10_000
 
@@ -40,10 +40,10 @@ class OutputResult:
     """Rendered stdout text plus optional on-disk artifact metadata."""
 
     rendered: str
-    artifact: Optional[dict[str, Any]]
+    artifact: dict[str, Any] | None
 
 
-def resolve_output_format(fmt: str, out_path: Optional[Path], *, force_fmt: bool = False) -> str:
+def resolve_output_format(fmt: str, out_path: Path | None, *, force_fmt: bool = False) -> str:
     """Infer structured formats from output suffixes unless the caller explicitly forces fmt."""
 
     if force_fmt:
@@ -138,7 +138,7 @@ def write_output_result(
     value: Any,
     *,
     fmt: str,
-    out_path: Optional[Path],
+    out_path: Path | None,
     stem: str,
     inline_char_limit: int = DEFAULT_INLINE_CHAR_LIMIT,
     force_fmt: bool = False,

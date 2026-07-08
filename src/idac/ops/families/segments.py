@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.matching import pattern_from_params, text_matches
@@ -24,7 +26,7 @@ class SegmentListEntry:
     size: int
 
 
-def _parse_segment_list(params: dict[str, object]) -> SegmentListRequest:
+def _parse_segment_list(params: Mapping[str, Any]) -> SegmentListRequest:
     pattern, glob, regex, ignore_case = pattern_from_params(params)
     if regex and pattern:
         try:
@@ -59,7 +61,7 @@ def _segment_list(
     return tuple(rows)
 
 
-def segment_operations() -> tuple[OperationSpec[object, object], ...]:
+def segment_operations() -> tuple[OperationSpec[Any, Any], ...]:
     return (
         OperationSpec(
             name="segment_list",

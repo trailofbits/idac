@@ -3,8 +3,10 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import optional_str, require_str
@@ -48,7 +50,7 @@ class PythonExecResult:
     result_repr: str
 
 
-def _parse_reanalyze(params: dict[str, object]) -> ReanalyzeRequest:
+def _parse_reanalyze(params: Mapping[str, Any]) -> ReanalyzeRequest:
     return ReanalyzeRequest(
         identifier=require_str(params.get("identifier"), field="identifier"),
         end=optional_str(params.get("end")),
@@ -63,7 +65,7 @@ def _json_payload_result(value: object) -> tuple[object, str]:
     return value, repr(value)
 
 
-def _parse_python_exec(params: dict[str, object]) -> PythonExecRequest:
+def _parse_python_exec(params: Mapping[str, Any]) -> PythonExecRequest:
     raw_script = str(params.get("script") or "")
     script = raw_script if raw_script.strip() else None
     script_path = str(params.get("script_path") or "").strip() or None
@@ -147,7 +149,7 @@ def _exec_script_file(runtime, script_path: str, scope: dict[str, object]) -> No
             scope["__file__"] = previous_file
 
 
-def misc_operations() -> tuple[OperationSpec[object, object], ...]:
+def misc_operations() -> tuple[OperationSpec[Any, Any], ...]:
     return (
         OperationSpec(
             name="reanalyze",

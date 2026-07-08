@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from idac.metadata import BRIDGE_PLUGIN_NAME, WIRE_PROTOCOL_VERSION
 from idac.ops.manifest import SUPPORTED_OPERATIONS
@@ -47,7 +47,7 @@ class BridgeRequest:
     request_id: str
     operation: str
     params: dict[str, Any]
-    target: Optional[str] = None
+    target: str | None = None
 
 
 def parse_request_envelope(payload: Any) -> BridgeRequest:

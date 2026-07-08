@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import require_str
@@ -27,7 +29,7 @@ class NameMutationResult:
     changed: bool
 
 
-def _parse_name_set(params: dict[str, object]) -> NameSetRequest:
+def _parse_name_set(params: Mapping[str, Any]) -> NameSetRequest:
     identifier = require_str(params.get("identifier"), field="address or identifier")
     new_name = require_str(params.get("new_name"), field="new name")
     return NameSetRequest(identifier=identifier, new_name=new_name)
@@ -68,7 +70,7 @@ def _restore_name(
         raise IdaOperationError(f"failed to restore name at {hex(ea)}")
 
 
-def name_operations() -> tuple[OperationSpec[object, object], ...]:
+def name_operations() -> tuple[OperationSpec[Any, Any], ...]:
     return (
         OperationSpec(
             name="name_set",

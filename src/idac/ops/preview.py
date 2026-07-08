@@ -80,7 +80,9 @@ def run_preview(
     if spec.rollback is None:
         raise PreviewUnsupportedError(f"preview is not supported for this operation: {name}")
 
-    result: ResultT | None = None
+    # Typed Any rather than ResultT | None: result is only consumed on paths
+    # where the mutation succeeded and it holds a real ResultT.
+    result: Any = None
     after: Any = None
     mutation_succeeded = False
     primary_error: BaseException | None = None

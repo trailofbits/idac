@@ -50,7 +50,7 @@ class DefaultHandlers:
     def list_targets(self, _params: dict[str, Any]) -> list[dict[str, Any]]:
         return [self._current_target()]
 
-    def validate_target(self, target: Optional[str]) -> None:
+    def validate_target(self, target: str | None) -> None:
         if target in (None, "", "active"):
             return
         current = self._current_target()
