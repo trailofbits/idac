@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from ..argparse_utils import add_command, add_context_options, add_output_options
@@ -11,24 +10,7 @@ from ..errors import CliUserError
 from ..result import CommandResult
 
 
-@dataclass(frozen=True)
-class PythonExecRequest:
-    script: str | None
-    script_path: str | None
-    persist: bool
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {}
-        if self.script is not None:
-            params["script"] = self.script
-        if self.script_path is not None:
-            params["script_path"] = self.script_path
-        if self.persist:
-            params["persist"] = True
-        return params
-
-
-def _python_exec_request(args: argparse.Namespace) -> PythonExecRequest:
+def _python_exec_params(args: argparse.Namespace) -> dict[str, object]:
     script: str | None = None
     script_path: str | None = None
     if args.code:
@@ -42,11 +24,18 @@ def _python_exec_request(args: argparse.Namespace) -> PythonExecRequest:
         script_path = str(path.resolve())
     else:
         raise CliUserError("missing Python input")
-    return PythonExecRequest(script=script, script_path=script_path, persist=bool(args.persist))
+    params: dict[str, object] = {}
+    if script is not None:
+        params["script"] = script
+    if script_path is not None:
+        params["script_path"] = script_path
+    if args.persist:
+        params["persist"] = True
+    return params
 
 
 def _exec(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="python_exec", params=_python_exec_request(args).to_params(), render_op="python_exec")
+    return send_op(args, op="python_exec", params=_python_exec_params(args))
 
 
 def register(

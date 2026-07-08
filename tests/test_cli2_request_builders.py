@@ -263,46 +263,35 @@ def test_disasm_request_rejects_missing_selector() -> None:
         top_level.disasm_request(args)
 
 
-def test_python_exec_request_reads_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_python_exec_params_read_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
     args = argparse.Namespace(code=None, stdin=True, script=None, persist=True)
     monkeypatch.setattr("sys.stdin", io.StringIO("print('hi')\n"))
 
-    request = python_exec._python_exec_request(args)
-
-    assert request.script == "print('hi')\n"
-    assert request.to_params() == {"script": "print('hi')\n", "persist": True}
+    assert python_exec._python_exec_params(args) == {"script": "print('hi')\n", "persist": True}
 
 
-def test_python_exec_request_preserves_script_path(tmp_path: Path) -> None:
+def test_python_exec_params_preserve_script_path(tmp_path: Path) -> None:
     script = tmp_path / "script.py"
     script.write_text("result = __file__\n", encoding="utf-8")
     args = argparse.Namespace(code=None, stdin=False, script=script, persist=False)
 
-    request = python_exec._python_exec_request(args)
-
-    assert request.script is None
-    assert request.script_path == str(script)
-    assert request.to_params() == {"script_path": str(script)}
+    assert python_exec._python_exec_params(args) == {"script_path": str(script)}
 
 
-def test_python_exec_request_resolves_relative_script_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_python_exec_params_resolve_relative_script_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     script = tmp_path / "script.py"
     script.write_text("result = __file__\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     args = argparse.Namespace(code=None, stdin=False, script=Path("script.py"), persist=False)
 
-    request = python_exec._python_exec_request(args)
-
-    assert request.script is None
-    assert request.script_path == str(script.resolve())
-    assert request.to_params() == {"script_path": str(script.resolve())}
+    assert python_exec._python_exec_params(args) == {"script_path": str(script.resolve())}
 
 
-def test_python_exec_request_rejects_missing_script_path(tmp_path: Path) -> None:
+def test_python_exec_params_reject_missing_script_path(tmp_path: Path) -> None:
     args = argparse.Namespace(code=None, stdin=False, script=tmp_path / "missing.py", persist=False)
 
     with pytest.raises(python_exec.CliUserError, match="script file not found"):
-        python_exec._python_exec_request(args)
+        python_exec._python_exec_params(args)
 
 
 def test_locals_apply_plan_params_accepts_items_object(tmp_path: Path) -> None:
@@ -319,7 +308,7 @@ def test_locals_apply_plan_params_accepts_items_object(tmp_path: Path) -> None:
     }
 
 
-def test_strings_request_switches_between_scan_and_pattern_modes() -> None:
+def test_strings_params_switch_between_scan_and_pattern_modes() -> None:
     pattern_args = argparse.Namespace(
         pattern="hello",
         segment="__TEXT",
@@ -339,16 +328,13 @@ def test_strings_request_switches_between_scan_and_pattern_modes() -> None:
         scan=True,
     )
 
-    pattern_request = search._strings_request(pattern_args)
-    scan_request = search._strings_request(scan_args)
-
-    assert pattern_request.to_params() == {
+    assert search._strings_params(pattern_args) == {
         "pattern": "hello",
         "regex": False,
         "ignore_case": True,
         "segment": "__TEXT",
     }
-    assert scan_request.to_params() == {
+    assert search._strings_params(scan_args) == {
         "pattern": "needle",
         "regex": False,
         "ignore_case": False,
@@ -359,7 +345,7 @@ def test_strings_request_switches_between_scan_and_pattern_modes() -> None:
     }
 
 
-def test_strings_request_rejects_scan_bounds_without_scan_flag() -> None:
+def test_strings_params_reject_scan_bounds_without_scan_flag() -> None:
     args = argparse.Namespace(
         pattern="needle",
         segment="__TEXT",
@@ -371,10 +357,10 @@ def test_strings_request_rejects_scan_bounds_without_scan_flag() -> None:
     )
 
     with pytest.raises(common.CliUserError, match="`--start` and `--end` are only valid with `search strings --scan`"):
-        search._strings_request(args)
+        search._strings_params(args)
 
 
-def test_search_bytes_request_includes_segment_scope() -> None:
+def test_search_bytes_params_include_segment_scope() -> None:
     args = argparse.Namespace(
         pattern="74 69 6e 79",
         segment="__TEXT",
@@ -383,7 +369,7 @@ def test_search_bytes_request_includes_segment_scope() -> None:
         end="0x2000",
     )
 
-    assert search._bytes_request(args).to_params() == {
+    assert search._bytes_params(args) == {
         "pattern": "74 69 6e 79",
         "segment": "__TEXT",
         "limit": 25,
@@ -432,17 +418,17 @@ def test_function_list_params_accept_query_alias() -> None:
     }
 
 
-def test_segment_list_request_includes_pattern_flags() -> None:
+def test_segment_list_params_include_pattern_flags() -> None:
     args = argparse.Namespace(pattern="__TEXT|__cstring", regex=True, ignore_case=True)
 
-    assert segment._list_request(args).to_params() == {
+    assert segment._list_params(args) == {
         "pattern": "__TEXT|__cstring",
         "regex": True,
         "ignore_case": True,
     }
 
 
-def test_type_declare_request_builds_aliases_and_flags() -> None:
+def test_type_declare_params_build_aliases_and_flags() -> None:
     args = argparse.Namespace(
         decl="typedef int OLD;",
         decl_file=None,
@@ -452,9 +438,7 @@ def test_type_declare_request_builds_aliases_and_flags() -> None:
         clang=True,
     )
 
-    request = type_commands._type_declare_request(args)
-
-    assert request.to_params() == {
+    assert type_commands._type_declare_params(args) == {
         "decl": "typedef int OLD;",
         "replace": True,
         "aliases": [{"from": "OLD", "to": "NEW"}],
@@ -491,37 +475,37 @@ def test_prototype_set_params_include_opt_in_for_caller_propagation() -> None:
     }
 
 
-def test_bookmark_and_database_request_builders_omit_optional_fields() -> None:
+def test_bookmark_and_database_params_builders_omit_optional_fields() -> None:
     bookmark_args = argparse.Namespace(slot="3", identifier="main", comment=None)
     save_args = argparse.Namespace(path=None)
 
-    assert bookmark._bookmark_set_request(bookmark_args).to_params() == {"slot": 3, "address": "main"}
-    assert database._database_save_request(save_args).to_params() == {}
+    assert bookmark._bookmark_set_params(bookmark_args) == {"slot": 3, "address": "main"}
+    assert database._database_save_params(save_args) == {}
 
 
-def test_comment_request_builders_capture_scope_and_repeatable() -> None:
+def test_comment_params_builders_capture_scope_and_repeatable() -> None:
     lookup_args = argparse.Namespace(identifier="main", repeatable=True, scope="function")
     anterior_args = argparse.Namespace(identifier="main", repeatable=False, scope="anterior")
     change_args = argparse.Namespace(identifier="main", text="entry", repeatable=False, scope="posterior")
 
-    assert comment._comment_lookup_request(lookup_args).to_params() == {
+    assert comment._comment_lookup_params(lookup_args) == {
         "address": "main",
         "scope": "function",
         "repeatable": True,
     }
-    assert comment._comment_lookup_request(anterior_args).to_params() == {
+    assert comment._comment_lookup_params(anterior_args) == {
         "address": "main",
         "scope": "anterior",
     }
-    assert comment._comment_change_request(change_args).to_params() == {
+    assert comment._comment_change_params(change_args) == {
         "address": "main",
         "text": "entry",
         "scope": "posterior",
     }
 
 
-def test_comment_request_builders_reject_repeatable_extra_comments() -> None:
+def test_comment_params_builders_reject_repeatable_extra_comments() -> None:
     args = argparse.Namespace(identifier="main", repeatable=True, scope="anterior")
 
     with pytest.raises(common.CliUserError, match="--repeatable is only valid for line or function comments"):
-        comment._comment_lookup_request(args)
+        comment._comment_lookup_params(args)

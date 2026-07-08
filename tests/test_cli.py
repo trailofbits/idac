@@ -755,6 +755,7 @@ def test_type_list_without_pattern_requires_out(capsys) -> None:
     assert "rerun with a pattern or `--out <path>`" in capsys.readouterr().err
 
 
+@pytest.mark.requires_ida
 def test_function_metadata_smoke(capsys, copy_database, tiny_database: Path, short_runtime_dir) -> None:
     fixture_db = _copied_fixture_db(copy_database, tiny_database)
     exit_code = main(["function", "metadata", "main", "-c", fixture_db])
@@ -1096,6 +1097,7 @@ def test_root_context_forwards_to_preview_wrapper(tmp_path: Path, monkeypatch) -
     assert captured["request"].database == "/tmp/demo.i64"
 
 
+@pytest.mark.requires_ida
 def test_batch_allows_preview_and_writes_jsonl(
     tmp_path: Path, copy_database, tiny_database: Path, short_runtime_dir
 ) -> None:
@@ -1520,6 +1522,34 @@ def test_batch_preserves_argparse_error_in_structured_output(tmp_path: Path, cap
     assert "invalid choice: 'does-not-exist'" in captured.err
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert "invalid choice: 'does-not-exist'" in payload["results"][0]["stderr"]
+
+
+def test_batch_persists_completed_rows_when_interrupted_mid_batch(tmp_path: Path, capsys, monkeypatch) -> None:
+    batch_path = tmp_path / "commands.txt"
+    out_path = tmp_path / "batch.jsonl"
+    batch_path.write_text("docs cli\ndocs cli\n", encoding="utf-8")
+
+    from idac.cli2 import batch as batch_module
+    from idac.cli2.result import CommandResult
+
+    calls = {"count": 0}
+
+    def fake_execute(parsed, *, root_parser):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise KeyboardInterrupt
+        return CommandResult(render_op="docs", value={"ok": True})
+
+    monkeypatch.setattr(batch_module, "_execute_batch_args", fake_execute)
+
+    with pytest.raises(KeyboardInterrupt):
+        main(["batch", str(batch_path), "-o", str(out_path)])
+
+    rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["line"] == 1
+    assert rows[0]["status"] == "ok"
+    capsys.readouterr()
 
 
 def test_batch_records_incomplete_command_groups_in_structured_output(tmp_path: Path, capsys) -> None:

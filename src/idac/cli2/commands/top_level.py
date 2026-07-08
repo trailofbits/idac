@@ -9,7 +9,7 @@ from typing import Any
 
 from ...output import write_output_result
 from ...transport import BackendError
-from ..argparse_utils import add_command, add_context_options, add_output_options
+from ..argparse_utils import add_standard_command
 from ..commands.common import send_op
 from ..errors import CliUserError
 from ..result import CommandResult
@@ -120,7 +120,6 @@ def _decompilemany_targets(args: argparse.Namespace) -> list[dict[str, Any]]:
                 args,
                 op="function_show",
                 params={"identifier": identifier},
-                render_op="function_show",
             )
             value = function_result.value
             if not isinstance(value, dict):
@@ -146,7 +145,6 @@ def _decompilemany_targets(args: argparse.Namespace) -> list[dict[str, Any]]:
             "regex": request.regex,
             "ignore_case": request.ignore_case,
         },
-        render_op="function_list",
     )
     rows = rows_result.value
     if not isinstance(rows, list):
@@ -172,7 +170,6 @@ def _run_single_decompile(
         args,
         op="decompile",
         params={"identifier": identifier, "no_cache": request.no_cache},
-        render_op="decompile",
         preview=False,
     )
     value = result.value
@@ -191,7 +188,6 @@ def _run_single_text_op(
         args,
         op=op,
         params={"identifier": identifier},
-        render_op=op,
         preview=False,
     )
     value = result.value
@@ -205,7 +201,6 @@ def run_decompile(args: argparse.Namespace) -> CommandResult:
         args,
         op="decompile",
         params={"identifier": args.function, "no_cache": bool(args.no_cache)},
-        render_op="decompile",
     )
 
 
@@ -234,15 +229,15 @@ def run_ctree(args: argparse.Namespace) -> CommandResult:
     params: dict[str, Any] = {"identifier": args.function, "level": args.level}
     if args.maturity:
         params["maturity"] = args.maturity
-    return send_op(args, op="ctree", params=params, render_op="ctree")
+    return send_op(args, op="ctree", params=params)
 
 
 def run_xrefs(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="xrefs", params={"identifier": args.identifier}, render_op="xrefs")
+    return send_op(args, op="xrefs", params={"identifier": args.identifier})
 
 
 def run_imports(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="imports", params={}, render_op="imports")
+    return send_op(args, op="imports", params={})
 
 
 def run_decompilemany(args: argparse.Namespace) -> CommandResult:
@@ -418,9 +413,9 @@ def _decompilemany_failure_lines(summary: dict[str, Any]) -> list[str]:
 def register(
     root_parser: argparse.ArgumentParser, subparsers: argparse._SubParsersAction[argparse.ArgumentParser]
 ) -> None:
-    parser = add_command(root_parser, subparsers, "decompile", help_text="Decompile one function")
-    add_context_options(parser)
-    add_output_options(parser, default_format="text")
+    parser = add_standard_command(
+        root_parser, subparsers, "decompile", help_text="Decompile one function", run=run_decompile
+    )
     parser.add_argument("function", help="Function name or address")
     parser.add_argument(
         "--no-cache",
@@ -429,15 +424,13 @@ def register(
         action="store_true",
         help="Force a fresh Hex-Rays decompilation instead of reusing cached pseudocode",
     )
-    parser.set_defaults(
-        run=run_decompile, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
-    )
 
-    parser = add_command(
+    parser = add_standard_command(
         root_parser,
         subparsers,
         "decompilemany",
         help_text="Decompile functions selected by name filter or target file",
+        run=run_decompilemany,
     )
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
     parser.epilog = """examples:
@@ -451,8 +444,6 @@ def register(
   # Write explicit functions into one combined output file
   idac decompilemany --functions-file funcs.txt --out-file .idac/tmp/decompile.c -c db:sample.i64
 """
-    add_context_options(parser)
-    add_output_options(parser, default_format="text")
     selection = parser.add_argument_group("selection")
     selection.add_argument(
         "patterns",
@@ -506,27 +497,17 @@ def register(
         action="store_true",
         help="With --out-dir, also write one .ctree Hex-Rays ctree artifact per selected function",
     )
-    parser.set_defaults(
-        run=run_decompilemany,
-        context_policy="standard",
-        allow_batch=True,
-        allow_preview=True,
-        _mutating_command=False,
-    )
 
-    parser = add_command(root_parser, subparsers, "disasm", help_text="Disassemble a function or address range")
-    add_context_options(parser)
-    add_output_options(parser, default_format="text")
+    parser = add_standard_command(
+        root_parser, subparsers, "disasm", help_text="Disassemble a function or address range", run=run_disasm
+    )
     parser.add_argument("function", nargs="?", help="Function name or address")
     parser.add_argument("--start", help="Range start address or symbol")
     parser.add_argument("--end", help="Range end address or symbol")
-    parser.set_defaults(
-        run=run_disasm, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
-    )
 
-    parser = add_command(root_parser, subparsers, "ctree", help_text="Inspect Hex-Rays ctree or microcode")
-    add_context_options(parser)
-    add_output_options(parser, default_format="text")
+    parser = add_standard_command(
+        root_parser, subparsers, "ctree", help_text="Inspect Hex-Rays ctree or microcode", run=run_ctree
+    )
     parser.add_argument("function", help="Function name or address")
     parser.add_argument("--level", choices=("ctree", "micro"), default="ctree", help="Inspect ctree or microcode")
     parser.add_argument(
@@ -534,21 +515,8 @@ def register(
         choices=("generated", "preoptimized", "locopt", "calls", "glbopt1", "glbopt2", "glbopt3", "lvars"),
         help="Requested microcode maturity when --level micro is used",
     )
-    parser.set_defaults(
-        run=run_ctree, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
-    )
 
-    parser = add_command(root_parser, subparsers, "xrefs", help_text="Show cross-references")
-    add_context_options(parser)
-    add_output_options(parser, default_format="text")
+    parser = add_standard_command(root_parser, subparsers, "xrefs", help_text="Show cross-references", run=run_xrefs)
     parser.add_argument("identifier", help="Function name, symbol, or address")
-    parser.set_defaults(
-        run=run_xrefs, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
-    )
 
-    parser = add_command(root_parser, subparsers, "imports", help_text="List imports")
-    add_context_options(parser)
-    add_output_options(parser, default_format="text")
-    parser.set_defaults(
-        run=run_imports, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
-    )
+    add_standard_command(root_parser, subparsers, "imports", help_text="List imports", run=run_imports)

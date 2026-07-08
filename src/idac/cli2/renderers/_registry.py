@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 from ...ops.manifest import SUPPORTED_OPERATIONS
 
@@ -82,12 +82,12 @@ def build_text_renderers(namespace: Mapping[str, object]) -> dict[str, Renderer]
         renderer = namespace[function_name]
         if not callable(renderer):
             raise TypeError(f"renderer is not callable: {function_name}")
-        renderers[operation] = renderer
+        renderers[operation] = cast("Renderer", renderer)
     return renderers
 
 
 def renderer_registry_drift(text_renderers: Mapping[str, Renderer]) -> tuple[list[str], list[str]]:
-    missing = sorted(set(SUPPORTED_OPERATIONS) - set(text_renderers))
+    missing = sorted(str(name) for name in set(SUPPORTED_OPERATIONS) - set(text_renderers))
     extra = sorted(set(text_renderers) - set(SUPPORTED_OPERATIONS) - _CLI_ONLY_RENDERERS)
     return missing, extra
 

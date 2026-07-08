@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from typing import Optional
 
 from ..transport.gui import list_discovered_instances as list_gui_discovered_instances
 from ..transport.gui import list_instances as list_gui_instances
@@ -20,7 +19,7 @@ class ResolvedContext:
     timeout: float | None
 
 
-def database_path_from_context(locator: str) -> Optional[str]:
+def database_path_from_context(locator: str) -> str | None:
     text = str(locator).strip()
     if not text:
         return None

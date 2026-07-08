@@ -1,39 +1,11 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 
-from ..argparse_utils import add_command, add_context_options, add_output_options
+from ..argparse_utils import add_command, add_standard_command
 from ..commands.common import send_op
 from ..errors import CliUserError
 from ..result import CommandResult
-
-
-@dataclass(frozen=True)
-class CommentLookupRequest:
-    identifier: str
-    scope: str
-    repeatable: bool
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {"address": self.identifier, "scope": self.scope}
-        if self.repeatable:
-            params["repeatable"] = True
-        return params
-
-
-@dataclass(frozen=True)
-class CommentChangeRequest:
-    identifier: str
-    text: str
-    scope: str
-    repeatable: bool
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {"address": self.identifier, "text": self.text, "scope": self.scope}
-        if self.repeatable:
-            params["repeatable"] = True
-        return params
 
 
 def _comment_scope(args: argparse.Namespace) -> str:
@@ -43,21 +15,22 @@ def _comment_scope(args: argparse.Namespace) -> str:
     return scope
 
 
-def _comment_lookup_request(args: argparse.Namespace) -> CommentLookupRequest:
-    return CommentLookupRequest(
-        identifier=str(args.identifier),
-        scope=_comment_scope(args),
-        repeatable=bool(args.repeatable),
-    )
+def _comment_lookup_params(args: argparse.Namespace) -> dict[str, object]:
+    params: dict[str, object] = {"address": str(args.identifier), "scope": _comment_scope(args)}
+    if args.repeatable:
+        params["repeatable"] = True
+    return params
 
 
-def _comment_change_request(args: argparse.Namespace) -> CommentChangeRequest:
-    return CommentChangeRequest(
-        identifier=str(args.identifier),
-        text=str(args.text),
-        scope=_comment_scope(args),
-        repeatable=bool(args.repeatable),
-    )
+def _comment_change_params(args: argparse.Namespace) -> dict[str, object]:
+    params: dict[str, object] = {
+        "address": str(args.identifier),
+        "text": str(args.text),
+        "scope": _comment_scope(args),
+    }
+    if args.repeatable:
+        params["repeatable"] = True
+    return params
 
 
 def _add_comment_target_options(parser: argparse.ArgumentParser) -> None:
@@ -92,20 +65,15 @@ def _add_comment_target_options(parser: argparse.ArgumentParser) -> None:
 
 
 def _show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="comment_get", params=_comment_lookup_request(args).to_params(), render_op="comment_get")
+    return send_op(args, op="comment_get", params=_comment_lookup_params(args))
 
 
 def _set(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="comment_set", params=_comment_change_request(args).to_params(), render_op="comment_set")
+    return send_op(args, op="comment_set", params=_comment_change_params(args))
 
 
 def _delete(args: argparse.Namespace) -> CommandResult:
-    return send_op(
-        args,
-        op="comment_delete",
-        params=_comment_lookup_request(args).to_params(),
-        render_op="comment_delete",
-    )
+    return send_op(args, op="comment_delete", params=_comment_lookup_params(args))
 
 
 def register(
@@ -114,30 +82,25 @@ def register(
     parser = add_command(root_parser, subparsers, "comment", help_text="Comment operations")
     comment_subparsers = parser.add_subparsers(dest="comment_command")
 
-    child = add_command(parser, comment_subparsers, "show", help_text="Show a comment")
-    add_context_options(child)
-    add_output_options(child, default_format="text")
+    child = add_standard_command(parser, comment_subparsers, "show", help_text="Show a comment", run=_show)
     child.add_argument("identifier", help="Address or symbol")
     _add_comment_target_options(child)
-    child.set_defaults(
-        run=_show, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
-    )
 
-    child = add_command(parser, comment_subparsers, "set", help_text="Set a comment")
-    add_context_options(child)
-    add_output_options(child, default_format="json")
+    child = add_standard_command(
+        parser, comment_subparsers, "set", help_text="Set a comment", run=_set, mutating=True, default_format="json"
+    )
     child.add_argument("identifier", help="Address or symbol")
     child.add_argument("text", help="Comment text")
     _add_comment_target_options(child)
-    child.set_defaults(
-        run=_set, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=True
-    )
 
-    child = add_command(parser, comment_subparsers, "delete", help_text="Delete a comment")
-    add_context_options(child)
-    add_output_options(child, default_format="json")
+    child = add_standard_command(
+        parser,
+        comment_subparsers,
+        "delete",
+        help_text="Delete a comment",
+        run=_delete,
+        mutating=True,
+        default_format="json",
+    )
     child.add_argument("identifier", help="Address or symbol")
     _add_comment_target_options(child)
-    child.set_defaults(
-        run=_delete, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=True
-    )

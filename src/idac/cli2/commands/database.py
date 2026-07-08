@@ -1,64 +1,38 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 
 from ..argparse_utils import add_command, add_context_options, add_output_options, set_context_defaults
 from ..commands.common import send_op
 from ..result import CommandResult
 
 
-@dataclass(frozen=True)
-class DatabaseOpenRequest:
-    path: str
-    run_auto_analysis: bool
-
-    def to_params(self) -> dict[str, object]:
-        return {"path": self.path, "run_auto_analysis": self.run_auto_analysis}
+def _database_open_params(args: argparse.Namespace) -> dict[str, object]:
+    return {"path": str(args.path), "run_auto_analysis": bool(args.run_auto_analysis)}
 
 
-@dataclass(frozen=True)
-class DatabaseSaveRequest:
-    path: str | None
-
-    def to_params(self) -> dict[str, object]:
-        return {} if self.path is None else {"path": self.path}
+def _database_save_params(args: argparse.Namespace) -> dict[str, object]:
+    return {} if args.path is None else {"path": str(args.path)}
 
 
-@dataclass(frozen=True)
-class DatabaseCloseRequest:
-    discard: bool
-
-    def to_params(self) -> dict[str, object]:
-        return {"discard": self.discard}
-
-
-def _database_open_request(args: argparse.Namespace) -> DatabaseOpenRequest:
-    return DatabaseOpenRequest(path=str(args.path), run_auto_analysis=bool(args.run_auto_analysis))
-
-
-def _database_save_request(args: argparse.Namespace) -> DatabaseSaveRequest:
-    return DatabaseSaveRequest(path=None if args.path is None else str(args.path))
-
-
-def _database_close_request(args: argparse.Namespace) -> DatabaseCloseRequest:
-    return DatabaseCloseRequest(discard=bool(args.discard))
+def _database_close_params(args: argparse.Namespace) -> dict[str, object]:
+    return {"discard": bool(args.discard)}
 
 
 def _show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="database_info", params={}, render_op="database_info")
+    return send_op(args, op="database_info", params={})
 
 
 def _open(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="db_open", params=_database_open_request(args).to_params(), render_op="db_open")
+    return send_op(args, op="db_open", params=_database_open_params(args))
 
 
 def _save(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="db_save", params=_database_save_request(args).to_params(), render_op="db_save")
+    return send_op(args, op="db_save", params=_database_save_params(args))
 
 
 def _close(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="db_close", params=_database_close_request(args).to_params(), render_op="db_close")
+    return send_op(args, op="db_close", params=_database_close_params(args))
 
 
 def register(
