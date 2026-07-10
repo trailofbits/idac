@@ -42,7 +42,6 @@ jobs:
           installer-id: release/9.3/ida-pro/ida-pro_93_x64linux.run
           license-id: ${{ secrets.IDA_LICENSE_ID }}
           api-key: ${{ secrets.HCLI_API_KEY }}
-          hcli-version-specifier: ==0.12.0
           python-version: "3.12"
 
       - name: Install uv
