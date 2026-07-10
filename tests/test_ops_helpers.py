@@ -468,6 +468,10 @@ def test_database_info_reports_start_ea_separately_from_first_entry() -> None:
             return 0x401000
 
         @staticmethod
+        def inf_get_main() -> int:
+            return 0x403000
+
+        @staticmethod
         def inf_is_64bit() -> bool:
             return True
 
@@ -525,6 +529,7 @@ def test_database_info_reports_start_ea_separately_from_first_entry() -> None:
 
     assert result.start_ea == "0x401000"
     assert result.entry_ea == "0x402000"
+    assert result.main_ea == "0x403000"
 
 
 def test_segment_list_filters_with_regex_pattern() -> None:

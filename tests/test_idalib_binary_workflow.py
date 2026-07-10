@@ -107,14 +107,16 @@ def test_binary_first_skill_workflow_lists_headless_target_and_reads(
         machine = platform.machine().lower()
         expected_processor = "ARM" if machine in {"aarch64", "arm64"} else "metapc"
         assert info["processor"] == expected_processor
-        function_identifier = info["start_ea"] or info["entry_ea"]
-        assert function_identifier
+        entry_identifier = info["start_ea"] or info["entry_ea"]
+        assert entry_identifier
+        main_identifier = info["main_ea"]
+        assert main_identifier
 
         entry_decompiled = run_cli(
             idac_cmd,
             idac_env,
             "decompile",
-            function_identifier,
+            entry_identifier,
             "--f5",
             "--timeout",
             "30",
@@ -124,24 +126,11 @@ def test_binary_first_skill_workflow_lists_headless_target_and_reads(
         assert entry_decompiled.returncode == 0, entry_decompiled.stderr or entry_decompiled.stdout
         assert entry_decompiled.stdout.strip()
 
-        functions = run_cli_json(
-            idac_cmd,
-            idac_env,
-            "function",
-            "list",
-            "main",
-            "--limit",
-            "1",
-            "-c",
-            f"db:{binary}",
-        )
-        assert isinstance(functions, list)
-        behavior_identifier = "main" if any(row.get("name") == "main" for row in functions) else function_identifier
         decompiled = run_cli(
             idac_cmd,
             idac_env,
             "decompile",
-            behavior_identifier,
+            main_identifier,
             "--f5",
             "--timeout",
             "30",
