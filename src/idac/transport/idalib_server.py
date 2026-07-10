@@ -4,7 +4,6 @@ import argparse
 import contextlib
 import json
 import os
-import socket
 import socketserver
 import sys
 import threading
@@ -234,7 +233,7 @@ class _IdaLibRequestHandler(socketserver.StreamRequestHandler):
         service = self.server.service  # type: ignore[attr-defined]
         try:
             raw = self._read_request()
-        except socket.timeout:
+        except TimeoutError:
             self._write_response(
                 response_error(
                     f"request body read timed out after {int(REQUEST_READ_TIMEOUT)} seconds",

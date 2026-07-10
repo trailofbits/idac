@@ -3,8 +3,9 @@ from __future__ import annotations
 import queue
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 T = TypeVar("T")
 

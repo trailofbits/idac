@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
-from typing import Any, Union
+from typing import Any
 
-JsonScalar = Union[None, bool, int, float, str]
-JsonValue = Union[JsonScalar, list["JsonValue"], dict[str, "JsonValue"]]
+JsonScalar = None | bool | int | float | str
+JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 
 
 def payload_from_model(value: Any) -> JsonValue:

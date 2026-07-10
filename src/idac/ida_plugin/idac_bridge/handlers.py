@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from idac.ops.dispatch import build_operation_registry
 from idac.ops.manifest import SUPPORTED_OPERATIONS

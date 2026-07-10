@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Optional, TypedDict, Union
+from typing import Any, Optional, TypedDict
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import parse_aliases
@@ -191,7 +191,7 @@ class TypeDeclarePreviewSnapshot:
     type_names_sample: tuple[str, ...]
 
 
-ChunkLike = Union[DeclarationChunk, DeclarationChunkDict]
+ChunkLike = DeclarationChunk | DeclarationChunkDict
 
 
 def _coerce_chunk(chunk: ChunkLike) -> DeclarationChunk:

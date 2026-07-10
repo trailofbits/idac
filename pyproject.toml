@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Jay Little / Trail of Bits", email = "jay@trailofbits.com" }
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
@@ -45,7 +45,7 @@ exclude-newer = "1 week"
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py310"
 src = ["src", "tests", "plugin"]
 
 [tool.ruff.lint]
