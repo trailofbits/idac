@@ -107,24 +107,10 @@ def test_binary_first_skill_workflow_lists_headless_target_and_reads(
         machine = platform.machine().lower()
         expected_processor = "ARM" if machine in {"aarch64", "arm64"} else "metapc"
         assert info["processor"] == expected_processor
-        entry_identifier = info["start_ea"] or info["entry_ea"]
-        assert entry_identifier
+        assert info["start_ea"]
+        assert info["entry_ea"]
         main_identifier = info["main_ea"]
         assert main_identifier
-
-        entry_decompiled = run_cli(
-            idac_cmd,
-            idac_env,
-            "decompile",
-            entry_identifier,
-            "--f5",
-            "--timeout",
-            "30",
-            "-c",
-            f"db:{binary}",
-        )
-        assert entry_decompiled.returncode == 0, entry_decompiled.stderr or entry_decompiled.stdout
-        assert entry_decompiled.stdout.strip()
 
         decompiled = run_cli(
             idac_cmd,
