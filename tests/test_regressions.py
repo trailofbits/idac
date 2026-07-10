@@ -801,6 +801,7 @@ def test_candidate_ida_dirs_reads_ida_config_after_explicit_env(monkeypatch, tmp
     monkeypatch.setenv("IDAUSR", str(idausr))
     monkeypatch.setenv("IDAC_IDA_INSTALL_DIR", str(explicit_root))
     monkeypatch.delenv("IDADIR", raising=False)
+    monkeypatch.setattr(idalib_common, "hcli_configured_install_dir", lambda: None)
     monkeypatch.setattr(idalib_common, "default_ida_install_dirs", lambda: [configured_root, fallback_root])
 
     assert idalib_common.candidate_ida_dirs() == [explicit_root, configured_root, fallback_root]

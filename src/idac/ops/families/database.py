@@ -21,6 +21,7 @@ class DatabaseInfoResult:
     base: str
     min_ea: str
     max_ea: str
+    main_ea: str | None
     start_ea: str | None
     entry_ea: str | None
 
@@ -54,6 +55,7 @@ def _database_info(context: OperationContext, request: DatabaseInfoRequest) -> D
     idaapi = runtime.mod("idaapi")
     entry_ord = ida_entry.get_entry_ordinal(0)
     entry_ea = ida_entry.get_entry(entry_ord) if entry_ord != idaapi.BADADDR else idaapi.BADADDR
+    main_ea = ida_ida.inf_get_main()
     start_ea = ida_ida.inf_get_start_ea()
     return DatabaseInfoResult(
         path=idaapi.get_input_file_path() or "",
@@ -64,6 +66,7 @@ def _database_info(context: OperationContext, request: DatabaseInfoRequest) -> D
         base=hex(idaapi.get_imagebase()),
         min_ea=hex(ida_ida.inf_get_min_ea()),
         max_ea=hex(ida_ida.inf_get_max_ea()),
+        main_ea=None if main_ea == idaapi.BADADDR else hex(main_ea),
         start_ea=None if start_ea == idaapi.BADADDR else hex(start_ea),
         entry_ea=None if entry_ea == idaapi.BADADDR else hex(entry_ea),
     )

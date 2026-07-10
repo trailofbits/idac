@@ -48,7 +48,7 @@ idac decompile "main" -c "db:/path/to/binary" --f5
 ```
 
 For massive binaries or first-time autoanalysis, prefer the indefinite default unless the user asked for a deadline. Do not wrap this import in a shell-level timeout or a tool-call timeout; let the command keep running and poll the session if your tool supports incremental output.
-If the raw import does not name `main`, use `start_ea` / `entry_ea` from `database show --json` or an address from `function list --json`.
+For source-level entry behavior, prefer `main_ea` from `database show --json`. If IDA cannot determine `main`, use `start_ea` / `entry_ea` or an address from `function list --json`.
 `database open` has no architecture-slice or loader-prompt options today. If a raw binary requires a slice choice, open the intended slice with IDA first, save an `.i64` / `.idb`, then use that database path with `idac database open "sample.i64"` or `-c "db:sample.i64"`.
 
 For an existing `.i64` / `.idb`:

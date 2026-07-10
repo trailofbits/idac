@@ -104,6 +104,7 @@ def render_database_info(value: Any) -> str:
         "base",
         "min_ea",
         "max_ea",
+        "main_ea",
         "start_ea",
         "entry_ea",
     )

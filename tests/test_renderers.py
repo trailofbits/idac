@@ -72,7 +72,7 @@ def test_render_bookmarks_formats_single_value_as_row() -> None:
     assert rendered == "2  0x401000  entry"
 
 
-def test_render_database_info_includes_start_and_entry_addresses() -> None:
+def test_render_database_info_includes_main_start_and_entry_addresses() -> None:
     rendered = render_database_info(
         {
             "path": "/tmp/sample",
@@ -83,6 +83,7 @@ def test_render_database_info_includes_start_and_entry_addresses() -> None:
             "base": "0x100000000",
             "min_ea": "0x100000000",
             "max_ea": "0x100001000",
+            "main_ea": "0x100000100",
             "start_ea": "0x100000120",
             "entry_ea": "0x100000200",
         }
@@ -97,6 +98,7 @@ def test_render_database_info_includes_start_and_entry_addresses() -> None:
         "base: 0x100000000",
         "min_ea: 0x100000000",
         "max_ea: 0x100001000",
+        "main_ea: 0x100000100",
         "start_ea: 0x100000120",
         "entry_ea: 0x100000200",
     ]

@@ -34,10 +34,12 @@ def test_read_only_path_getters_do_not_create_directories(monkeypatch, tmp_path:
     idausr = tmp_path / ".idapro"
     claude_home = tmp_path / ".claude"
     codex_home = tmp_path / ".codex"
+    hcli_dir = tmp_path / "hcli"
     runtime = tmp_path / "runtime"
     monkeypatch.setenv("IDAUSR", str(idausr))
     monkeypatch.setenv("CLAUDE_HOME", str(claude_home))
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(paths, "hcli_config_dir", lambda: hcli_dir)
     monkeypatch.setattr(paths, "runtime_dir", lambda: runtime)
 
     assert user_runtime_dir() == runtime
@@ -60,6 +62,7 @@ def test_read_only_path_getters_do_not_create_directories(monkeypatch, tmp_path:
     assert not idausr.exists()
     assert not claude_home.exists()
     assert not codex_home.exists()
+    assert not hcli_dir.exists()
 
 
 def test_ensure_helpers_create_directories(monkeypatch, tmp_path: Path) -> None:

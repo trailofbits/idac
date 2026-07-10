@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
 from pathlib import Path
 
@@ -103,15 +104,19 @@ def test_binary_first_skill_workflow_lists_headless_target_and_reads(
         )
         assert info["path"] == str(binary)
         assert info["module"] == "tiny"
-        assert info["processor"] == "ARM"
-        function_identifier = info["start_ea"] or info["entry_ea"]
-        assert function_identifier
+        machine = platform.machine().lower()
+        expected_processor = "ARM" if machine in {"aarch64", "arm64"} else "metapc"
+        assert info["processor"] == expected_processor
+        assert info["start_ea"]
+        assert info["entry_ea"]
+        main_identifier = info["main_ea"]
+        assert main_identifier
 
         decompiled = run_cli(
             idac_cmd,
             idac_env,
             "decompile",
-            function_identifier,
+            main_identifier,
             "--f5",
             "--timeout",
             "30",
