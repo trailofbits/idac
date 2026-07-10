@@ -1,23 +1,53 @@
-.PHONY: dev lint format test audit check
+TESTS :=
 
+# If the user selects a specific test pattern to run, set pytest to fail fast
+# and only run tests that match the pattern. Otherwise, run the full suite.
+ifneq ($(TESTS),)
+	TEST_ARGS := -x -k $(TESTS)
+else
+	TEST_ARGS :=
+endif
+
+.PHONY: all
+all:
+	@echo "Run my targets individually!"
+
+.PHONY: dev
 dev:
-	uv sync
+	uv sync --group dev
 
+.PHONY: run
+run:
+	uv run idac $(ARGS)
+
+.PHONY: lint
 lint:
-	uv run ruff format --check src/idac tests
-	uv run ruff check src/idac tests
+	uv sync --group lint
+	uv run ruff format --check
+	uv run ruff check
 
+.PHONY: format
 format:
-	uv run ruff format src/idac tests
-	uv run ruff check --fix src/idac tests
+	uv sync --group lint
+	uv run ruff format
+	uv run ruff check --fix
 
+.PHONY: test
 test:
-	uv run pytest -q
+	uv sync --group test
+	uv run pytest -q $(T) $(TEST_ARGS)
 
+.PHONY: audit
 audit:
-	uv run pip-audit .
+	uv audit
 
-check:
-	uv run ruff format --check src/idac tests
-	uv run ruff check src/idac tests
-	uv run pytest -q
+.PHONY: doc
+doc:
+	@echo "No generated documentation set up"
+
+.PHONY: build
+build:
+	uv build
+
+.PHONY: check
+check: lint test audit
