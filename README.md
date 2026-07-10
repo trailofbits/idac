@@ -1,6 +1,6 @@
 # idac
 
-![version](https://img.shields.io/badge/version-0.17.0-blue)
+![version](https://img.shields.io/badge/version-0.18.0-blue)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![status](https://img.shields.io/badge/status-alpha-orange)
 

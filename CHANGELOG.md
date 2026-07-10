@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.18.0
+
+This release exposes the IDA entry point in database metadata, adds continuous integration and security checks, and modernizes the project's Python and dependency-management baseline.
+
+- Added `main_address` to `database show` output so binary workflows can reliably locate and validate IDA's detected program entry point.
+- Added GitHub Actions coverage for formatting, linting, tests, dependency auditing, and workflow security analysis, including a licensed raw-binary `idalib` workflow.
+- Raised the minimum supported Python version to 3.10, switched dependency auditing to `uv audit --locked`, updated direct and indirect dependencies, and configured Dependabot's update policy.
+- Isolated IDA-backed tests with per-test `IDAUSR` directories so test runs preserve required license and configuration files without loading user-installed plugins.
+- Improved raw-binary workflow portability and tightened regression coverage around paths, timeouts, renderers, and database metadata.
+
 ## 0.17.0
 
 This release adds preflight validation and safer batch mutation workflows, improves IDA discovery diagnostics, and refreshes the bundled agent guidance around current recovery practices.
