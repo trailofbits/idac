@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from ...ops.families.type_declare import TypeDeclareDiagnostic, TypeDeclareResult
 from ._registry import build_text_renderers

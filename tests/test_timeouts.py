@@ -323,7 +323,7 @@ def test_idalib_probe_timeout_does_not_purge_instance_files(monkeypatch, tmp_pat
     )
 
     def fake_socket_request(socket_path_arg, payload, *, timeout):
-        raise socket.timeout()
+        raise TimeoutError()
 
     monkeypatch.setattr(idalib, "_socket_request", fake_socket_request)
 
@@ -466,7 +466,7 @@ def test_idalib_daemon_startup_timeout_terminates_worker(monkeypatch, tmp_path: 
     def fake_read_ready_payload(read_fd, *, timeout):
         seen["timeout"] = timeout
         os.close(read_fd)
-        raise socket.timeout()
+        raise TimeoutError()
 
     monkeypatch.setattr(idalib, "ensure_user_runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(idalib.subprocess, "Popen", lambda *args, **kwargs: proc)
@@ -545,7 +545,7 @@ def test_idalib_backend_reports_timeout(monkeypatch, tmp_path: Path) -> None:
     )
 
     def fake_socket_request(socket_path, payload, *, timeout):
-        raise socket.timeout()
+        raise TimeoutError()
 
     monkeypatch.setattr(
         "idac.transport.idalib._ensure_instance_for_database",

@@ -5,15 +5,15 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import socket
 import socketserver
 import sys
 import threading
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import ida_kernwin  # type: ignore
 
@@ -141,7 +141,7 @@ class _BridgeRequestHandler(socketserver.StreamRequestHandler):
         service = self.server.service  # type: ignore[attr-defined]
         try:
             raw = self._read_request()
-        except socket.timeout:
+        except TimeoutError:
             self._write_response(
                 response_error(
                     f"request body read timed out after {int(BRIDGE_REQUEST_READ_TIMEOUT)} seconds",

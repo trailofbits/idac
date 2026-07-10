@@ -26,5 +26,7 @@ Live GUI tests:
 
 IDA isolation:
 
-- When regenerating fixtures or running workflows that spawn `idat`, use an isolated `IDAUSR`.
-- The repo `AGENTS.md` documents the recommended isolation pattern so tests do not depend on the live `~/.idapro` profile.
+- Tests that spawn IDA receive a per-test isolated `IDAUSR` through the shared `idac_env` fixture. It copies only
+  license/config files and uses an empty `plugins/` directory, so tests do not depend on the live `~/.idapro` profile.
+- When regenerating fixtures outside pytest, create an isolated `IDAUSR` manually as documented in the repo
+  `AGENTS.md`.

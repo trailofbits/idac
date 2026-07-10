@@ -1,7 +1,7 @@
 # idac
 
 ![version](https://img.shields.io/badge/version-0.17.0-blue)
-![python](https://img.shields.io/badge/python-3.9%2B-blue)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![status](https://img.shields.io/badge/status-alpha-orange)
 
 The IDA Pro CLI built for agents and humans. One Unix socket — no JSON-RPC framing, no sidecar daemon, no MCP server. Just `idac decompile "sub_08041337"` from any shell or agent.
@@ -121,7 +121,7 @@ To run from a checkout without installing globally, use `uv run idac --help`.
 
 ## Requirements
 
-- **Python 3.9+** and [`uv`](https://docs.astral.sh/uv/).
+- **Python 3.10+** and [`uv`](https://docs.astral.sh/uv/).
 - **IDA Pro** with the **Hex-Rays decompiler** (required for `decompile`, `ctree`, and class recovery).
 - A valid IDA license. Headless work uses `idalib`, which requires `idapro` to be installed and importable.
 

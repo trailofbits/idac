@@ -151,7 +151,7 @@ def _probe_instance(
             {"version": WIRE_PROTOCOL_VERSION, "op": "daemon_status", "params": {}},
             timeout=timeout,
         )
-    except socket.timeout:
+    except TimeoutError:
         raise
     except RuntimeError:
         if purge_on_failure:
@@ -197,7 +197,7 @@ def _read_ready_payload(read_fd: int, *, timeout: float | None) -> dict[str, Any
             selector.register(read_fd, selectors.EVENT_READ)
             events = selector.select(timeout)
             if not events:
-                raise socket.timeout()
+                raise TimeoutError()
             raw = os.read(read_fd, IDALIB_READY_MAX_BYTES + 1)
     finally:
         with contextlib.suppress(OSError):
@@ -267,7 +267,7 @@ def _start_daemon_for_database(
                         f"idalib daemon opened `{instance.database_path}` while `{database_path}` was requested"
                     )
                 return instance
-            except socket.timeout as exc:
+            except TimeoutError as exc:
                 _terminate_process(proc)
                 raise RuntimeError(
                     f"timed out after {_timeout_text(startup_timeout)} waiting for idalib daemon "
@@ -353,7 +353,7 @@ class IdaLibBackend:
                     run_auto_analysis=bool(request.params.get("run_auto_analysis", True)),
                     start_if_missing=True,
                 )
-            except socket.timeout as exc:
+            except TimeoutError as exc:
                 raise _timeout_error("db_open", timeout) from exc
             return response_ok(
                 {
@@ -377,7 +377,7 @@ class IdaLibBackend:
             try:
                 if not _probe_instance(instance, timeout=timeout):
                     return response_ok(_already_closed_result(database), backend="idalib")
-            except socket.timeout as exc:
+            except TimeoutError as exc:
                 raise _timeout_error(request.op, timeout) from exc
         else:
             try:
@@ -387,7 +387,7 @@ class IdaLibBackend:
                     run_auto_analysis=True,
                     start_if_missing=True,
                 )
-            except socket.timeout as exc:
+            except TimeoutError as exc:
                 raise _timeout_error(request.op, timeout) from exc
 
         payload = {
@@ -397,5 +397,5 @@ class IdaLibBackend:
         }
         try:
             return _socket_request(instance.socket_path, payload, timeout=timeout)
-        except socket.timeout as exc:
+        except TimeoutError as exc:
             raise _timeout_error(request.op, timeout) from exc
