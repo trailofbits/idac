@@ -16,7 +16,6 @@ idac = "idac.cli:main"
 dev = [
     { include-group = "lint" },
     { include-group = "test" },
-    { include-group = "audit" },
 ]
 lint = [
     "ruff>=0.15.20",
@@ -25,7 +24,6 @@ test = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
 ]
-audit = ["pip-audit>=2.9.0"]
 
 [build-system]
 requires = ["uv_build>=0.11.26,<0.12.0"]
@@ -43,6 +41,7 @@ wheel-exclude = [
 
 [tool.uv]
 default-groups = ["dev"]
+exclude-newer = "1 week"
 
 [tool.ruff]
 line-length = 120

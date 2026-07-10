@@ -39,7 +39,7 @@ test:
 
 .PHONY: audit
 audit:
-	uv audit
+	uv audit --locked
 
 .PHONY: doc
 doc:

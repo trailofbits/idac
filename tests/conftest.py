@@ -120,16 +120,33 @@ def _cleanup_runtime_dir(runtime_dir: Path) -> None:
     shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
+def _prepare_isolated_idausr(source: Path, target: Path) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    for name in ("ida.reg", "ida-config.json"):
+        source_file = source / name
+        if source_file.is_file():
+            shutil.copy2(source_file, target / name)
+    for license_file in source.glob("idapro_*.hexlic"):
+        if license_file.is_file():
+            shutil.copy2(license_file, target / license_file.name)
+    (target / "plugins").mkdir(exist_ok=True)
+
+
 @pytest.fixture
 def idac_env() -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = str(_repo_root() / "src")
     runtime_dir = Path(tempfile.mkdtemp(prefix="idac-test-runtime-"))
+    idausr_dir = Path(tempfile.mkdtemp(prefix="idac-test-idapro-"))
+    source_idausr = Path(env.get("IDAUSR", Path.home() / ".idapro")).expanduser()
+    _prepare_isolated_idausr(source_idausr, idausr_dir)
     env["IDAC_RUNTIME_DIR"] = str(runtime_dir)
+    env["IDAUSR"] = str(idausr_dir)
     try:
         yield env
     finally:
         _cleanup_runtime_dir(runtime_dir)
+        shutil.rmtree(idausr_dir, ignore_errors=True)
 
 
 @pytest.fixture
