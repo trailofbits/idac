@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
 from pathlib import Path
 
@@ -103,7 +104,9 @@ def test_binary_first_skill_workflow_lists_headless_target_and_reads(
         )
         assert info["path"] == str(binary)
         assert info["module"] == "tiny"
-        assert info["processor"] == "ARM"
+        machine = platform.machine().lower()
+        expected_processor = "ARM" if machine in {"aarch64", "arm64"} else "metapc"
+        assert info["processor"] == expected_processor
         function_identifier = info["start_ea"] or info["entry_ea"]
         assert function_identifier
 
