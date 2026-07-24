@@ -18,7 +18,7 @@ dev = [
     { include-group = "test" },
 ]
 lint = [
-    "ruff>=0.15.21",
+    "ruff>=0.15.22",
 ]
 test = [
     "pytest>=9.1.1",
@@ -26,7 +26,7 @@ test = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.11.28,<0.12.0"]
+requires = ["uv_build>=0.11.29,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
