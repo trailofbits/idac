@@ -26,15 +26,18 @@ jobs:
         run: make lint
 
   test:
+    name: Test (IDA ${{ matrix.ida-version }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        ida-installer:
-          - release/9.3/ida-pro/ida-pro_93_x64linux.run
-          - release/9.4/ida-pro/ida-pro_94_x64linux.run
+        include:
+          - ida-version: "9.3"
+            ida-installer: release/9.3/ida-pro/ida-pro_93_x64linux.run
+          - ida-version: "9.4"
+            ida-installer: release/9.4/ida-pro/ida-pro_94_x64linux.run
     steps:
       - name: Check out repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
