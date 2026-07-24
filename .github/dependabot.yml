@@ -12,7 +12,7 @@ updates:
         patterns:
           - "*"
     schedule:
-      interval: daily
+      interval: monthly
 
   - package-ecosystem: github-actions
     cooldown:
@@ -23,4 +23,4 @@ updates:
         patterns:
           - "*"
     schedule:
-      interval: daily
+      interval: monthly
