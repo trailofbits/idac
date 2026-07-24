@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tests.helpers import preview_round_trip_cli2, run_idalib, run_idalib_json, run_idalib_text
+from tests.helpers import (
+    normalize_pseudocode_call_arguments,
+    preview_round_trip_cli2,
+    run_idalib,
+    run_idalib_json,
+    run_idalib_text,
+)
 
 
 def test_comment_delete_preview_then_persist(
@@ -368,7 +374,9 @@ def test_proto_set_can_optionally_propagate_to_callers(
         "long long __cdecl add(long long a, long long b)",
         "--propagate-callers",
     )
-    caller_text = run_idalib_text(idac_cmd, idac_env, database, "decompile", "main")
+    caller_text = normalize_pseudocode_call_arguments(
+        run_idalib_text(idac_cmd, idac_env, database, "decompile", "main")
+    )
 
     assert result["changed"] is True
     assert result["callers_considered"] >= 1

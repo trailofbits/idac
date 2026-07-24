@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.helpers import preview_round_trip_cli2, run_idalib, run_idalib_json, run_idalib_text
+from tests.helpers import (
+    normalize_pseudocode_call_arguments,
+    preview_round_trip_cli2,
+    run_idalib,
+    run_idalib_json,
+    run_idalib_text,
+)
 
 
 def _local_type_map(payload: object) -> dict[str, str]:
@@ -25,7 +31,7 @@ def test_name_set_persists_and_updates_function_metadata_and_decompile(
     before = run_idalib_json(idac_cmd, idac_env, database, "function", "metadata", "add")
     persisted = run_idalib_json(idac_cmd, idac_env, database, "misc", "rename", "add", "add_numbers")
     after_persist = run_idalib_json(idac_cmd, idac_env, database, "function", "metadata", "add_numbers")
-    decompiled = run_idalib_text(idac_cmd, idac_env, database, "decompile", "main")
+    decompiled = normalize_pseudocode_call_arguments(run_idalib_text(idac_cmd, idac_env, database, "decompile", "main"))
 
     assert isinstance(before, dict)
     assert before["address"] == "0x1000004b0"
@@ -68,7 +74,7 @@ def test_local_rename_preview_then_persist_updates_local_list_and_decompile(
     after_preview = result["after_preview"]
     persisted = result["persisted"]
     after_persist = result["after_persist"]
-    decompiled = run_idalib_text(idac_cmd, idac_env, database, "decompile", "main")
+    decompiled = normalize_pseudocode_call_arguments(run_idalib_text(idac_cmd, idac_env, database, "decompile", "main"))
 
     before_names = _local_names(before)
     assert "v4" in before_names
@@ -164,7 +170,7 @@ def test_local_update_preview_then_persist_updates_name_and_type_together(
     after_preview = result["after_preview"]
     persisted = result["persisted"]
     after_persist = result["after_persist"]
-    decompiled = run_idalib_text(idac_cmd, idac_env, database, "decompile", "main")
+    decompiled = normalize_pseudocode_call_arguments(run_idalib_text(idac_cmd, idac_env, database, "decompile", "main"))
 
     before_names = _local_names(before)
     before_types = _local_type_map(before)

@@ -1,8 +1,20 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
+
+_PSEUDOCODE_STRING_OR_NAMED_CALL_ARGUMENT_RE = re.compile(
+    r"""
+    "(?:\\.|[^"\\])*"
+    | '(?:\\.|[^'\\])*'
+    | //[^\r\n]*
+    | /\*.*?\*/
+    | (?<=[(,])(?P<whitespace>\s*)[A-Za-z_][A-Za-z0-9_]*:(?!:)\s*
+    """,
+    re.DOTALL | re.VERBOSE,
+)
 
 
 def _flatten_args(*args: object) -> list[str]:
@@ -13,6 +25,17 @@ def _flatten_args(*args: object) -> list[str]:
             continue
         flattened.append(str(arg))
     return flattened
+
+
+def normalize_pseudocode_call_arguments(text: str) -> str:
+    """Remove optional argument-name annotations from Hex-Rays calls."""
+
+    def replace(match: re.Match[str]) -> str:
+        if match.group("whitespace") is None:
+            return match.group()
+        return match.group("whitespace")
+
+    return _PSEUDOCODE_STRING_OR_NAMED_CALL_ARGUMENT_RE.sub(replace, text)
 
 
 def run_cli(
@@ -219,6 +242,7 @@ def preview_round_trip_cli2(
 
 
 __all__ = [
+    "normalize_pseudocode_call_arguments",
     "preview_round_trip",
     "preview_round_trip_cli2",
     "preview_snapshot",
