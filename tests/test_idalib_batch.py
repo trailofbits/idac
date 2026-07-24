@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tests.helpers import run_cli, run_idalib_json, run_idalib_text
+from tests.helpers import (
+    normalize_pseudocode_call_arguments,
+    run_cli,
+    run_idalib_json,
+    run_idalib_text,
+)
 
 
 def _local_type_map(payload: object) -> dict[str, str]:
@@ -67,7 +72,7 @@ def test_batch_reuses_batch_dir_and_updates_prototypes_and_locals(
     updated_proto = run_idalib_json(idac_cmd, idac_env, database, "function", "prototype", "show", "add")
     updated_locals = run_idalib_json(idac_cmd, idac_env, database, "function", "locals", "list", "main")
     type_info = run_idalib_json(idac_cmd, idac_env, database, "type", "show", "cli_batch_record")
-    decompiled = run_idalib_text(idac_cmd, idac_env, database, "decompile", "main")
+    decompiled = normalize_pseudocode_call_arguments(run_idalib_text(idac_cmd, idac_env, database, "decompile", "main"))
 
     assert isinstance(result, dict)
     assert result["ok"] is True

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tests.helpers import run_cli
+from tests.helpers import normalize_pseudocode_call_arguments, run_cli
 
 
 def test_idalib_database_show_json(
@@ -150,8 +150,9 @@ def test_idalib_decompile_text(
         f"db:{database}",
     )
     assert proc.returncode == 0, proc.stderr
-    assert "printf" in proc.stdout
-    assert "add(2, 3)" in proc.stdout
+    decompiled = normalize_pseudocode_call_arguments(proc.stdout)
+    assert "printf" in decompiled
+    assert "add(2, 3)" in decompiled
 
 
 def test_idalib_decompile_text_with_f5(
@@ -171,8 +172,9 @@ def test_idalib_decompile_text_with_f5(
         f"db:{database}",
     )
     assert proc.returncode == 0, proc.stderr
-    assert "printf" in proc.stdout
-    assert "add(2, 3)" in proc.stdout
+    decompiled = normalize_pseudocode_call_arguments(proc.stdout)
+    assert "printf" in decompiled
+    assert "add(2, 3)" in decompiled
 
 
 def test_idalib_decompile_bulk_query_writes_manifest_and_artifacts(

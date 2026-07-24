@@ -5,7 +5,7 @@ import platform
 import subprocess
 from pathlib import Path
 
-from tests.helpers import run_cli, run_cli_json
+from tests.helpers import normalize_pseudocode_call_arguments, run_cli, run_cli_json
 
 
 def _idalib_rows_for(rows: object, binary: Path) -> list[dict[str, object]]:
@@ -124,8 +124,9 @@ def test_binary_first_skill_workflow_lists_headless_target_and_reads(
             f"db:{binary}",
         )
         assert decompiled.returncode == 0, decompiled.stderr or decompiled.stdout
-        assert "printf" in decompiled.stdout
-        assert "add(2, 3" in decompiled.stdout
+        pseudocode = normalize_pseudocode_call_arguments(decompiled.stdout)
+        assert "printf" in pseudocode
+        assert "add(2, 3" in pseudocode
     finally:
         if opened:
             close = run_cli(

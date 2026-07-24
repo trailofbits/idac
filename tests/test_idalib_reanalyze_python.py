@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.helpers import run_idalib, run_idalib_json, run_idalib_text
+from tests.helpers import (
+    normalize_pseudocode_call_arguments,
+    run_idalib,
+    run_idalib_json,
+    run_idalib_text,
+)
 
 
 def test_reanalyze_function_mode_reports_function_bounds(
@@ -418,7 +423,7 @@ def test_reanalyze_range_restores_function_after_session_item_deletion(
         "0x100000468",
     )
     restored = run_idalib_json(idac_cmd, idac_env, database, "function", "metadata", "main")
-    decompiled = run_idalib_text(idac_cmd, idac_env, database, "decompile", "main")
+    decompiled = normalize_pseudocode_call_arguments(run_idalib_text(idac_cmd, idac_env, database, "decompile", "main"))
 
     assert deleted == {
         "stdout": "",
