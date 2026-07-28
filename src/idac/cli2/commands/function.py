@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ..argparse_utils import (
     add_command,
@@ -13,6 +13,7 @@ from ..argparse_utils import (
     add_pattern_options,
     add_retype_input,
     add_segment_option,
+    add_standard_command,
     positive_int,
     read_decl_text,
 )
@@ -41,84 +42,60 @@ LOCAL_SELECTOR_EPILOG = """examples:
 """
 
 
-@dataclass(frozen=True)
-class FunctionListRequest:
-    pattern: str | None
-    regex: bool
-    ignore_case: bool
-    segment: str | None
-    limit: int | None
-    demangle: bool
-
-    def to_params(self) -> dict[str, object]:
-        params: dict[str, object] = {
-            "pattern": self.pattern,
-            "regex": self.regex,
-            "ignore_case": self.ignore_case,
-            "demangle": self.demangle,
-        }
-        if self.segment:
-            params["segment"] = self.segment
-        if self.limit is not None:
-            params["limit"] = self.limit
-        return params
-
-
-def _list_request(args: argparse.Namespace) -> FunctionListRequest:
+def _list_params(args: argparse.Namespace) -> dict[str, object]:
     if args.pattern and args.query:
         raise CliUserError("function list accepts either positional pattern or --query, not both")
-    return FunctionListRequest(
-        pattern=args.pattern if args.pattern is not None else args.query,
-        regex=args.regex,
-        ignore_case=args.ignore_case,
-        segment=args.segment,
-        limit=args.limit,
-        demangle=args.demangle,
-    )
-
-
-def _list_params(args: argparse.Namespace) -> dict[str, object]:
-    return _list_request(args).to_params()
+    params: dict[str, object] = {
+        "pattern": args.pattern if args.pattern is not None else args.query,
+        "regex": args.regex,
+        "ignore_case": args.ignore_case,
+        "demangle": args.demangle,
+    }
+    if args.segment:
+        params["segment"] = args.segment
+    if args.limit is not None:
+        params["limit"] = args.limit
+    return params
 
 
 def run_list(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_list", params=_list_params(args), render_op="function_list")
+    return send_op(args, op="function_list", params=_list_params(args))
 
 
 def run_metadata(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_show", params={"identifier": args.function}, render_op="function_show")
+    return send_op(args, op="function_show", params={"identifier": args.function})
 
 
 def run_frame(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_frame", params={"identifier": args.function}, render_op="function_frame")
+    return send_op(args, op="function_frame", params={"identifier": args.function})
 
 
 def run_stackvars(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_stackvars", params={"identifier": args.function}, render_op="function_stackvars")
+    return send_op(args, op="function_stackvars", params={"identifier": args.function})
 
 
 def run_callees(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_callees", params={"identifier": args.function}, render_op="function_callees")
+    return send_op(args, op="function_callees", params={"identifier": args.function})
 
 
 def run_callers(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="function_callers", params={"identifier": args.function}, render_op="function_callers")
+    return send_op(args, op="function_callers", params={"identifier": args.function})
 
 
 def run_locals_list(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="local_list", params={"identifier": args.function}, render_op="local_list")
+    return send_op(args, op="local_list", params={"identifier": args.function})
 
 
 def run_locals_rename(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="local_rename", params=local_rename_params(args), render_op="local_rename")
+    return send_op(args, op="local_rename", params=local_rename_params(args))
 
 
 def run_locals_retype(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="local_retype", params=local_retype_params(args), render_op="local_retype")
+    return send_op(args, op="local_retype", params=local_retype_params(args))
 
 
 def run_locals_update(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="local_update", params=local_update_params(args), render_op="local_update")
+    return send_op(args, op="local_update", params=local_update_params(args))
 
 
 def _locals_apply_plan_params(args: argparse.Namespace) -> dict[str, object]:
@@ -138,11 +115,11 @@ def _locals_apply_plan_params(args: argparse.Namespace) -> dict[str, object]:
 
 
 def run_locals_apply_plan(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="local_apply_plan", params=_locals_apply_plan_params(args), render_op="local_apply_plan")
+    return send_op(args, op="local_apply_plan", params=_locals_apply_plan_params(args))
 
 
 def run_prototype_show(args: argparse.Namespace) -> CommandResult:
-    return send_op(args, op="proto_get", params={"identifier": args.function}, render_op="proto_get")
+    return send_op(args, op="proto_get", params={"identifier": args.function})
 
 
 def _prototype_set_params(args: argparse.Namespace) -> dict[str, object]:
@@ -159,10 +136,10 @@ def _prototype_set_params(args: argparse.Namespace) -> dict[str, object]:
 
 def run_prototype_set(args: argparse.Namespace) -> CommandResult:
     params = _prototype_set_params(args)
-    return send_op(args, op="proto_set", params=params, render_op="proto_set")
+    return send_op(args, op="proto_set", params=params)
 
 
-def _prototype_check_failure_lines(value: dict[str, object]) -> list[str]:
+def _prototype_check_failure_lines(value: dict[str, Any]) -> list[str]:
     diagnostics = [str(item) for item in value.get("diagnostics") or [] if str(item)]
     lines = ["function prototype check failed:"]
     if diagnostics:
@@ -173,12 +150,7 @@ def _prototype_check_failure_lines(value: dict[str, object]) -> list[str]:
 
 
 def run_prototype_check(args: argparse.Namespace) -> CommandResult:
-    result = send_op(
-        args,
-        op="proto_check",
-        params={"identifier": args.function, "decl": read_decl_text(args)},
-        render_op="proto_check",
-    )
+    result = send_op(args, op="proto_check", params={"identifier": args.function, "decl": read_decl_text(args)})
     exit_code = 0
     stderr_lines: list[str] = []
     if isinstance(result.value, dict) and result.value.get("success") is False:
@@ -232,62 +204,50 @@ def register(
         demangle=False,
     )
 
-    child = add_command(parser, parser_subparsers, "metadata", help_text="Show function metadata")
-    add_context_options(child)
-    add_output_options(child, default_format="text")
-    child.add_argument("function", help="Function name or address")
-    child.set_defaults(
-        run=run_metadata, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
+    child = add_standard_command(
+        parser, parser_subparsers, "metadata", help_text="Show function metadata", run=run_metadata
     )
+    child.add_argument("function", help="Function name or address")
 
-    child = add_command(parser, parser_subparsers, "frame", help_text="Show raw function frame layout")
-    add_context_options(child)
-    add_output_options(child, default_format="text")
-    child.add_argument("function", help="Function name or address")
-    child.set_defaults(
-        run=run_frame, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
+    child = add_standard_command(
+        parser, parser_subparsers, "frame", help_text="Show raw function frame layout", run=run_frame
     )
+    child.add_argument("function", help="Function name or address")
 
-    child = add_command(parser, parser_subparsers, "stackvars", help_text="Show stack variables and xrefs")
-    add_context_options(child)
-    add_output_options(child, default_format="text")
-    child.add_argument("function", help="Function name or address")
-    child.set_defaults(
-        run=run_stackvars, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
+    child = add_standard_command(
+        parser, parser_subparsers, "stackvars", help_text="Show stack variables and xrefs", run=run_stackvars
     )
+    child.add_argument("function", help="Function name or address")
 
-    child = add_command(parser, parser_subparsers, "callees", help_text="Show called functions and call sites")
-    add_context_options(child)
-    add_output_options(child, default_format="text")
-    child.add_argument("function", help="Function name or address")
-    child.set_defaults(
-        run=run_callees, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
+    child = add_standard_command(
+        parser, parser_subparsers, "callees", help_text="Show called functions and call sites", run=run_callees
     )
+    child.add_argument("function", help="Function name or address")
 
-    child = add_command(parser, parser_subparsers, "callers", help_text="Show callers and call sites")
-    add_context_options(child)
-    add_output_options(child, default_format="text")
-    child.add_argument("function", help="Function name or address")
-    child.set_defaults(
-        run=run_callers, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
+    child = add_standard_command(
+        parser, parser_subparsers, "callers", help_text="Show callers and call sites", run=run_callers
     )
+    child.add_argument("function", help="Function name or address")
 
     locals_parser = add_command(parser, parser_subparsers, "locals", help_text="Decompiler local variable operations")
     locals_subparsers = locals_parser.add_subparsers(dest="locals_command")
 
-    child = add_command(locals_parser, locals_subparsers, "list", help_text="List decompiler locals")
-    add_context_options(child)
-    add_output_options(child, default_format="text")
-    child.add_argument("function", help="Function name or address")
-    child.set_defaults(
-        run=run_locals_list, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
+    child = add_standard_command(
+        locals_parser, locals_subparsers, "list", help_text="List decompiler locals", run=run_locals_list
     )
+    child.add_argument("function", help="Function name or address")
 
-    child = add_command(locals_parser, locals_subparsers, "rename", help_text="Rename one local variable")
+    child = add_standard_command(
+        locals_parser,
+        locals_subparsers,
+        "rename",
+        help_text="Rename one local variable",
+        run=run_locals_rename,
+        mutating=True,
+        default_format="json",
+    )
     child.formatter_class = argparse.RawDescriptionHelpFormatter
     child.epilog = LOCAL_SELECTOR_EPILOG
-    add_context_options(child)
-    add_output_options(child, default_format="json")
     child.add_argument("function", help="Function name or address")
     child.add_argument(
         "selector",
@@ -298,15 +258,18 @@ def register(
     child.add_argument("--local-id", dest="local_id", help="Stable local id from `function locals list --json`")
     child.add_argument("--index", help="Decompiler local index from `function locals list --json`")
     child.add_argument("--new-name", required=True, metavar="NEW_NAME", help="Replacement local variable name")
-    child.set_defaults(
-        run=run_locals_rename, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=True
-    )
 
-    child = add_command(locals_parser, locals_subparsers, "retype", help_text="Retype one local variable")
+    child = add_standard_command(
+        locals_parser,
+        locals_subparsers,
+        "retype",
+        help_text="Retype one local variable",
+        run=run_locals_retype,
+        mutating=True,
+        default_format="json",
+    )
     child.formatter_class = argparse.RawDescriptionHelpFormatter
     child.epilog = LOCAL_SELECTOR_EPILOG
-    add_context_options(child)
-    add_output_options(child, default_format="json")
     child.add_argument("function", help="Function name or address")
     child.add_argument(
         "selector",
@@ -317,15 +280,18 @@ def register(
     child.add_argument("--local-id", dest="local_id", help="Stable local id from `function locals list --json`")
     child.add_argument("--index", help="Decompiler local index from `function locals list --json`")
     add_retype_input(child)
-    child.set_defaults(
-        run=run_locals_retype, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=True
-    )
 
-    child = add_command(locals_parser, locals_subparsers, "update", help_text="Rename and/or retype one local variable")
+    child = add_standard_command(
+        locals_parser,
+        locals_subparsers,
+        "update",
+        help_text="Rename and/or retype one local variable",
+        run=run_locals_update,
+        mutating=True,
+        default_format="json",
+    )
     child.formatter_class = argparse.RawDescriptionHelpFormatter
     child.epilog = LOCAL_SELECTOR_EPILOG
-    add_context_options(child)
-    add_output_options(child, default_format="json")
     child.add_argument("function", help="Function name or address")
     child.add_argument("selector", nargs="?", metavar="LOCAL_SELECTOR", help=LOCAL_SELECTOR_HELP)
     child.add_argument("--local-id", dest="local_id", help="Stable local id from `function locals list --json`")
@@ -339,11 +305,16 @@ def register(
         type=Path,
         help="Read full local variable declaration text from this file",
     )
-    child.set_defaults(
-        run=run_locals_update, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=True
-    )
 
-    child = add_command(locals_parser, locals_subparsers, "apply", help_text="Apply local updates from JSON")
+    child = add_standard_command(
+        locals_parser,
+        locals_subparsers,
+        "apply",
+        help_text="Apply local updates from JSON",
+        run=run_locals_apply_plan,
+        mutating=True,
+        default_format="json",
+    )
     child.formatter_class = argparse.RawDescriptionHelpFormatter
     child.epilog = """plan JSON:
   [
@@ -351,41 +322,27 @@ def register(
     {"index": 3, "type": "uint64_t"}
   ]
 """
-    add_context_options(child)
-    add_output_options(child, default_format="json")
     child.add_argument("function", help="Function name or address")
     child.add_argument("--json-file", required=True, type=Path, help="Read local update plan JSON from this file")
-    child.set_defaults(
-        run=run_locals_apply_plan,
-        context_policy="standard",
-        allow_batch=True,
-        allow_preview=True,
-        _mutating_command=True,
-    )
 
     proto_parser = add_command(parser, parser_subparsers, "prototype", help_text="Prototype operations")
     proto_subparsers = proto_parser.add_subparsers(dest="prototype_command")
 
-    child = add_command(proto_parser, proto_subparsers, "show", help_text="Show a prototype")
-    add_context_options(child)
-    add_output_options(child, default_format="text")
-    child.add_argument("function", help="Function name or address")
-    child.set_defaults(
-        run=run_prototype_show, context_policy="standard", allow_batch=True, allow_preview=True, _mutating_command=False
+    child = add_standard_command(
+        proto_parser, proto_subparsers, "show", help_text="Show a prototype", run=run_prototype_show
     )
+    child.add_argument("function", help="Function name or address")
 
-    child = add_command(proto_parser, proto_subparsers, "check", help_text="Validate a prototype without applying it")
-    add_context_options(child)
-    add_output_options(child, default_format="json")
+    child = add_standard_command(
+        proto_parser,
+        proto_subparsers,
+        "check",
+        help_text="Validate a prototype without applying it",
+        run=run_prototype_check,
+        default_format="json",
+    )
     child.add_argument("function", help="Function name or address")
     add_decl_input(child, help_text="Prototype declaration text")
-    child.set_defaults(
-        run=run_prototype_check,
-        context_policy="standard",
-        allow_batch=True,
-        allow_preview=True,
-        _mutating_command=False,
-    )
 
     child = add_command(proto_parser, proto_subparsers, "set", help_text="Set a prototype")
     add_context_options(child)

@@ -295,6 +295,20 @@ def test_docs_large_topic_prints_inline(capsys) -> None:
     assert "## Practical caveat" in output
 
 
+def test_docs_templates_prints_template_files(capsys) -> None:
+    exit_code = main(["docs", "templates"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "# Template Files" in output
+    assert "`checkpoint-note.md`:" in output
+    assert "### Open Questions" in output
+    assert "`prototype-pass.idac`:" in output
+    assert "function prototype check" in output
+    assert "`rename-pass.idac`:" in output
+    assert "`locals-jq-snippets.sh`:" in output
+
+
 def test_docs_list_prints_available_topics(capsys) -> None:
     exit_code = main(["docs", "--list"])
 
@@ -699,9 +713,7 @@ def test_workspace_init_runs_on_public_cli(tmp_path: Path, capsys) -> None:
         "headers/vendor/",
         "headers/vendor/.gitkeep",
         "prompts/",
-        "prompts/class-recovery-pass.md",
-        "prompts/general-analysis.md",
-        "prompts/reverse-engineer.md",
+        "prompts/recovery-pass.md",
         "scripts/",
         "scripts/.gitkeep",
         "references/",
@@ -723,7 +735,7 @@ def test_workspace_init_runs_on_public_cli(tmp_path: Path, capsys) -> None:
         ".idac/tmp/",
     ]
     assert (dest / "AGENTS.md").exists()
-    assert (dest / "prompts" / "general-analysis.md").exists()
+    assert (dest / "prompts" / "recovery-pass.md").exists()
     assert (dest / ".codex" / "config.toml").exists()
 
 
@@ -743,6 +755,7 @@ def test_type_list_without_pattern_requires_out(capsys) -> None:
     assert "rerun with a pattern or `--out <path>`" in capsys.readouterr().err
 
 
+@pytest.mark.requires_ida
 def test_function_metadata_smoke(capsys, copy_database, tiny_database: Path, short_runtime_dir) -> None:
     fixture_db = _copied_fixture_db(copy_database, tiny_database)
     exit_code = main(["function", "metadata", "main", "-c", fixture_db])
@@ -1084,6 +1097,7 @@ def test_root_context_forwards_to_preview_wrapper(tmp_path: Path, monkeypatch) -
     assert captured["request"].database == "/tmp/demo.i64"
 
 
+@pytest.mark.requires_ida
 def test_batch_allows_preview_and_writes_jsonl(
     tmp_path: Path, copy_database, tiny_database: Path, short_runtime_dir
 ) -> None:
@@ -1508,6 +1522,34 @@ def test_batch_preserves_argparse_error_in_structured_output(tmp_path: Path, cap
     assert "invalid choice: 'does-not-exist'" in captured.err
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert "invalid choice: 'does-not-exist'" in payload["results"][0]["stderr"]
+
+
+def test_batch_persists_completed_rows_when_interrupted_mid_batch(tmp_path: Path, capsys, monkeypatch) -> None:
+    batch_path = tmp_path / "commands.txt"
+    out_path = tmp_path / "batch.jsonl"
+    batch_path.write_text("docs cli\ndocs cli\n", encoding="utf-8")
+
+    from idac.cli2 import batch as batch_module
+    from idac.cli2.result import CommandResult
+
+    calls = {"count": 0}
+
+    def fake_execute(parsed, *, root_parser):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise KeyboardInterrupt
+        return CommandResult(render_op="docs", value={"ok": True})
+
+    monkeypatch.setattr(batch_module, "_execute_batch_args", fake_execute)
+
+    with pytest.raises(KeyboardInterrupt):
+        main(["batch", str(batch_path), "-o", str(out_path)])
+
+    rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(rows) == 1
+    assert rows[0]["line"] == 1
+    assert rows[0]["status"] == "ok"
+    capsys.readouterr()
 
 
 def test_batch_records_incomplete_command_groups_in_structured_output(tmp_path: Path, capsys) -> None:

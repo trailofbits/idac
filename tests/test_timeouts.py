@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
+import struct
+import subprocess
+import sys
+import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -250,10 +256,9 @@ def test_idalib_existing_instance_probe_honors_blocking_mode(monkeypatch, tmp_pa
 
     monkeypatch.setattr(idalib, "_find_instance_for_database", lambda database_path: instance)
 
-    def fake_probe(instance_arg, *, timeout, purge_on_failure=True):
+    def fake_probe(instance_arg, *, timeout):
         assert instance_arg is instance
         seen["timeout"] = timeout
-        seen["purge_on_failure"] = purge_on_failure
         return True
 
     monkeypatch.setattr(idalib, "_probe_instance", fake_probe)
@@ -267,7 +272,7 @@ def test_idalib_existing_instance_probe_honors_blocking_mode(monkeypatch, tmp_pa
 
     assert found is instance
     assert already_open is True
-    assert seen == {"timeout": None, "purge_on_failure": True}
+    assert seen == {"timeout": None}
 
 
 def test_idalib_new_instance_startup_uses_request_timeout(monkeypatch, tmp_path: Path) -> None:
@@ -308,13 +313,142 @@ def test_idalib_new_instance_startup_uses_request_timeout(monkeypatch, tmp_path:
     }
 
 
-def test_idalib_probe_timeout_does_not_purge_instance_files(monkeypatch, tmp_path: Path) -> None:
-    registry_path = tmp_path / "idac-idalib-1234.json"
-    socket_path = tmp_path / "idac-idalib-1234.sock"
+def test_idalib_probe_timeout_treats_busy_daemon_as_reachable_without_resend(monkeypatch) -> None:
+    # Real _socket_request against a real Unix socket. The server accepts and
+    # reads each request but never replies, so the probe times out. A daemon
+    # that accepts the connection is alive-but-busy: the probe must return True
+    # (reachable), never purge, and never resend. The server keeps draining so a
+    # buggy resend would be counted.
+    monkeypatch.setattr(idalib, "IDALIB_PROBE_TIMEOUT_CAP", 0.25)
+    with tempfile.TemporaryDirectory(prefix="idac-timeout-", dir="/tmp") as tmp:
+        tmp_path = Path(tmp)
+        registry_path = tmp_path / "idac-idalib-1.json"
+        registry_path.write_text("{}", encoding="utf-8")
+        socket_path = tmp_path / "idac-idalib-1.sock"
+
+        stop = threading.Event()
+        received: list[bytes] = []
+        held: list[socket.socket] = []
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(socket_path))
+        server.listen(8)
+        server.settimeout(0.05)
+
+        def serve() -> None:
+            while not stop.is_set():
+                try:
+                    conn, _ = server.accept()
+                except TimeoutError:
+                    continue
+                except OSError:
+                    return
+                held.append(conn)
+                conn.settimeout(1.0)
+                chunks: list[bytes] = []
+                try:
+                    while True:
+                        data = conn.recv(65536)
+                        if not data:
+                            break
+                        chunks.append(data)
+                except (TimeoutError, OSError):
+                    pass
+                if chunks:
+                    received.append(b"".join(chunks))
+                # Deliberately do not reply or close: the client blocks in recv
+                # until its own timeout fires.
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        instance = IdaLibInstance(
+            pid=os.getpid(),
+            socket_path=socket_path,
+            registry_path=registry_path,
+            database_path=str(tmp_path / "fixture.i64"),
+            started_at=None,
+            meta={},
+        )
+        try:
+            # Blocking mode (timeout=None) must still be bounded by the probe cap
+            # and return "reachable" rather than hang.
+            assert idalib._probe_instance(instance, timeout=None) is True
+        finally:
+            stop.set()
+            thread.join(timeout=5.0)
+            for conn in held:
+                conn.close()
+            server.close()
+
+        assert registry_path.exists()
+        assert socket_path.exists()
+        assert len(received) == 1
+        assert json.loads(received[0])["op"] == "daemon_status"
+
+
+def test_idalib_socket_request_does_not_resend_after_connection_reset() -> None:
+    # The H2 hazard: the server reads the (possibly mutating) request, then
+    # aborts the connection with RST. _socket_request must surface an error
+    # without re-sending, because the daemon may already be executing it.
+    with tempfile.TemporaryDirectory(prefix="idac-timeout-", dir="/tmp") as tmp:
+        socket_path = Path(tmp) / "idac-idalib-rst.sock"
+        stop = threading.Event()
+        received: list[bytes] = []
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(socket_path))
+        server.listen(8)
+        server.settimeout(0.05)
+
+        def serve() -> None:
+            while not stop.is_set():
+                try:
+                    conn, _ = server.accept()
+                except TimeoutError:
+                    continue
+                except OSError:
+                    return
+                with conn:
+                    chunks: list[bytes] = []
+                    try:
+                        while True:
+                            data = conn.recv(65536)
+                            if not data:
+                                break
+                            chunks.append(data)
+                    except OSError:
+                        pass
+                    if chunks:
+                        received.append(b"".join(chunks))
+                    # Force an RST rather than a clean close: SO_LINGER with a
+                    # zero timeout makes close() send a reset.
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        try:
+            with pytest.raises(RuntimeError):
+                idalib._socket_request(
+                    socket_path,
+                    {"version": WIRE_PROTOCOL_VERSION, "op": "python_exec", "params": {"code": "mutate()"}},
+                    timeout=1.0,
+                )
+        finally:
+            stop.set()
+            thread.join(timeout=5.0)
+            server.close()
+
+        assert len(received) == 1
+
+
+def _refused_socket_instance(tmp_path: Path, pid: int) -> IdaLibInstance:
+    registry_path = tmp_path / "idac-idalib-2.json"
     registry_path.write_text("{}", encoding="utf-8")
-    socket_path.write_text("", encoding="utf-8")
-    instance = IdaLibInstance(
-        pid=1234,
+    socket_path = tmp_path / "idac-idalib-2.sock"
+    # Bind then close so the socket file exists with no listener behind it.
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(socket_path))
+    server.close()
+    return IdaLibInstance(
+        pid=pid,
         socket_path=socket_path,
         registry_path=registry_path,
         database_path=str(tmp_path / "fixture.i64"),
@@ -322,16 +456,162 @@ def test_idalib_probe_timeout_does_not_purge_instance_files(monkeypatch, tmp_pat
         meta={},
     )
 
-    def fake_socket_request(socket_path_arg, payload, *, timeout):
-        raise TimeoutError()
 
-    monkeypatch.setattr(idalib, "_socket_request", fake_socket_request)
+def test_idalib_probe_refused_with_live_worker_pid_does_not_purge_instance_files(monkeypatch) -> None:
+    # A live pid whose command line is the idalib worker, but whose socket
+    # refuses the connection: a daemon shutting down or wedged. Its files must
+    # survive so no second daemon opens the same database.
+    monkeypatch.setattr(
+        idalib,
+        "pid_command_line",
+        lambda pid: f"{sys.executable} -m idac.transport.idalib_server --database x.i64",
+    )
+    with tempfile.TemporaryDirectory(prefix="idac-timeout-", dir="/tmp") as tmp:
+        tmp_path = Path(tmp)
+        instance = _refused_socket_instance(tmp_path, os.getpid())
 
-    with pytest.raises(socket.timeout):
-        idalib._probe_instance(instance, timeout=0.25)
+        with pytest.raises(RuntimeError, match="is not answering on its socket"):
+            idalib._probe_instance(instance, timeout=0.25)
 
-    assert registry_path.exists()
-    assert socket_path.exists()
+        assert instance.registry_path.exists()
+        assert instance.socket_path.exists()
+
+
+def test_idalib_probe_failure_with_recycled_foreign_pid_purges_instance_files(monkeypatch) -> None:
+    # A live pid whose command line is NOT the idalib worker: the original
+    # daemon died and its pid was recycled. Purge so a fresh daemon can start,
+    # rather than wedging the database forever.
+    monkeypatch.setattr(idalib, "pid_command_line", lambda pid: "/usr/bin/some-unrelated-process")
+    with tempfile.TemporaryDirectory(prefix="idac-timeout-", dir="/tmp") as tmp:
+        tmp_path = Path(tmp)
+        instance = _refused_socket_instance(tmp_path, os.getpid())
+
+        assert idalib._probe_instance(instance, timeout=0.25) is False
+
+        assert not instance.registry_path.exists()
+        assert not instance.socket_path.exists()
+
+
+def test_idalib_probe_failure_with_dead_pid_purges_instance_files() -> None:
+    with tempfile.TemporaryDirectory(prefix="idac-timeout-", dir="/tmp") as tmp:
+        tmp_path = Path(tmp)
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        proc.wait()
+        instance = _refused_socket_instance(tmp_path, proc.pid)
+
+        assert idalib._probe_instance(instance, timeout=0.25) is False
+
+        assert not instance.registry_path.exists()
+        assert not instance.socket_path.exists()
+
+
+def test_idalib_db_close_warns_when_daemon_died_uncleanly(monkeypatch, tmp_path: Path) -> None:
+    # A registry survives for the database but no live daemon answers: the daemon
+    # died without a clean close, so unsaved changes may be lost. db_close must
+    # flag this rather than silently report a clean already-closed.
+    database = str(tmp_path / "fixture.i64")
+    registry_path = tmp_path / "idac-idalib-999999.json"
+    registry_path.write_text(
+        json.dumps({"pid": 999999, "socket_path": str(tmp_path / "x.sock"), "database_path": database}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(idalib, "idalib_registry_paths", lambda: [registry_path])
+    monkeypatch.setattr(idalib, "list_instances", lambda: [])
+
+    response = IdaLibBackend().send(RequestEnvelope(op="db_close", backend="idalib", database=database))
+
+    assert response["ok"] is True
+    assert response["result"]["already_closed"] is True
+    assert response["result"]["unclean"] is True
+    assert response["warnings"]
+    assert "without a clean close" in response["warnings"][0]
+
+
+def test_idalib_db_close_without_registry_is_clean_already_closed(monkeypatch, tmp_path: Path) -> None:
+    database = str(tmp_path / "fixture.i64")
+    monkeypatch.setattr(idalib, "idalib_registry_paths", lambda: [])
+    monkeypatch.setattr(idalib, "list_instances", lambda: [])
+
+    response = IdaLibBackend().send(RequestEnvelope(op="db_close", backend="idalib", database=database))
+
+    assert response["ok"] is True
+    assert response["result"]["already_closed"] is True
+    assert "unclean" not in response["result"]
+    assert response["warnings"] == []
+
+
+def test_idalib_database_start_lock_is_exclusive(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(idalib, "ensure_user_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(idalib, "idalib_open_lock_path", lambda db: tmp_path / "open.lock")
+    database = str(tmp_path / "fixture.i64")
+
+    order: list[str] = []
+    holding = threading.Event()
+    release = threading.Event()
+    second_acquired = threading.Event()
+
+    def hold_first() -> None:
+        with idalib._database_start_lock(database):
+            order.append("first-acquired")
+            holding.set()
+            release.wait(timeout=5.0)
+            order.append("first-releasing")
+
+    def acquire_second() -> None:
+        with idalib._database_start_lock(database):
+            order.append("second-acquired")
+            second_acquired.set()
+
+    first = threading.Thread(target=hold_first)
+    first.start()
+    assert holding.wait(timeout=5.0)
+
+    second = threading.Thread(target=acquire_second)
+    second.start()
+    # The second acquisition must block while the first holds the lock.
+    assert not second_acquired.wait(timeout=0.3)
+    release.set()
+    assert second_acquired.wait(timeout=5.0)
+
+    first.join(timeout=5.0)
+    second.join(timeout=5.0)
+    assert order == ["first-acquired", "first-releasing", "second-acquired"]
+
+
+def test_idalib_ensure_instance_rechecks_under_lock_and_skips_double_start(monkeypatch, tmp_path: Path) -> None:
+    # A daemon started by a racing process between the first lookup and the lock
+    # must be reused, not double-started (which would fail with rc=4).
+    monkeypatch.setattr(idalib, "ensure_user_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(idalib, "idalib_open_lock_path", lambda db: tmp_path / "open.lock")
+    database = str(tmp_path / "fixture.i64")
+    instance = IdaLibInstance(
+        pid=1234,
+        socket_path=tmp_path / "s.sock",
+        registry_path=tmp_path / "r.json",
+        database_path=idalib.normalize_database_path(database),
+        started_at=None,
+        meta={},
+    )
+
+    finds = [None, instance]
+    monkeypatch.setattr(idalib, "_find_instance_for_database", lambda db: finds.pop(0))
+    monkeypatch.setattr(idalib, "_probe_instance", lambda inst, *, timeout: True)
+
+    def no_start(*args, **kwargs):
+        raise AssertionError("a second daemon must not be started under the lock")
+
+    monkeypatch.setattr(idalib, "_start_daemon_for_database", no_start)
+
+    found, already_open = idalib._ensure_instance_for_database(
+        database,
+        timeout=None,
+        run_auto_analysis=True,
+        start_if_missing=True,
+    )
+
+    assert found is instance
+    assert already_open is True
+    assert finds == []
 
 
 def test_idalib_daemon_startup_uses_readiness_pipe(monkeypatch, tmp_path: Path) -> None:
@@ -484,6 +764,46 @@ def test_idalib_daemon_startup_timeout_terminates_worker(monkeypatch, tmp_path: 
     assert proc.terminated is True
     assert proc.killed is False
     assert proc.wait_timeouts == [5.0]
+
+
+def test_idalib_daemon_startup_terminates_worker_on_keyboard_interrupt(monkeypatch, tmp_path: Path) -> None:
+    # Ctrl-C during the readiness wait (KeyboardInterrupt is a BaseException,
+    # not Exception) must still reap the spawned daemon so it does not linger
+    # holding the database lock.
+    class FakeProc:
+        pid = 1234
+
+        def __init__(self) -> None:
+            self.terminated = False
+            self.wait_timeouts: list[float] = []
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, *, timeout):
+            self.wait_timeouts.append(timeout)
+            return 1
+
+    proc = FakeProc()
+    database_path = str(tmp_path / "fixture.i64")
+
+    def fake_read_ready_payload(read_fd, *, timeout):
+        os.close(read_fd)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(idalib, "ensure_user_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(idalib.subprocess, "Popen", lambda *args, **kwargs: proc)
+    monkeypatch.setattr(idalib, "idalib_registry_path", lambda pid: tmp_path / f"idac-idalib-{pid}.json")
+    monkeypatch.setattr(idalib, "_read_ready_payload", fake_read_ready_payload)
+
+    with pytest.raises(KeyboardInterrupt):
+        idalib._start_daemon_for_database(
+            database_path,
+            startup_timeout=120.0,
+            run_auto_analysis=True,
+        )
+
+    assert proc.terminated is True
 
 
 def test_idalib_daemon_startup_reads_stderr_when_worker_exits_before_readiness(monkeypatch, tmp_path: Path) -> None:

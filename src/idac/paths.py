@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -23,11 +24,6 @@ def _env_path(name: str, default: Path) -> Path:
 
 def _ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def _ensure_parent(path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
@@ -184,6 +180,13 @@ def idalib_registry_paths() -> list[Path]:
     if not runtime.exists():
         return []
     return sorted(runtime.glob(f"{IDALIB_REGISTRY_PREFIX}-*.json"))
+
+
+def idalib_open_lock_path(database_path: str) -> Path:
+    """Return the per-database lock file that serializes concurrent opens."""
+
+    digest = hashlib.sha256(database_path.encode("utf-8")).hexdigest()[:16]
+    return _runtime_path(f"{IDALIB_REGISTRY_PREFIX}-open-{runtime_uid_token()}-{digest}.lock")
 
 
 def plugin_source_dir() -> Path:

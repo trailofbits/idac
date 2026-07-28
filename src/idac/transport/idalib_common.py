@@ -5,7 +5,7 @@ import os
 import sys
 from itertools import chain
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from idac.paths import hcli_configured_install_dir, ida_configured_install_dir
 
@@ -102,7 +102,7 @@ def bootstrap_idapro():
     except IDAPRO_IMPORT_ERRORS:
         pass
 
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
     for ida_dir in candidate_ida_dirs():
         python_dir = ida_dir / "idalib" / "python"
         if not python_dir.exists():

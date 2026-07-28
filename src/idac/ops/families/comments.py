@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import require_str
@@ -47,14 +48,14 @@ def _normalize_comment_text(text: str | None) -> str | None:
     return None if text in (None, "") else str(text)
 
 
-def _parse_scope(params: dict[str, object]) -> CommentScope:
+def _parse_scope(params: Mapping[str, Any]) -> CommentScope:
     scope = str(params.get("scope") or "line").strip().lower()
     if scope not in {"line", "function", "anterior", "posterior"}:
         raise IdaOperationError(f"unsupported comment scope: {scope}")
-    return scope  # type: ignore[return-value]
+    return scope
 
 
-def _parse_repeatable(params: dict[str, object], *, scope: CommentScope) -> bool:
+def _parse_repeatable(params: Mapping[str, Any], *, scope: CommentScope) -> bool:
     repeatable = bool(params.get("repeatable"))
     if repeatable and scope in {"anterior", "posterior"}:
         raise IdaOperationError("repeatable comments are only supported for line or function scope")
@@ -181,13 +182,13 @@ def _comment_view(context: OperationContext, request: CommentLookup | CommentCha
     return _read_comment(context.runtime, request)
 
 
-def _parse_lookup(params: dict[str, object]) -> CommentLookup:
+def _parse_lookup(params: Mapping[str, Any]) -> CommentLookup:
     identifier = require_str(params.get("address"), field="address")
     scope = _parse_scope(params)
     return CommentLookup(identifier=identifier, scope=scope, repeatable=_parse_repeatable(params, scope=scope))
 
 
-def _parse_change(params: dict[str, object]) -> CommentChange:
+def _parse_change(params: Mapping[str, Any]) -> CommentChange:
     request = _parse_lookup(params)
     return CommentChange(
         identifier=request.identifier,
@@ -233,7 +234,7 @@ def _restore_comment(
     )
 
 
-def comment_operations() -> tuple[OperationSpec[object, object], ...]:
+def comment_operations() -> tuple[OperationSpec[Any, Any], ...]:
     return (
         OperationSpec(
             name="comment_get",

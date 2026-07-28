@@ -26,6 +26,16 @@ uv sync
 uv run pytest -q
 ```
 
+The suite has two layers, split by the `requires_ida` marker:
+
+- `make test-unit` — no IDA required; runs in a few seconds.
+- `make test-integration` — talks to a real idalib daemon against the committed
+  fixture databases; needs a licensed local IDA install. These tests are
+  auto-skipped when no install is discovered.
+- `make coverage` — full suite with line coverage. Note that integration tests
+  execute the CLI in subprocesses, so their coverage is not attributed; judge
+  modules with dedicated `test_idalib_*` files by those tests, not the percentage.
+
 When changing the operation layer, start with targeted suites before broad runs:
 
 ```bash
@@ -66,7 +76,7 @@ For `type declare` internals:
 
 - keep `DeclarationChunk` as the internal representation through parse, diagnostics, and bisect flows
 - convert to plain dicts only at boundaries that actually need serialized output
-- prefer small helpers for optional bisect / trial-parse control flow instead of growing `op_type_declare` inline
+- prefer small helpers for optional bisect / trial-parse control flow instead of growing `_type_declare` inline
 
 For preview behavior:
 

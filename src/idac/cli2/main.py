@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Optional
+from typing import Any
 
 from ..output import OutputTooLargeError
 from ..transport import BackendError
@@ -92,10 +92,9 @@ def _print_artifact_notices(result: CommandResult, artifacts: list[dict[str, obj
             print(notice, file=sys.stderr)
 
 
-def main(argv: Optional[list[str]] = None, *, prog: str = "idac") -> int:
+def main(argv: list[str] | None = None, *, prog: str = "idac") -> int:
     parser = build_parser(prog=prog)
     args = parser.parse_args(argv)
-    args._raw_argv = list(argv) if argv is not None else sys.argv[1:]
     arg_map = vars(args)
     try:
         result = execute_parsed(args, root_parser=parser)
@@ -119,7 +118,7 @@ def main(argv: Optional[list[str]] = None, *, prog: str = "idac") -> int:
                 _print_result_stderr(result)
             return result.exit_code
 
-        emit_kwargs = {}
+        emit_kwargs: dict[str, Any] = {}
         if args.command == "docs" and not arg_map.get("all", False):
             emit_kwargs["inline_limit"] = DOCS_INLINE_CHAR_LIMIT
         artifacts = emit_result(

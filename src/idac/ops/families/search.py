@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.matching import pattern_from_params, text_matches
 from ..helpers.params import optional_param_int, optional_str, require_str
-from ..models import payload_from_model
 from ..runtime import IdaOperationError, IdaRuntime, SegmentRange
 
 MEBIBYTE = 1024 * 1024
@@ -99,15 +100,15 @@ class ImportModule:
     entries: tuple[ImportEntry, ...]
 
 
-def _require_identifier(params: dict[str, object], *, key: str = "identifier") -> str:
+def _require_identifier(params: Mapping[str, Any], *, key: str = "identifier") -> str:
     return require_str(params.get(key), field="address or identifier")
 
 
-def _require_segment_selector(params: dict[str, object]) -> str:
+def _require_segment_selector(params: Mapping[str, Any]) -> str:
     return require_str(params.get("segment"), field="segment selector")
 
 
-def _parse_search_bytes(params: dict[str, object]) -> SearchBytesRequest:
+def _parse_search_bytes(params: Mapping[str, Any]) -> SearchBytesRequest:
     pattern = require_str(params.get("pattern"), field="byte pattern")
     segment = _require_segment_selector(params)
     start = optional_str(params.get("start"))
@@ -122,7 +123,7 @@ def _match_row(address: int, function: str | None) -> SearchMatch | SearchMatchI
     return SearchMatch(address=hex(address))
 
 
-def _bin_search_address(result: object) -> int:
+def _bin_search_address(result: Any) -> int:
     if isinstance(result, tuple):
         return int(result[0])
     return int(result)
@@ -203,7 +204,7 @@ def _search_bytes(context: OperationContext, request: SearchBytesRequest) -> Sea
     )
 
 
-def _parse_xrefs(params: dict[str, object]) -> XrefsRequest:
+def _parse_xrefs(params: Mapping[str, Any]) -> XrefsRequest:
     return XrefsRequest(identifier=_require_identifier(params))
 
 
@@ -239,7 +240,7 @@ def _xrefs(
     return tuple(rows)
 
 
-def _parse_strings(params: dict[str, object]) -> StringsRequest:
+def _parse_strings(params: Mapping[str, Any]) -> StringsRequest:
     pattern, glob, regex, ignore_case = pattern_from_params(params)
     segment = _require_segment_selector(params)
     start = optional_str(params.get("start"))
@@ -435,7 +436,7 @@ def _strings(context: OperationContext, request: StringsRequest) -> tuple[String
     )
 
 
-def _parse_imports(_params: dict[str, object]) -> None:
+def _parse_imports(_params: Mapping[str, Any]) -> None:
     return None
 
 
@@ -462,7 +463,7 @@ def _imports(context: OperationContext, request: None) -> tuple[ImportModule, ..
     return tuple(modules)
 
 
-def search_operations() -> tuple[OperationSpec[object, object], ...]:
+def search_operations() -> tuple[OperationSpec[Any, Any], ...]:
     return (
         OperationSpec(
             name="search_bytes",
@@ -487,11 +488,6 @@ def search_operations() -> tuple[OperationSpec[object, object], ...]:
     )
 
 
-def op_strings(runtime: IdaRuntime, params: dict[str, object]) -> list[dict[str, object]]:
-    request = _parse_strings(params)
-    return payload_from_model(_strings(OperationContext(runtime=runtime), request))
-
-
 __all__ = [
     "ImportEntry",
     "ImportModule",
@@ -504,6 +500,5 @@ __all__ = [
     "StringsRequest",
     "XrefRow",
     "XrefsRequest",
-    "op_strings",
     "search_operations",
 ]

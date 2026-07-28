@@ -409,6 +409,31 @@ def failure_lines(payload: Any) -> list[str]:
     return lines
 
 
+def _batch_payload(rows: list[dict[str, Any]], *, batch_path: Path) -> dict[str, Any]:
+    return {
+        "ok": all(row["exit_code"] == 0 for row in rows),
+        "batch_file": str(batch_path),
+        "commands_total": len(rows),
+        "commands_succeeded": sum(1 for row in rows if row["exit_code"] == 0),
+        "commands_failed": sum(1 for row in rows if row["exit_code"] != 0),
+        "results": rows,
+    }
+
+
+def _write_batch_rows(
+    rows: list[dict[str, Any]],
+    *,
+    batch_path: Path,
+    out_path: Path | None,
+) -> list[dict[str, Any]]:
+    if out_path is None:
+        return []
+    fmt = json_or_jsonl_from_path(out_path, default="json")
+    value = rows if fmt == "jsonl" else _batch_payload(rows, batch_path=batch_path)
+    output = write_output_result(value, fmt=fmt, out_path=Path(out_path), stem="batch")
+    return [] if output.artifact is None else [output.artifact]
+
+
 def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> CommandResult:
     rows: list[dict[str, Any]] = []
     batch_path = Path(args.batch_file)
@@ -434,6 +459,7 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
     _reject_mutating_batch_without_out(root_parser=root_parser, command_lines=command_lines, out_path=args.out)
     for line_number, stripped in command_lines:
         started = time.perf_counter()
+        rows_before = len(rows)
         try:
             try:
                 argv = _argv_from_batch_line(stripped)
@@ -442,7 +468,6 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
             if not argv:
                 raise CliUserError("empty command")
             parsed = _parse_batch_args(root_parser, argv)
-            parsed._raw_argv = list(argv)
             parsed_map = vars(parsed)
             if parsed_map.get("_hidden_command", False) or not parsed_map.get("allow_batch", True):
                 raise CliUserError("command is not available in batch mode")
@@ -451,20 +476,28 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
             parsed._relative_path_base_dir = batch_dir
             parsed._batch_mode = True
             result = _execute_batch_args(parsed, root_parser=root_parser)
-            artifacts = _serialize_child_if_needed(result, parsed)
-            rows.append(
-                _line_record(
-                    line=line_number,
-                    command=stripped,
-                    status="ok" if result.exit_code == 0 else "failed",
-                    exit_code=result.exit_code,
-                    stderr=_render_child_failure(result) if result.exit_code != 0 else None,
-                    result=result.value,
-                    timing_ms=(time.perf_counter() - started) * 1000.0,
-                    artifacts=artifacts,
-                )
+            record = _line_record(
+                line=line_number,
+                command=stripped,
+                status="ok" if result.exit_code == 0 else "failed",
+                exit_code=result.exit_code,
+                stderr=_render_child_failure(result) if result.exit_code != 0 else None,
+                result=result.value,
+                timing_ms=(time.perf_counter() - started) * 1000.0,
+                artifacts=list(result.artifacts),
             )
-            if result.exit_code != 0 and args.fail_fast:
+            # Record the row before serializing the child's own --out file, so a
+            # write failure there cannot erase the fact that the command (which
+            # may have mutated the database) already ran.
+            rows.append(record)
+            try:
+                record["artifacts"] = _serialize_child_if_needed(result, parsed)
+            except OSError as exc:
+                record["status"] = "failed"
+                if record["exit_code"] == 0:
+                    record["exit_code"] = 1
+                record["stderr"] = f"command ran but writing its --out file failed: {exc}"
+            if record["exit_code"] != 0 and args.fail_fast:
                 break
         except BatchParseError as exc:
             rows.append(
@@ -492,24 +525,19 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
             )
             if args.fail_fast:
                 break
+        finally:
+            # Checkpoint after every line so an interrupted mutating batch still
+            # leaves an ordered record of which commands ran. Best-effort: a
+            # write failure here must not mask an in-flight exception (e.g.
+            # KeyboardInterrupt) or abort the remaining batch. The authoritative
+            # write after the loop still surfaces a persistent out-file error.
+            if len(rows) != rows_before:
+                with contextlib.suppress(OSError):
+                    _write_batch_rows(rows, batch_path=batch_path, out_path=args.out)
 
-    payload = {
-        "ok": all(row["exit_code"] == 0 for row in rows),
-        "batch_file": str(batch_path),
-        "commands_total": len(rows),
-        "commands_succeeded": sum(1 for row in rows if row["exit_code"] == 0),
-        "commands_failed": sum(1 for row in rows if row["exit_code"] != 0),
-        "results": rows,
-    }
+    payload = _batch_payload(rows, batch_path=batch_path)
     exit_code = 0 if payload["ok"] else 1
-    fmt = json_or_jsonl_from_path(args.out, default="json")
-    artifacts: list[dict[str, Any]] = []
-    if args.out is not None:
-        path = Path(args.out)
-        value = rows if fmt == "jsonl" else payload
-        output = write_output_result(value, fmt=fmt, out_path=path, stem="batch")
-        if output.artifact is not None:
-            artifacts.append(output.artifact)
+    artifacts = _write_batch_rows(rows, batch_path=batch_path, out_path=args.out)
     return CommandResult(
         render_op="batch",
         value=payload,

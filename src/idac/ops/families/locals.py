@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import contextlib
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import optional_param_int, parse_int_text, require_str
-from ..models import payload_from_model
 from ..preview import PreviewSpec
 from ..runtime import (
     IdaOperationError,
@@ -141,11 +141,11 @@ _LOCAL_SELECTOR_GUIDANCE = (
 )
 
 
-def _require_identifier(params: dict[str, object]) -> str:
+def _require_identifier(params: Mapping[str, Any]) -> str:
     return require_str(params.get("identifier"), field="address or identifier")
 
 
-def _parse_local_selector(params: dict[str, object], *, name_key: str) -> LocalSelector:
+def _parse_local_selector(params: Mapping[str, Any], *, name_key: str) -> LocalSelector:
     name = str(params.get(name_key) or "").strip() or None
     local_id = str(params.get("local_id") or "").strip() or None
     index = optional_param_int(params, "index", label="local index", minimum=0)
@@ -157,11 +157,11 @@ def _parse_local_selector(params: dict[str, object], *, name_key: str) -> LocalS
     return LocalSelector(name=name, local_id=local_id, index=index)
 
 
-def _parse_local_list(params: dict[str, object]) -> LocalListRequest:
+def _parse_local_list(params: Mapping[str, Any]) -> LocalListRequest:
     return LocalListRequest(identifier=_require_identifier(params))
 
 
-def _parse_local_rename(params: dict[str, object]) -> LocalRenameRequest:
+def _parse_local_rename(params: Mapping[str, Any]) -> LocalRenameRequest:
     new_name = str(params.get("new_name") or "")
     if not new_name:
         raise IdaOperationError("new local variable name is required")
@@ -172,7 +172,7 @@ def _parse_local_rename(params: dict[str, object]) -> LocalRenameRequest:
     )
 
 
-def _parse_local_retype(params: dict[str, object]) -> LocalRetypeRequest:
+def _parse_local_retype(params: Mapping[str, Any]) -> LocalRetypeRequest:
     decl = str(params.get("decl") or "")
     if not decl:
         raise IdaOperationError("local variable declaration is required")
@@ -183,7 +183,7 @@ def _parse_local_retype(params: dict[str, object]) -> LocalRetypeRequest:
     )
 
 
-def _parse_local_update(params: dict[str, object]) -> LocalUpdateRequest:
+def _parse_local_update(params: Mapping[str, Any]) -> LocalUpdateRequest:
     new_name = str(params.get("new_name") or "").strip() or None
     decl = str(params.get("decl") or "").strip() or None
     if new_name is None and decl is None:
@@ -196,7 +196,7 @@ def _parse_local_update(params: dict[str, object]) -> LocalUpdateRequest:
     )
 
 
-def _local_plan_selector(raw: dict[str, Any], *, index: int) -> LocalSelector:
+def _local_plan_selector(raw: Mapping[Any, Any], *, index: int) -> LocalSelector:
     selector_value = raw.get("selector")
     selector_map: dict[str, Any] = selector_value if isinstance(selector_value, dict) else {}
     name = (
@@ -227,7 +227,7 @@ def _local_plan_selector(raw: dict[str, Any], *, index: int) -> LocalSelector:
     return LocalSelector(name=name, local_id=local_id, index=local_index)
 
 
-def _parse_local_apply_plan(params: dict[str, object]) -> LocalApplyPlanRequest:
+def _parse_local_apply_plan(params: Mapping[str, Any]) -> LocalApplyPlanRequest:
     raw_items = params.get("items")
     if not isinstance(raw_items, list):
         raise IdaOperationError("local apply requires a JSON list of item objects")
@@ -514,18 +514,6 @@ def _available_locals_suffix(runtime: IdaRuntime, func_ea: int) -> str:
     return suffix
 
 
-def _resolve_lvar_selection(
-    runtime: IdaRuntime,
-    func_ea: int,
-    params: dict[str, object],
-    *,
-    name_key: str,
-) -> tuple[str, Any]:
-    selector = _parse_local_selector(params, name_key=name_key)
-    selected = _select_local(runtime, func_ea, selector)
-    return selected.name, selected.locator
-
-
 def _local_saved_info(runtime: IdaRuntime, locator):
     info = runtime.require_hexrays().lvar_saved_info_t()
     info.ll = locator
@@ -762,7 +750,7 @@ def _local_apply_plan(context: OperationContext, request: LocalApplyPlanRequest)
     )
 
 
-def local_operations() -> tuple[OperationSpec[object, object], ...]:
+def local_operations() -> tuple[OperationSpec[Any, Any], ...]:
     return (
         OperationSpec(
             name="local_list",
@@ -820,21 +808,6 @@ def local_operations() -> tuple[OperationSpec[object, object], ...]:
     )
 
 
-def op_local_list(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_local_list(params)
-    return payload_from_model(_local_list(OperationContext(runtime=runtime), request))
-
-
-def op_local_rename(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_local_rename(params)
-    return payload_from_model(_local_rename(OperationContext(runtime=runtime), request))
-
-
-def op_local_update(runtime: IdaRuntime, params: dict[str, object]) -> dict[str, object]:
-    request = _parse_local_update(params)
-    return payload_from_model(_local_update(OperationContext(runtime=runtime), request))
-
-
 __all__ = [
     "LocalApplyPlanRequest",
     "LocalApplyPlanResult",
@@ -847,7 +820,4 @@ __all__ = [
     "LocalSelector",
     "LocalUpdateRequest",
     "local_operations",
-    "op_local_list",
-    "op_local_rename",
-    "op_local_update",
 ]

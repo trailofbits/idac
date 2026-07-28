@@ -35,7 +35,7 @@ def _children(parser: argparse.ArgumentParser) -> list[tuple[argparse.ArgumentPa
 def _append_child(parent: argparse.ArgumentParser, child: argparse.ArgumentParser, *, hidden: bool) -> None:
     children = _children(parent)
     children.append((child, hidden))
-    parent._idac_children = children
+    parent._idac_children = children  # ty: ignore[unresolved-attribute]  # dynamic attr on stdlib parser
 
 
 def render_full_help(parser: argparse.ArgumentParser, *, include_hidden: bool = False) -> str:
@@ -122,6 +122,35 @@ def add_command(
     )
     add_full_help_option(parser)
     _append_child(parent_parser, parser, hidden=hidden)
+    return parser
+
+
+def add_standard_command(
+    parent_parser: argparse.ArgumentParser,
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    name: str,
+    *,
+    help_text: str,
+    run: Callable[[argparse.Namespace], object],
+    mutating: bool = False,
+    default_format: str = "text",
+    description: str | None = None,
+    hidden: bool = False,
+    require_timeout: bool = False,
+    timeout_requirement_label: str | None = None,
+    require_out: bool = False,
+) -> argparse.ArgumentParser:
+    """add_command + context/output options + the standard defaults block."""
+    parser = add_command(parent_parser, subparsers, name, help_text=help_text, description=description, hidden=hidden)
+    add_context_options(parser, require_timeout=require_timeout, timeout_requirement_label=timeout_requirement_label)
+    add_output_options(parser, default_format=default_format, require_out=require_out)
+    parser.set_defaults(
+        run=run,
+        context_policy="standard",
+        allow_batch=True,
+        allow_preview=True,
+        _mutating_command=mutating,
+    )
     return parser
 
 

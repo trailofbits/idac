@@ -47,14 +47,14 @@ def _install_path(source: Path, dest: Path, *, mode: str, force: bool, is_dir: b
 
 def _rename(args: argparse.Namespace) -> CommandResult:
     params = {"identifier": args.identifier, "new_name": args.new_name}
-    return send_op(args, op="name_set", params=params, render_op="name_set")
+    return send_op(args, op="name_set", params=params)
 
 
 def _reanalyze(args: argparse.Namespace) -> CommandResult:
     params: dict[str, object] = {"identifier": args.identifier}
     if args.end:
         params["end"] = args.end
-    return send_op(args, op="reanalyze", params=params, render_op="reanalyze")
+    return send_op(args, op="reanalyze", params=params)
 
 
 def _plugin_install(args: argparse.Namespace) -> CommandResult:

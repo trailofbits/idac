@@ -15,9 +15,7 @@ def payload_from_model(value: Any) -> JsonValue:
             )
             for field in fields(value)
         }
-    if isinstance(value, tuple):
-        return [payload_from_model(item) for item in value]
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [payload_from_model(item) for item in value]
     if isinstance(value, dict):
         return {str(key): payload_from_model(item) for key, item in value.items()}

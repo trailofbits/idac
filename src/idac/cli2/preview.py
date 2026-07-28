@@ -62,7 +62,6 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser):
     if not tokens:
         raise CliUserError("preview requires a command to wrap")
     parsed = root_parser.parse_args(tokens)
-    parsed._raw_argv = list(tokens)
     parsed_map = vars(parsed)
     if parsed_map.get("_hidden_command", False) or not parsed_map.get("allow_preview", True):
         raise CliUserError("command is not available in preview mode")

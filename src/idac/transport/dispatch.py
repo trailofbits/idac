@@ -116,15 +116,16 @@ class SerializedDispatcher:
                 raise DispatcherBusyError(
                     f"{self._name} dispatcher queue is full ({self._pending}/{self._max_pending})"
                 )
-            queue_depth_at_enqueue = self._pending
+            call = DispatchCall(
+                label=label,
+                fn=fn,
+                queue_depth_at_enqueue=self._pending,
+            )
             self._pending += 1
-
-        call = DispatchCall(
-            label=label,
-            fn=fn,
-            queue_depth_at_enqueue=queue_depth_at_enqueue,
-        )
-        self._queue.put(call)
+            # Enqueue while holding the lock: stop() also enqueues its shutdown
+            # sentinel under the lock, so an accepted call can never land behind
+            # the sentinel and leave the caller waiting forever.
+            self._queue.put(call)
         call.done.wait()
         if call.error is not None:
             raise call.error

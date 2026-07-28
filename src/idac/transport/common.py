@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,26 @@ def pid_is_live(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+
+def pid_command_line(pid: int) -> str | None:
+    """Return the process command line for ``pid`` when it can be queried safely."""
+
+    try:
+        proc = subprocess.run(
+            ["ps", "-o", "args=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    if not lines:
+        return None
+    return lines[0]
 
 
 def normalize_timeout(raw_timeout: float | None) -> float | None:

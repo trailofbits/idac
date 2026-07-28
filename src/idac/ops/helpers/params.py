@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from ..runtime import IdaOperationError
@@ -24,7 +25,7 @@ def parse_int_text(
 
 
 def param_int(
-    params: dict[str, Any],
+    params: Mapping[str, Any],
     key: str,
     *,
     label: str | None = None,
@@ -38,7 +39,7 @@ def param_int(
 
 
 def optional_param_int(
-    params: dict[str, Any],
+    params: Mapping[str, Any],
     key: str,
     *,
     label: str | None = None,

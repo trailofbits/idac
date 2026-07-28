@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from fnmatch import fnmatchcase
 from typing import Any
 
 
-def pattern_from_params(params: dict[str, Any]) -> tuple[str, bool, bool, bool]:
+def pattern_from_params(params: Mapping[str, Any]) -> tuple[str, bool, bool, bool]:
     pattern = params.get("pattern")
     if pattern not in (None, ""):
         return str(pattern), bool(params.get("glob")), bool(params.get("regex")), bool(params.get("ignore_case"))

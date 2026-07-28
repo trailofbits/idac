@@ -4,7 +4,7 @@ from typing import get_args
 
 import pytest
 
-from idac.ops import OperationContext
+from idac.ops import OperationContext, payload_from_model
 from idac.ops.families import (
     bookmarks,
     classes,
@@ -18,7 +18,6 @@ from idac.ops.families import (
     type_declare,
 )
 from idac.ops.families import named_types as types
-from idac.ops.families.named_types import op_struct_field_set
 from idac.ops.families.type_declare import _split_declarations
 from idac.ops.helpers import matching
 from idac.ops.manifest import OPERATION_SPEC_MAP, SUPPORTED_OPERATIONS, OperationName
@@ -33,6 +32,12 @@ from idac.ops.runtime import (
 )
 
 
+def _run_op(name: OperationName, runtime, params: dict[str, object]):
+    """Parse and run an operation through its spec, as production dispatch does."""
+    spec = OPERATION_SPEC_MAP[name]
+    return payload_from_model(spec.run(OperationContext(runtime=runtime), spec.parse(params)))
+
+
 class _DummyRuntime:
     def mod(self, _name: str):
         return object()
@@ -43,7 +48,8 @@ class _DummyRuntime:
 
 def test_struct_field_set_rejects_negative_offsets() -> None:
     with pytest.raises(IdaOperationError, match="greater than or equal to 0"):
-        op_struct_field_set(
+        _run_op(
+            "struct_field_set",
             _DummyRuntime(),
             {
                 "struct_name": "Player",
@@ -187,7 +193,7 @@ def test_op_decompile_passes_no_cache_flag_when_requested() -> None:
 
             return FakeIdaLines()
 
-    payload = functions.op_decompile(FakeRuntime(), {"identifier": "main", "no_cache": True})
+    payload = _run_op("decompile", FakeRuntime(), {"identifier": "main", "no_cache": True})
 
     assert payload == {"text": "int main(void)"}
     assert calls == [(0x401000, 0x2)]
@@ -778,7 +784,7 @@ def test_op_function_frame_uses_get_func_frame_not_func_frame_object() -> None:
 
         @property
         def frame_object(self) -> object:
-            raise AssertionError("reads.op_function_frame should not use func.frame_object")
+            raise AssertionError("function_frame should not use func.frame_object")
 
     class FakeRuntime(IdaRuntime):
         def resolve_function(self, identifier: str) -> FakeFunc:
@@ -801,7 +807,7 @@ def test_op_function_frame_uses_get_func_frame_not_func_frame_object() -> None:
             assert multi is False
             return "int"
 
-    payload = functions.op_function_frame(FakeRuntime(), {"identifier": "main"})
+    payload = _run_op("function_frame", FakeRuntime(), {"identifier": "main"})
 
     assert payload["frame_size"] == 24
     assert payload["members"] == [
@@ -854,7 +860,8 @@ def test_local_rename_uses_direct_hexrays_rename_for_name_selector(monkeypatch) 
         ),
     )
 
-    payload = locals.op_local_rename(
+    payload = _run_op(
+        "local_rename",
         FakeRuntime(),
         {"identifier": "main", "old_name": "v4", "new_name": "sum_value"},
     )
@@ -1183,9 +1190,9 @@ def test_type_declare_diagnostics_report_cppobj_and_forward_decl_hints() -> None
 
 
 def test_type_declare_detects_forward_declared_opaque_by_value_member() -> None:
-    chunks = type_declare._split_declarations(
+    chunks = type_declare._parse_declaration_chunks(
         "struct Missing; typedef struct wrapper_bad { struct Missing value; } wrapper_bad;"
-    )
+    )[0]
 
     blocking = type_declare._opaque_by_value_members(chunks[1], earlier_chunks=chunks[:1])
 
@@ -1193,11 +1200,11 @@ def test_type_declare_detects_forward_declared_opaque_by_value_member() -> None:
 
 
 def test_type_declare_bisect_isolates_first_failing_declaration() -> None:
-    chunks = type_declare._split_declarations(
+    chunks = type_declare._parse_declaration_chunks(
         "typedef struct good_one { int value; } good_one;"
         "struct Missing;"
         "typedef struct wrapper_bad { struct Missing value; } wrapper_bad;"
-    )
+    )[0]
 
     class FakeUndo:
         def create_undo_point(self, **_kwargs) -> bool:
@@ -1528,7 +1535,7 @@ def test_type_declare_clang_bisect_returns_structured_unavailable_result() -> No
         def list_named_types() -> list[dict[str, object]]:
             return [{"name": "Existing", "decl": "struct Existing;"}]
 
-    chunks = type_declare._coerce_chunks(type_declare._split_declarations("struct Widget { int value; };"))
+    chunks = type_declare._parse_declaration_chunks("struct Widget { int value; };")[0]
     errors, before, after, bisect = type_declare._apply_type_declarations_with_optional_bisect(
         FakeRuntime(),
         "struct Widget { int value; };",
@@ -1585,7 +1592,8 @@ def test_local_rename_reports_success_when_readback_fails(monkeypatch) -> None:
         IdaOperationError,
         match="failed to read back locals: decompiler refresh failed",
     ):
-        locals.op_local_rename(
+        _run_op(
+            "local_rename",
             FakeRuntime(),
             {"identifier": "main", "old_name": "v4", "new_name": "sum_value"},
         )
@@ -1596,9 +1604,7 @@ def test_local_name_from_selector_rejects_multiple_stable_selector_kinds(monkeyp
         IdaOperationError,
         match="--local-id and --index are mutually exclusive",
     ):
-        locals._resolve_lvar_selection(
-            object(),
-            0x401000,
+        locals._parse_local_selector(
             {"index": 0, "local_id": "stack(16)@0x401000"},
             name_key="old_name",
         )
@@ -1635,16 +1641,15 @@ def test_resolve_lvar_selection_uses_stable_locator_for_index_selector() -> None
         def require_hexrays(self) -> FakeHexrays:
             return FakeHexrays()
 
-    name, locator = locals._resolve_lvar_selection(
+    selected = locals._select_local(
         FakeRuntime(),
         0x401000,
-        {"index": 0},
-        name_key="old_name",
+        locals._parse_local_selector({"index": 0}, name_key="old_name"),
     )
 
-    assert name == "v4"
-    assert locator.defea == 0x401000
-    assert isinstance(locator.location, FakeLocation)
+    assert selected.name == "v4"
+    assert selected.locator.defea == 0x401000
+    assert isinstance(selected.locator.location, FakeLocation)
 
 
 def test_resolve_lvar_selection_allows_name_hint_with_stable_selector() -> None:
@@ -1678,15 +1683,14 @@ def test_resolve_lvar_selection_allows_name_hint_with_stable_selector() -> None:
         def require_hexrays(self) -> FakeHexrays:
             return FakeHexrays()
 
-    name, locator = locals._resolve_lvar_selection(
+    selected = locals._select_local(
         FakeRuntime(),
         0x401000,
-        {"old_name": "v6", "index": 0},
-        name_key="old_name",
+        locals._parse_local_selector({"old_name": "v6", "index": 0}, name_key="old_name"),
     )
 
-    assert name == "v4"
-    assert locator.defea == 0x401000
+    assert selected.name == "v4"
+    assert selected.locator.defea == 0x401000
 
 
 def test_resolve_lvar_selection_accepts_local_id_text() -> None:
@@ -1724,15 +1728,14 @@ def test_resolve_lvar_selection_accepts_local_id_text() -> None:
         def require_hexrays(self) -> FakeHexrays:
             return FakeHexrays()
 
-    name, locator = locals._resolve_lvar_selection(
+    selected = locals._select_local(
         FakeRuntime(),
         0x401000,
-        {"local_id": "stack(-16)@0X401000"},
-        name_key="old_name",
+        locals._parse_local_selector({"local_id": "stack(-16)@0X401000"}, name_key="old_name"),
     )
 
-    assert name == "v4"
-    assert locator.defea == 0x401000
+    assert selected.name == "v4"
+    assert selected.locator.defea == 0x401000
 
 
 def test_local_update_allows_unnamed_local_selected_by_stable_selector(monkeypatch) -> None:
@@ -1787,7 +1790,8 @@ def test_local_update_allows_unnamed_local_selected_by_stable_selector(monkeypat
         lambda runtime, func_ea: locals.LocalListResult(function="main", address="0x401000", locals=()),
     )
 
-    payload = locals.op_local_update(
+    payload = _run_op(
+        "local_update",
         FakeRuntime(),
         {"identifier": "main", "index": 0, "new_name": "recovered_name"},
     )
@@ -1868,7 +1872,8 @@ def test_proto_set_parses_silently_and_applies_tinfo() -> None:
         def find_named_type(self, name: str):
             return object()
 
-    payload = prototypes.op_proto_set(
+    payload = _run_op(
+        "proto_set",
         FakeRuntime(),
         {"identifier": "target", "decl": "void __fastcall target(void)", "propagate_callers": False},
     )
@@ -1942,7 +1947,8 @@ def test_proto_set_retries_with_relaxed_namespace_parse() -> None:
         def find_named_type(self, name: str):
             return object()
 
-    payload = prototypes.op_proto_set(
+    payload = _run_op(
+        "proto_set",
         FakeRuntime(),
         {
             "identifier": "target",
@@ -2112,7 +2118,8 @@ def test_proto_set_optionally_propagates_to_callers() -> None:
         def find_named_type(self, name: str):
             return object()
 
-    payload = prototypes.op_proto_set(
+    payload = _run_op(
+        "proto_set",
         FakeRuntime(),
         {
             "identifier": "target",
@@ -2171,7 +2178,8 @@ def test_proto_set_reports_unknown_type_name() -> None:
             return None if name == "eValueType" else object()
 
     with pytest.raises(IdaOperationError, match="unknown type\\(s\\): eValueType"):
-        prototypes.op_proto_set(
+        _run_op(
+            "proto_set",
             FakeRuntime(),
             {"identifier": "target", "decl": "void __fastcall target(eValueType value_type)"},
         )
@@ -2223,7 +2231,8 @@ def test_proto_set_reports_generic_parse_failure() -> None:
             return object()
 
     with pytest.raises(IdaOperationError, match="parser limitations"):
-        prototypes.op_proto_set(
+        _run_op(
+            "proto_set",
             FakeRuntime(),
             {"identifier": "target", "decl": "void __fastcall target(ValueType value)"},
         )
@@ -2286,7 +2295,8 @@ def test_proto_set_reports_apply_failure_after_successful_parse() -> None:
             return object()
 
     with pytest.raises(IdaOperationError, match="apply_tinfo failed"):
-        prototypes.op_proto_set(
+        _run_op(
+            "proto_set",
             FakeRuntime(),
             {"identifier": "target", "decl": "void __fastcall target(int value)"},
         )
@@ -2342,7 +2352,7 @@ def test_class_hierarchy_explains_non_class_materialized_type() -> None:
             ]
 
     with pytest.raises(IdaOperationError) as excinfo:
-        classes.op_class_hierarchy(FakeRuntime(), {"name": "CMessaging"})
+        _run_op("class_hierarchy", FakeRuntime(), {"name": "CMessaging"})
     message = str(excinfo.value)
     assert "exists as a struct, but is not class-materialized" in message
     assert "type class candidates --query CMessaging" in message
@@ -2430,7 +2440,7 @@ def test_class_vtable_runtime_fallback_uses_requested_alias_when_type_name_missi
         },
     )
 
-    payload = classes.op_class_vtable(runtime, {"name": "Alias", "runtime": True})
+    payload = _run_op("class_vtable", runtime, {"name": "Alias", "runtime": True})
 
     assert looked_up_names == ["Alias"]
     assert payload["runtime_vtable"] == {"identifier": "0x402000", "slot_limit": 64}
@@ -2456,7 +2466,7 @@ def test_class_show_preserves_case_sensitive_name_lookup(monkeypatch) -> None:
 
     monkeypatch.setattr(classes, "_flatten_class_fields", lambda runtime, resolved_tif, derived_only: [])
 
-    payload = classes.op_class_show(FakeRuntime(), {"name": "MiXeDClass"})
+    payload = _run_op("class_show", FakeRuntime(), {"name": "MiXeDClass"})
 
     assert payload["name"] == "MiXeDClass"
     assert payload["decl"] == "struct MiXeDClass;"
@@ -2485,7 +2495,7 @@ def test_type_show_normalizes_unknown_size_to_none() -> None:
         def tinfo_members(self, tif: object) -> list[dict[str, object]]:
             return []
 
-    payload = types.op_type_show(FakeRuntime(), {"name": "OpaqueThing"})
+    payload = _run_op("type_show", FakeRuntime(), {"name": "OpaqueThing"})
 
     assert payload["size"] is None
     assert payload["size_known"] is False
@@ -2535,7 +2545,8 @@ def test_enum_member_rename_reports_success_when_readback_fails(monkeypatch) -> 
         IdaOperationError,
         match="persisted named type `Color` but failed to read it back: enum refresh failed",
     ):
-        types.op_enum_member_rename(
+        _run_op(
+            "enum_member_rename",
             FakeRuntime(),
             {"enum_name": "Color", "member_name": "RED", "new_name": "CRIMSON"},
         )
@@ -2562,6 +2573,6 @@ def test_first_free_bookmark_slot_reports_full_range() -> None:
             comment=None,
         )
         with pytest.raises(IdaOperationError, match=r"no free bookmark slots remain \(0\.\.2\)"):
-            bookmarks._first_free_bookmark_slot(FakeRuntime())
+            bookmarks._first_free_slot(FakeRuntime())
     finally:
         bookmarks._bookmark_state = original  # type: ignore[assignment]

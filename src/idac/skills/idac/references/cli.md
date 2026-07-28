@@ -55,6 +55,7 @@ idac function prototype check "sub_08041337" --decl-file "sub_08041337_proto.h" 
 
 `xrefs` is a top-level command; there is no `function xrefs` command.
 For broad function discovery, prefer `function list "name1|name2" --regex -i` so IDA filters before rendering. Add `--demangle` when the filter should match demangled display names. Avoid producing a full function list just to pipe it into `rg`; add `--out <path>` if the filtered result is still too large for inline output.
+`search strings` and `search bytes` require both `--timeout` and `--segment`. On dyld shared caches, `search strings` only allows `--scan` with explicit `--start` / `--end` bounds up to 16 MiB.
 
 ## Preview
 
@@ -66,8 +67,6 @@ idac preview -o "/tmp/preview.json" \
   function prototype set "sub_08042010" --decl "long long __cdecl sub_08042010(long long lhs, long long rhs)"
 ```
 
-Use `--propagate-callers` when you also want to apply the new callee type at matching caller call sites.
-
 Read-only commands under `preview` are treated as no-op previews with identical `before` and `after` payloads.
 
 ## Batch
@@ -77,46 +76,31 @@ It allows `preview ...` lines, but commands that are not batch-safe are rejected
 If a batch contains persistent mutating commands, `batch --out` is required so the ordered result log is preserved before any changes run.
 
 ```bash
-idac batch "recovery.idac" -o "/tmp/recovery.json"
-idac batch "recovery.idac" --lint -o "/tmp/recovery.lint.json"
+idac batch "recovery.idac" --out "/tmp/recovery.json"
+idac batch "recovery.idac" --lint --out "/tmp/recovery.lint.json"
 ```
 
-Batch files may include blank lines and `#` comments.
-
-Example batch file:
+Batch files may include blank lines and `#` comments. Example:
 
 ```text
 # recovery.idac
 type check --decl-file "recovered_types.h"
 type declare --replace --decl-file "recovered_types.h"
-type declare --clang --decl-file "recovered_templates.hpp"
-function prototype check "sub_08041337" --decl-file "sub_08041337_proto.h"
 function prototype set "sub_08041337" --decl-file "sub_08041337_proto.h"
 misc reanalyze "sub_08041337"
-function locals update "sub_08041337" --local-id "stack(16)@0x100000460" --rename "value_maybe" --decl-file "local_v4.h"
 function locals rename "sub_08041337" --index 6 --new-name "entry_count"
-function locals retype "sub_08041337" --index 7 --type "unsigned int"
-function locals retype "sub_08041337" --index 8 --decl-file "local_v8.h"
-function locals apply "sub_08041337" --json-file "locals-plan.json"
-preview function prototype set "sub_08041337" --decl-file "sub_08041337_proto.h"
 ```
 
-Keep setup-only `misc` commands such as `misc plugin install` and `misc skill install` outside saved batch files.
-`misc reanalyze` is batch-safe and should be placed between type/prototype mutations and local cleanup when the batch is a full recovery pass.
-`search strings` and `search bytes` require both `--timeout` and `--segment`.
-On dyld shared caches, `search strings` only allows `--scan` with explicit `--start` / `--end` bounds up to 16 MiB.
-For `function locals retype`, `--type` is shorthand for simple type text. Use `--decl` or `--decl-file` when you need a full declaration, such as arrays or function pointers.
+For a full recovery-pass example and the batch authoring rules, read [workflows.md](workflows.md#batch).
 
 ## Misc commands
 
 These setup, maintenance, and utility commands live under `misc`:
 
-- `misc rename`
-- `misc reanalyze`
-- `misc plugin install`
-- `misc skill install`
-
-Some `misc` commands are intentionally unavailable in `preview` or `batch`.
+- `misc rename` — rename a function or global symbol. Not available in `batch` or `preview`; commit symbol renames one-off.
+- `misc reanalyze` — re-run IDA analysis on a function or range. Batch-safe; place it between type/prototype mutations and local cleanup.
+- `misc plugin install` — install the GUI bridge plugin; `--force` replaces an existing install. Setup-only; rejected from `batch`.
+- `misc skill install` — install the bundled skill. Setup-only; rejected from `batch`.
 
 ## Bundled docs
 
@@ -133,6 +117,7 @@ Use `idac docs --list` to list every topic and `idac docs --all --out docs.md` t
 - `function prototype check` validates a function declaration without applying it
 - `type deps NAME` prints an existing type with IDA dependency expansion when available
 - `type list`, `type struct list`, and `type enum list` require `--out` when no pattern is given
+- for `function locals retype`, `--type` is shorthand for simple type text; use `--decl` or `--decl-file` for a full declaration, such as arrays or function pointers
 - `decompile` uses `-o/--out` for a single rendered result; `decompilemany` uses `--out-file` or `--out-dir` for bulk artifacts
 - `decompilemany FUNCTION_FILTER` selects functions by name substring; it is not a list of exact functions
 - for multiple explicit functions, write one function name or address per line and pass `decompilemany --functions-file <path>`

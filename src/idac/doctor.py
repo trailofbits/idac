@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .metadata import BRIDGE_SOCKET_PREFIX, IDALIB_SOCKET_PREFIX
 from .paths import (
@@ -41,7 +41,7 @@ def _check(status: str, component: str, name: str, summary: str, **details: Any)
     }
 
 
-def _symlink_target(path: Path) -> Optional[Path]:
+def _symlink_target(path: Path) -> Path | None:
     try:
         return path.resolve(strict=True)
     except OSError:
@@ -124,7 +124,7 @@ def _downgrade_gui_optional_errors(checks: list[dict[str, Any]]) -> None:
         item["summary"] = f"{item.get('summary', '')}; GUI bridge support is optional for headless idalib use".strip()
 
 
-def _doctor_gui(*, timeout: Optional[float], require_gui: bool = True) -> list[dict[str, Any]]:
+def _doctor_gui(*, timeout: float | None, require_gui: bool = True) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     checks.append(
         _plugin_check(
@@ -374,7 +374,7 @@ def _ida_license_check() -> dict[str, Any]:
     )
 
 
-def _idalib_import_checks(database: Optional[str]) -> list[dict[str, Any]]:
+def _idalib_import_checks(database: str | None) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     candidates = _candidate_ida_dirs()
     try:
@@ -459,7 +459,7 @@ def _idalib_hexrays_probe(database: str) -> bool:
     return bool(isinstance(result, dict) and result.get("available"))
 
 
-def _idalib_hexrays_check(database: Optional[str]) -> dict[str, Any]:
+def _idalib_hexrays_check(database: str | None) -> dict[str, Any]:
     if not database:
         return _check(
             "warn",
@@ -520,7 +520,7 @@ def _idalib_database_path_check(database: str) -> dict[str, Any]:
     )
 
 
-def _doctor_idalib(*, database: Optional[str]) -> list[dict[str, Any]]:
+def _doctor_idalib(*, database: str | None) -> list[dict[str, Any]]:
     checks = [_idalib_install_dirs_check()]
     checks.append(_ida_license_check())
     checks.extend(_idalib_import_checks(database))
@@ -559,8 +559,8 @@ def _available_backends(checks: list[dict[str, Any]]) -> list[str]:
 def run_doctor(
     *,
     scope: str = "all",
-    timeout: Optional[float] = None,
-    database: Optional[str] = None,
+    timeout: float | None = None,
+    database: str | None = None,
 ) -> dict[str, Any]:
     selected = scope.strip().lower() if scope else "all"
     if selected not in {"all", "gui", "idalib"}:
@@ -599,7 +599,7 @@ def _cleanup_entry(
     status: str,
     reason: str,
     *,
-    backend: Optional[str] = None,
+    backend: str | None = None,
 ) -> dict[str, Any]:
     entry = {
         "kind": kind,
@@ -612,7 +612,7 @@ def _cleanup_entry(
     return entry
 
 
-def _non_gui_pid_reason(*, backend: str, pid: int) -> Optional[str]:
+def _non_gui_pid_reason(*, backend: str, pid: int) -> str | None:
     if backend != "gui":
         return None
     return gui._pid_non_gui_bridge_reason(pid)

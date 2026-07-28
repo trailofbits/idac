@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from ..base import OperationContext, OperationSpec
 from ..runtime import IdaOperationError
@@ -37,11 +39,11 @@ class DatabaseSaveResult:
     path: str
 
 
-def _parse_info(_params: dict[str, object]) -> DatabaseInfoRequest:
+def _parse_info(_params: Mapping[str, Any]) -> DatabaseInfoRequest:
     return DatabaseInfoRequest()
 
 
-def _parse_save(params: dict[str, object]) -> DatabaseSaveRequest:
+def _parse_save(params: Mapping[str, Any]) -> DatabaseSaveRequest:
     path = str(params.get("path") or "").strip()
     return DatabaseSaveRequest(path=path or None)
 
@@ -83,7 +85,7 @@ def _database_save(context: OperationContext, request: DatabaseSaveRequest) -> D
     return DatabaseSaveResult(saved=True, path=save_path)
 
 
-def database_operations() -> tuple[OperationSpec[object, object], ...]:
+def database_operations() -> tuple[OperationSpec[Any, Any], ...]:
     return (
         OperationSpec(
             name="database_info",

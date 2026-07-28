@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from .base import OperationContext
@@ -19,7 +19,7 @@ def build_operation_registry(
     registry = OperationRegistry(operation_specs())
 
     def make_handler(name: str) -> Callable[[dict[str, Any]], Any]:
-        def handler(params: dict[str, Any]) -> Any:
+        def handler(params: Mapping[str, Any]) -> Any:
             payload = dict(params)
             preview_requested = bool(payload.pop("preview", False))
             context = OperationContext(runtime=runtime, preview=preview_requested)

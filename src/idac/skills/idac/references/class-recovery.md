@@ -67,22 +67,13 @@ Raw runtime slot inspection is not exposed as a first-class CLI command. Use `ty
 - `type class fields --derived-only`: isolate the fields owned by one derived class.
 - `type class vtable --runtime`: inspect both the local-type vtable layout and the raw runtime targets when symbols are available.
 - `decompilemany "<function-filter>" --out-dir ...`: capture pseudocode artifacts for every function matching a class-family name filter before narrowing to representative callers and overrides.
-  It writes one `.c` artifact per function plus `manifest.json`.
-- For multiple exact functions, write one function name or address per line and pass `decompilemany --functions-file <path>`.
-- For a single large function, use `decompile "<func>" -o <path>` instead of trying to force `--out-file` onto `decompile`.
-- On symbol-rich targets, one early discovery capture is worth doing before mutations so you can grep the whole family locally.
-- After type import and reanalysis, rerun a narrower verification capture only if you still need broad readback artifacts.
-- During type or prototype recovery, prefer `decompile --f5` and `decompilemany --f5` so each pass reflects the latest imported class and prototype changes.
-- During discovery, stop decompiling once constructor, destructor, one accessor, and one serializer or parser have already proven the layout.
+  For capture strategy, `--functions-file`, `manifest.json` handling, and the `--f5` policy, read [workflows.md](workflows.md#safe-mutation-loop).
+  During discovery, stop decompiling once constructor, destructor, one accessor, and one serializer or parser have already proven the layout.
 - `function prototype set`: apply corrected function types to the runtime virtual targets after the class layout is in place.
   Use `function prototype show` first so the current signature is recorded before the update.
-  Use `function prototype check` before applying high-risk target signatures.
+  Use `function prototype check` before applying signatures with custom calling conventions or newly imported types.
   Use `preview -o /tmp/proto_preview.json function prototype set ...`; the command-specific preview readback carries richer before/after data when supported.
-  Clean up the shared helpers that dominate many callers before spending time on local renames. Once helper prototypes are correct and callers are reanalyzed, the remaining rename work is usually much smaller and more trustworthy.
-- Treat return-type changes as higher risk than parameter-name changes. If the body does not clearly prove the returned semantic type, keep the return generic.
 - `decompile`: spot-check representative constructors, factories, and overrides after type changes.
-- For larger prototype or rename passes, write a `recovery.idac` file and run `batch` so the mutation order and failures are preserved in one log artifact.
-- For embedded opaque members, estimate size from neighboring field offsets first, then use constructor evidence as confirmation.
 
 Confidence and naming conventions:
 
@@ -103,11 +94,8 @@ Confidence and naming conventions:
 - reanalyze touched callers, not just the callee whose prototype changed
 - rename locals last
 - recover support types before cosmetic renames; early support-type recovery usually improves output more than local-name cleanup
-- For large local-variable sets, read `function locals list --json --out <path>` and calibrate selectors from the JSON artifact before renaming.
-- For many local edits in one function, prefer `function locals apply --json-file <plan.json>` after a fresh locals dump.
-- For rename previews on large functions, write the preview to disk with `preview -o <path>` and inspect the artifact with `jq` instead of trusting inline output.
 
-For selector calibration before rename-heavy phases, read [workflows.md](workflows.md#selector-calibration).
+For selector calibration and the local-rename rules, read [workflows.md](workflows.md#selector-calibration).
 
 ## Vtable guidance
 
@@ -133,9 +121,7 @@ For batch syntax and `.idac` file format, read [workflows.md](workflows.md#batch
 
 For large recovered families, use `idac py exec` with an explicit local script when first-class commands are not enough, and keep the script with the rest of your recovery artifacts so the pass stays reviewable and reproducible.
 
-For shell inspection of JSON artifacts, prefer portable tools such as:
-
-- `type list`, `type class candidates`, and `function list` artifacts are top-level JSON arrays, so inspect them with `.[]`.
+Inspect JSON artifacts with portable shell tools such as `jq` and `sed` instead of assuming bare `python` exists. `type list`, `type class candidates`, and `function list` artifacts are top-level JSON arrays, so start filters with `.[]`; `function locals list` wraps rows under `.locals[]`.
 
 ```bash
 jq '.functions_succeeded' /tmp/class_family_decompile_discovery/manifest.json
@@ -189,10 +175,8 @@ Do not keep pushing for cosmetic pseudocode perfection when:
 - runtime virtual targets have function prototypes applied, not just local vtable slot types
 - at least one representative base implementation and one representative override decompile with the expected `this` type
 - at least one caller of a newly fixed prototype reflects the intended type cleanup
-- stale caller casts or bad `this` propagation triggered targeted `reanalyze` on those callers before final readback
-- any renamed locals were reread after the last prototype/reanalysis pass
-- each committed rename was confirmed by rereading `function locals list --json` and checking the intended `index` or `local_id`
-- rename work stayed scoped per function, with a fresh local reread before moving to the next function
+- stale caller casts or bad `this` propagation triggered targeted `misc reanalyze` on those callers before final readback
+- each committed local rename was confirmed against fresh `function locals list --json` output, per the rules in [workflows.md](workflows.md#selector-calibration)
 
 Representative readback set:
 
@@ -206,8 +190,8 @@ Representative readback set:
 
 Do not assume every derived field appears strictly after the base size. Real targets can reuse tail padding, so constructor evidence and `this+offset` access patterns still matter.
 Treat empty derived classes as the default unless constructor evidence or `this+offset` access proves extra state.
+For embedded opaque members, estimate size from neighboring field offsets first, then use constructor evidence as confirmation.
 Inherited vtable slot types often keep the base-class `this` type even when the runtime target is a derived override. When improving decompiler quality, prefer the owning implementation class from the runtime target symbol when setting the function prototype.
-If demangled signatures or nearby callers reference useful local types that do not yet exist, create placeholder support types early instead of leaving important prototypes generic.
 Prefer preserving existing opaque local types unless replacing them is intentionally required for layout recovery.
 If you replace an opaque type with a size-only blob or placeholder, record that tradeoff explicitly in the issue log.
 Destructor bodies often start by restoring a vtable pointer and then lose precise derived-type propagation in Hex-Rays. When that happens, use function-local retypes on the derived locals after the prototype and reanalysis pass instead of forcing the whole type system harder.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal, cast
 
 from .base import OperationSpec
 from .families import (
@@ -80,7 +80,7 @@ OperationName = Literal[
     "python_exec",
 ]
 
-_OPERATION_SPECS: tuple[OperationSpec[object, object], ...] = (
+_OPERATION_SPECS: tuple[OperationSpec[Any, Any], ...] = (
     *database_operations(),
     *segment_operations(),
     *function_operations(),
@@ -96,20 +96,25 @@ _OPERATION_SPECS: tuple[OperationSpec[object, object], ...] = (
     *misc_operations(),
 )
 
-OPERATION_SPEC_MAP: dict[str, OperationSpec[object, object]] = {spec.name: spec for spec in _OPERATION_SPECS}
+OPERATION_SPEC_MAP: dict[str, OperationSpec[Any, Any]] = {spec.name: spec for spec in _OPERATION_SPECS}
 
-SUPPORTED_OPERATIONS: tuple[OperationName, ...] = ("list_targets", *tuple(OPERATION_SPEC_MAP))
-
-MUTATING_OPERATIONS: tuple[OperationName, ...] = tuple(
-    name for name, spec in OPERATION_SPEC_MAP.items() if spec.mutating
+# The Literal names are hand-listed above; sync with the spec map is enforced
+# by tests, so these derived tuples need a cast from plain str.
+SUPPORTED_OPERATIONS: tuple[OperationName, ...] = cast(
+    "tuple[OperationName, ...]", ("list_targets", *tuple(OPERATION_SPEC_MAP))
 )
 
-PREVIEW_UNSUPPORTED_OPERATIONS: tuple[OperationName, ...] = tuple(
-    name for name, spec in OPERATION_SPEC_MAP.items() if spec.mutating and spec.preview is None
+MUTATING_OPERATIONS: tuple[OperationName, ...] = cast(
+    "tuple[OperationName, ...]", tuple(name for name, spec in OPERATION_SPEC_MAP.items() if spec.mutating)
+)
+
+PREVIEW_UNSUPPORTED_OPERATIONS: tuple[OperationName, ...] = cast(
+    "tuple[OperationName, ...]",
+    tuple(name for name, spec in OPERATION_SPEC_MAP.items() if spec.mutating and spec.preview is None),
 )
 
 
-def operation_specs() -> tuple[OperationSpec[object, object], ...]:
+def operation_specs() -> tuple[OperationSpec[Any, Any], ...]:
     return _OPERATION_SPECS
 
 

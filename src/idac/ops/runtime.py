@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from . import runtime_classes
 from .helpers.matching import text_matches
@@ -134,8 +134,8 @@ class IdaRuntime:
     def __init__(
         self,
         *,
-        database_path: Optional[str] = None,
-        python_scope: Optional[dict[str, Any]] = None,
+        database_path: str | None = None,
+        python_scope: dict[str, Any] | None = None,
     ) -> None:
         self.database_path = database_path
         self._module_cache: dict[str, Any] = {}
@@ -205,7 +205,7 @@ class IdaRuntime:
         udt = self.ida_typeinf.udt_type_data_t()
         return udt if tif.get_udt_details(udt) else ()
 
-    def _member_pointed_name(self, member) -> Optional[str]:
+    def _member_pointed_name(self, member) -> str | None:
         pointed = member.type.get_pointed_object()
         if pointed is None:
             return None
@@ -276,7 +276,7 @@ class IdaRuntime:
         texts.extend(self._lookup_text_variants(demangled_name or ""))
         return texts
 
-    def _resolve_demangled_function_address(self, identifier: str) -> Optional[int]:
+    def _resolve_demangled_function_address(self, identifier: str) -> int | None:
         if not self._looks_like_demangled_identifier(identifier):
             return None
 
@@ -608,7 +608,7 @@ class IdaRuntime:
             raise IdaOperationError("Hex-Rays decompiler is unavailable")
         return ida_hexrays
 
-    def get_named_type(self, name: str, *, kind: Optional[str] = None):
+    def get_named_type(self, name: str, *, kind: str | None = None):
         """Resolve a named type, optionally constraining the expected kind."""
 
         tif = self.ida_typeinf.tinfo_t()
@@ -631,7 +631,7 @@ class IdaRuntime:
             raise IdaOperationError(f"type not found: {name}")
         return tif
 
-    def find_named_type(self, name: str, *, kind: Optional[str] = None):
+    def find_named_type(self, name: str, *, kind: str | None = None):
         """Best-effort named type lookup that returns ``None`` on failure."""
 
         try:
@@ -664,7 +664,7 @@ class IdaRuntime:
             return "array"
         return "type"
 
-    def demangle_name(self, name: str) -> Optional[str]:
+    def demangle_name(self, name: str) -> str | None:
         """Best-effort demangling that hides expected IDA failures."""
 
         text = (name or "").strip()
@@ -678,7 +678,7 @@ class IdaRuntime:
                 raise
         return None
 
-    def tinfo_decl(self, tif, *, name: Optional[str] = None, multi: bool = True) -> str:
+    def tinfo_decl(self, tif, *, name: str | None = None, multi: bool = True) -> str:
         """Render a stable declaration string for a ``tinfo_t``."""
 
         type_name = name or tif.get_type_name() or ""
@@ -736,12 +736,12 @@ class IdaRuntime:
     def list_named_types(
         self,
         *,
-        query: Optional[str] = None,
-        pattern: Optional[str] = None,
+        query: str | None = None,
+        pattern: str | None = None,
         glob: bool = False,
         regex: bool = False,
         ignore_case: bool = False,
-        kinds: Optional[set[str]] = None,
+        kinds: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         """List named local types, optionally filtered by substring and kind."""
 
@@ -782,26 +782,26 @@ class IdaRuntime:
     def class_base_names(self, tif) -> list[str]:
         return runtime_classes.class_base_names(self, tif)
 
-    def class_vtable_type_name(self, tif) -> Optional[str]:
+    def class_vtable_type_name(self, tif) -> str | None:
         return runtime_classes.class_vtable_type_name(self, tif)
 
-    def vtable_ea(self, tif) -> Optional[int]:
+    def vtable_ea(self, tif) -> int | None:
         return runtime_classes.vtable_ea(self, tif)
 
-    def class_vtable_ea(self, tif) -> Optional[int]:
+    def class_vtable_ea(self, tif) -> int | None:
         return runtime_classes.class_vtable_ea(self, tif)
 
-    def class_runtime_vtable_identifier(self, tif, *, name: Optional[str] = None) -> Optional[str]:
+    def class_runtime_vtable_identifier(self, tif, *, name: str | None = None) -> str | None:
         return runtime_classes.class_runtime_vtable_identifier(self, tif, name=name)
 
-    def class_summary(self, tif, *, name: Optional[str] = None, decl_multi: bool = False) -> dict[str, Any]:
+    def class_summary(self, tif, *, name: str | None = None, decl_multi: bool = False) -> dict[str, Any]:
         return runtime_classes.class_summary(self, tif, name=name, decl_multi=decl_multi)
 
     def list_named_classes(
         self,
         *,
-        query: Optional[str] = None,
-        pattern: Optional[str] = None,
+        query: str | None = None,
+        pattern: str | None = None,
         glob: bool = False,
         regex: bool = False,
         ignore_case: bool = False,
@@ -822,8 +822,8 @@ class IdaRuntime:
     def find_symbols(
         self,
         *,
-        query: Optional[str] = None,
-        pattern: Optional[str] = None,
+        query: str | None = None,
+        pattern: str | None = None,
         glob: bool = False,
         regex: bool = False,
         ignore_case: bool = False,
@@ -850,7 +850,7 @@ class IdaRuntime:
             )
         return rows
 
-    def find_vtable_symbol(self, class_name: str) -> Optional[dict[str, Any]]:
+    def find_vtable_symbol(self, class_name: str) -> dict[str, Any] | None:
         return runtime_classes.find_vtable_symbol(self, class_name)
 
     def pointer_size(self) -> int:
@@ -890,7 +890,7 @@ def _strip_tags(runtime: IdaRuntime, text: Any) -> str:
     return ida_lines.tag_remove(str(text or ""))
 
 
-def _ea_text(runtime: IdaRuntime, ea: Any) -> Optional[str]:
+def _ea_text(runtime: IdaRuntime, ea: Any) -> str | None:
     idaapi = runtime.mod("idaapi")
     try:
         value = int(ea)

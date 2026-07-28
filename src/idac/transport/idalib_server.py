@@ -10,7 +10,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, cast
 
 from ..metadata import WIRE_PROTOCOL_VERSION, idalib_registry_payload
 from ..ops.dispatch import build_operation_registry
@@ -230,7 +230,7 @@ class _IdaLibRequestHandler(socketserver.StreamRequestHandler):
         )
 
     def handle(self) -> None:
-        service = self.server.service  # type: ignore[attr-defined]
+        service = cast("_UnixIdaLibServer", self.server).service
         try:
             raw = self._read_request()
         except TimeoutError:
@@ -254,6 +254,7 @@ class _IdaLibRequestHandler(socketserver.StreamRequestHandler):
 class _UnixIdaLibServer(socketserver.UnixStreamServer):
     allow_reuse_address = True
     request_queue_size = 64
+    service: IdaLibService
 
 
 def serve(*, database_path: str, run_auto_analysis: bool, ready_fd: int | None = None) -> int:
@@ -270,7 +271,7 @@ def serve(*, database_path: str, run_auto_analysis: bool, ready_fd: int | None =
             run_auto_analysis=run_auto_analysis,
         )
         server = _UnixIdaLibServer(str(socket_path), _IdaLibRequestHandler)
-        server.service = service  # type: ignore[attr-defined]
+        server.service = service
         service._write_registry()
         _write_ready(ready_fd, {"ok": True})
         ready_fd = None
@@ -308,7 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from ..base import OperationContext, OperationSpec
 from ..helpers.params import require_str
@@ -130,10 +132,6 @@ def _first_free_slot(runtime: IdaRuntime) -> int:
     raise IdaOperationError(f"no free bookmark slots remain (0..{ida_moves.MAX_MARK_SLOT})")
 
 
-def _first_free_bookmark_slot(runtime: IdaRuntime) -> int:
-    return _first_free_slot(runtime)
-
-
 def _erase_bookmark(runtime: IdaRuntime, slot: int) -> None:
     ida_moves = runtime.mod("ida_moves")
     loc = _bookmark_template(runtime)
@@ -157,14 +155,14 @@ def _write_bookmark(runtime: IdaRuntime, *, slot: int, identifier: str, comment:
     )
 
 
-def _parse_get(params: dict[str, object]) -> BookmarkGetRequest:
+def _parse_get(params: Mapping[str, Any]) -> BookmarkGetRequest:
     slot_value = params.get("slot")
     if slot_value in (None, ""):
         return BookmarkGetRequest()
     return BookmarkGetRequest(slot=_parse_slot(slot_value))
 
 
-def _parse_set(params: dict[str, object]) -> BookmarkSetRequest:
+def _parse_set(params: Mapping[str, Any]) -> BookmarkSetRequest:
     return BookmarkSetRequest(
         slot=_parse_slot(params.get("slot")),
         identifier=_require_identifier(params.get("address"), label="address"),
@@ -172,14 +170,14 @@ def _parse_set(params: dict[str, object]) -> BookmarkSetRequest:
     )
 
 
-def _parse_add(params: dict[str, object]) -> BookmarkAddRequest:
+def _parse_add(params: Mapping[str, Any]) -> BookmarkAddRequest:
     return BookmarkAddRequest(
         identifier=_require_identifier(params.get("address"), label="address"),
         comment=str(params.get("comment") or ""),
     )
 
 
-def _parse_delete(params: dict[str, object]) -> BookmarkDeleteRequest:
+def _parse_delete(params: Mapping[str, Any]) -> BookmarkDeleteRequest:
     return BookmarkDeleteRequest(slot=_parse_slot(params.get("slot")))
 
 
@@ -266,7 +264,7 @@ def _restore_added_bookmark(
         _erase_bookmark(context.runtime, result.slot)
 
 
-def bookmark_operations() -> tuple[OperationSpec[object, object], ...]:
+def bookmark_operations() -> tuple[OperationSpec[Any, Any], ...]:
     return (
         OperationSpec(
             name="bookmark_get",
@@ -317,6 +315,5 @@ __all__ = [
     "BookmarkMutationResult",
     "BookmarkSetRequest",
     "BookmarkState",
-    "_first_free_bookmark_slot",
     "bookmark_operations",
 ]

@@ -6,14 +6,14 @@ import contextlib
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from idac.ops.dispatch import build_operation_registry
 from idac.ops.manifest import SUPPORTED_OPERATIONS
 from idac.ops.runtime import IdaRuntime
 
 HandlerFn = Callable[[dict[str, Any]], Any]
-TargetValidator = Callable[[Optional[str]], None]
+TargetValidator = Callable[[str | None], None]
 
 
 class DefaultHandlers:
@@ -50,7 +50,7 @@ class DefaultHandlers:
     def list_targets(self, _params: dict[str, Any]) -> list[dict[str, Any]]:
         return [self._current_target()]
 
-    def validate_target(self, target: Optional[str]) -> None:
+    def validate_target(self, target: str | None) -> None:
         if target in (None, "", "active"):
             return
         current = self._current_target()

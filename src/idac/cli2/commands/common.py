@@ -162,7 +162,6 @@ def _local_selector_from_args(
     args: argparse.Namespace,
     *,
     name_param: Literal["old_name", "local_name"],
-    require_selector: bool,
 ) -> LocalSelector:
     if args.local_id and args.index is not None:
         raise CliUserError("--local-id and --index are mutually exclusive")
@@ -174,9 +173,7 @@ def _local_selector_from_args(
     if args.index is not None:
         return LocalSelector("index", _parse_cli_int_text(args.index, label="local index", minimum=0))
     if not selector_text:
-        if require_selector:
-            raise CliUserError("local selector is required via selector, --local-id, or --index")
-        raise CliUserError("missing local selector")
+        raise CliUserError("local selector is required via selector, --local-id, or --index")
     selector_kind, selector_value = _infer_local_selector(selector_text)
     if selector_kind == "old_name":
         return LocalSelector(name_param, str(selector_value))
@@ -188,7 +185,7 @@ def _local_selector_from_args(
 def _local_rename_request(args: argparse.Namespace) -> LocalRenameRequest:
     return LocalRenameRequest(
         identifier=str(args.function),
-        selector=_local_selector_from_args(args, name_param="old_name", require_selector=True),
+        selector=_local_selector_from_args(args, name_param="old_name"),
         new_name=str(args.new_name),
     )
 
@@ -196,7 +193,7 @@ def _local_rename_request(args: argparse.Namespace) -> LocalRenameRequest:
 def _local_retype_request(args: argparse.Namespace) -> LocalRetypeRequest:
     return LocalRetypeRequest(
         identifier=str(args.function),
-        selector=_local_selector_from_args(args, name_param="local_name", require_selector=True),
+        selector=_local_selector_from_args(args, name_param="local_name"),
         decl=read_decl_or_type_text(args),
     )
 
@@ -204,7 +201,7 @@ def _local_retype_request(args: argparse.Namespace) -> LocalRetypeRequest:
 def _local_update_request(args: argparse.Namespace) -> LocalUpdateRequest:
     request = LocalUpdateRequest(
         identifier=str(args.function),
-        selector=_local_selector_from_args(args, name_param="local_name", require_selector=True),
+        selector=_local_selector_from_args(args, name_param="local_name"),
         new_name=str(args.rename or "").strip() or None,
         decl=read_decl_text_if_present(args),
     )

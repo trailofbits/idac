@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from .version import VERSION
 
@@ -21,7 +21,7 @@ def bridge_registry_payload(
     *,
     pid: int,
     socket_path: str,
-    started_at: Optional[str],
+    started_at: str | None,
 ) -> dict[str, Any]:
     return {
         "pid": pid,
@@ -37,8 +37,8 @@ def idalib_registry_payload(
     *,
     pid: int,
     socket_path: str,
-    started_at: Optional[str],
-    database_path: Optional[str],
+    started_at: str | None,
+    database_path: str | None,
 ) -> dict[str, Any]:
     return {
         "pid": pid,

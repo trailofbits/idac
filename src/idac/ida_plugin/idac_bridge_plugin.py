@@ -36,8 +36,8 @@ _bootstrap_paths()
 
 import ida_kernwin  # type: ignore
 import idaapi  # type: ignore
-from idac_bridge.bridge import BridgeService
-from idac_bridge.protocol import registry_path, socket_path
+from idac_bridge.bridge import BridgeService  # ty: ignore[unresolved-import]
+from idac_bridge.protocol import registry_path, socket_path  # ty: ignore[unresolved-import]
 
 from idac.version import VERSION
 
