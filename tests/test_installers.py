@@ -48,12 +48,12 @@ def test_setup_install_symlinks_plugin_and_both_skills(
     assert all(Path(str(item["destination"])).is_symlink() for item in result["targets"])
 
 
-def test_setup_install_skill_for_single_host(idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path) -> None:
+def test_setup_install_skill_for_single_agent(idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path) -> None:
     env = dict(idac_env)
     env["CLAUDE_HOME"] = str(tmp_path / ".claude")
     env["CODEX_HOME"] = str(tmp_path / ".codex")
 
-    result = _run_setup_json(idac_cmd, env, "setup", "install", "--component", "skill", "--host", "claude")
+    result = _run_setup_json(idac_cmd, env, "setup", "install", "--component", "skill", "--agent", "claude")
 
     targets = _target_rows(result, "skill")
     assert result["components"] == ["skill"]
@@ -151,7 +151,7 @@ def test_setup_update_replaces_skill_copy_and_preserves_mode(
     assert (destination / "SKILL.md").exists()
 
 
-def test_setup_update_installs_missing_default_skill_host_noninteractively(
+def test_setup_update_installs_missing_default_skill_agent_noninteractively(
     idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path
 ) -> None:
     env = dict(idac_env)
@@ -164,7 +164,7 @@ def test_setup_update_installs_missing_default_skill_host_noninteractively(
         "install",
         "--component",
         "skill",
-        "--host",
+        "--agent",
         "claude",
         "--mode",
         "copy",
@@ -335,7 +335,7 @@ def test_setup_update_changes_installation_mode_when_requested(
     assert destination.is_symlink() is expected_symlink
 
 
-def test_setup_rejects_host_with_custom_skill_destination(
+def test_setup_rejects_agent_with_custom_skill_destination(
     idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path
 ) -> None:
     proc = run_cli(
@@ -345,14 +345,14 @@ def test_setup_rejects_host_with_custom_skill_destination(
         "install",
         "--component",
         "skill",
-        "--host",
+        "--agent",
         "claude",
         "--skill-dest",
         str(tmp_path / "idac"),
     )
 
     assert proc.returncode == 1
-    assert "--host cannot be combined with --skill-dest" in proc.stderr
+    assert "--agent cannot be combined with --skill-dest" in proc.stderr
 
 
 def test_setup_install_plugin_symlink(idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path) -> None:

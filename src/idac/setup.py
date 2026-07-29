@@ -23,7 +23,7 @@ from .paths import (
 SetupAction = Literal["install", "update"]
 SetupComponent = Literal["plugin", "skill"]
 InstallMode = Literal["copy", "symlink"]
-SkillHost = Literal["claude", "codex", "both"]
+SkillAgent = Literal["claude", "codex", "both"]
 SetupStatus = Literal["installed", "updated", "unchanged"]
 SetupPhase = Literal["planned", "applied"]
 
@@ -36,7 +36,7 @@ class SetupValidationError(ValueError):
 class SetupRequest:
     action: SetupAction
     components: tuple[SetupComponent, ...] = ("plugin", "skill")
-    host: SkillHost = "both"
+    agent: SkillAgent = "both"
     mode: InstallMode | None = None
     plugin_destination: Path | None = None
     skill_destination: Path | None = None
@@ -123,25 +123,25 @@ def _plugin_targets(custom_destination: Path | None) -> list[SetupTarget]:
     ]
 
 
-def _skill_target_name(destination: Path, *, host: SkillHost, custom: bool) -> str:
+def _skill_target_name(destination: Path, *, agent: SkillAgent, custom: bool) -> str:
     if custom:
         return "skill_custom"
-    matching_hosts = [
-        candidate for candidate in ("claude", "codex") if skill_install_dir(host=candidate) == destination
+    matching_agents = [
+        candidate for candidate in ("claude", "codex") if skill_install_dir(agent=candidate) == destination
     ]
-    if matching_hosts:
-        return "skill_" + "_".join(matching_hosts)
-    return f"skill_{host}"
+    if matching_agents:
+        return "skill_" + "_".join(matching_agents)
+    return f"skill_{agent}"
 
 
-def _skill_targets(host: SkillHost, custom_destination: Path | None) -> list[SetupTarget]:
+def _skill_targets(agent: SkillAgent, custom_destination: Path | None) -> list[SetupTarget]:
     source = skill_source_dir()
     custom = custom_destination is not None
-    destinations = [custom_destination] if custom_destination is not None else skill_install_dirs(host=host)
+    destinations = [custom_destination] if custom_destination is not None else skill_install_dirs(agent=agent)
     return [
         SetupTarget(
             "skill",
-            _skill_target_name(destination, host=host, custom=custom),
+            _skill_target_name(destination, agent=agent, custom=custom),
             source,
             destination,
             True,
@@ -156,7 +156,7 @@ def build_setup_targets(request: SetupRequest) -> list[SetupTarget]:
     if "plugin" in request.components:
         targets.extend(_plugin_targets(request.plugin_destination))
     if "skill" in request.components:
-        targets.extend(_skill_targets(request.host, request.skill_destination))
+        targets.extend(_skill_targets(request.agent, request.skill_destination))
     return targets
 
 

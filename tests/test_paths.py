@@ -52,7 +52,7 @@ def test_read_only_path_getters_do_not_create_directories(monkeypatch, tmp_path:
     assert plugin_runtime_package_install_dir() == idausr / "plugins" / "idac"
     assert claude_skills_dir() == claude_home / "skills"
     assert codex_skills_dir() == codex_home / "skills"
-    assert skill_install_dir(host="claude") == claude_home / "skills" / "idac"
+    assert skill_install_dir(agent="claude") == claude_home / "skills" / "idac"
     assert skill_install_dir() == codex_home / "skills" / "idac"
     assert skill_install_dirs() == [
         claude_home / "skills" / "idac",

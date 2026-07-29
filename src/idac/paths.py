@@ -241,22 +241,22 @@ def workspace_template_source_dir() -> Path:
     return package_source_dir() / "workspace_template" / "default"
 
 
-def skill_install_dir(*, host: str = "codex") -> Path:
-    if host == "codex":
+def skill_install_dir(*, agent: str = "codex") -> Path:
+    if agent == "codex":
         return codex_skills_dir() / SKILL_NAME
-    if host == "claude":
+    if agent == "claude":
         return claude_skills_dir() / SKILL_NAME
-    raise ValueError(f"unsupported skill host: {host}")
+    raise ValueError(f"unsupported skill agent: {agent}")
 
 
-def skill_install_dirs(*, host: str = "both") -> list[Path]:
-    if host == "both":
+def skill_install_dirs(*, agent: str = "both") -> list[Path]:
+    if agent == "both":
         deduped: list[Path] = []
         for candidate in (
-            skill_install_dir(host="claude"),
-            skill_install_dir(host="codex"),
+            skill_install_dir(agent="claude"),
+            skill_install_dir(agent="codex"),
         ):
             if candidate not in deduped:
                 deduped.append(candidate)
         return deduped
-    return [skill_install_dir(host=host)]
+    return [skill_install_dir(agent=agent)]

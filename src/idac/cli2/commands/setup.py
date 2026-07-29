@@ -11,7 +11,7 @@ from ...setup import (
     SetupComponent,
     SetupPlan,
     SetupRequest,
-    SkillHost,
+    SkillAgent,
     apply_setup,
     plan_setup,
     setup_result,
@@ -24,19 +24,22 @@ from ..result import CommandResult
 
 
 def _setup_request(args: argparse.Namespace) -> SetupRequest:
-    components = tuple(dict.fromkeys(args.component or ("plugin", "skill")))
+    components = cast(
+        tuple[SetupComponent, ...],
+        (args.component,) if args.component is not None else ("plugin", "skill"),
+    )
     if args.plugin_dest is not None and "plugin" not in components:
         raise CliUserError("--plugin-dest requires the plugin component")
     if args.skill_dest is not None and "skill" not in components:
         raise CliUserError("--skill-dest requires the skill component")
-    if args.host is not None and "skill" not in components:
-        raise CliUserError("--host requires the skill component")
-    if args.host is not None and args.skill_dest is not None:
-        raise CliUserError("--host cannot be combined with --skill-dest because a custom destination has no host")
+    if args.agent is not None and "skill" not in components:
+        raise CliUserError("--agent requires the skill component")
+    if args.agent is not None and args.skill_dest is not None:
+        raise CliUserError("--agent cannot be combined with --skill-dest because a custom destination has no agent")
     return SetupRequest(
         action=cast(SetupAction, args.setup_command),
-        components=cast(tuple[SetupComponent, ...], components),
-        host=cast(SkillHost, args.host or "both"),
+        components=components,
+        agent=cast(SkillAgent, args.agent or "both"),
         mode=cast(InstallMode | None, args.mode),
         plugin_destination=args.plugin_dest,
         skill_destination=args.skill_dest,
@@ -87,23 +90,30 @@ def _add_setup_options(parser: argparse.ArgumentParser, *, is_update: bool) -> N
     add_output_options(parser, default_format="text")
     parser.add_argument(
         "--component",
-        action="append",
         choices=("plugin", "skill"),
-        help="Limit setup to one component; repeat to select both (default: both)",
+        help="Limit setup to one component (default: both)",
     )
     parser.add_argument(
-        "--host",
+        "--agent",
         choices=("claude", "codex", "both"),
         default=None,
-        help="Skill installation target (default: both); cannot be combined with --skill-dest",
+        help="Agent skill target (default: both); cannot be combined with --skill-dest",
     )
     parser.add_argument(
         "--mode",
         choices=("copy", "symlink"),
         default=None,
-        help="Installation mode (default: preserve existing mode, or symlink for new targets)",
+        help=(
+            "Installation mode (default: preserve existing mode; symlink for new targets)"
+            if is_update
+            else "Installation mode (default: symlink)"
+        ),
     )
-    parser.add_argument("--plugin-dest", type=Path, help="Custom GUI bridge package destination")
+    parser.add_argument(
+        "--plugin-dest",
+        type=Path,
+        help="Custom idac_bridge package destination; bootstrap and runtime are installed beside it",
+    )
     parser.add_argument("--skill-dest", type=Path, help="Custom skill destination")
     parser.add_argument(
         "--dry-run",
@@ -114,7 +124,7 @@ def _add_setup_options(parser: argparse.ArgumentParser, *, is_update: bool) -> N
         parser.add_argument(
             "--force",
             action="store_true",
-            help="Replace custom destinations without interactive confirmation",
+            help="Skip confirmation when replacing custom destinations",
         )
     parser.set_defaults(
         run=_run_setup,

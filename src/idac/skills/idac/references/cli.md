@@ -100,10 +100,10 @@ Setup commands operate on bundled integrations without contacting an IDA target:
 - `setup install` — install the GUI bridge and both agent skills. It fails before changing anything if a destination already exists.
 - `setup update` — refresh existing GUI bridge and skill targets and install missing ones. Existing copy/symlink modes are preserved unless `--mode` is passed. Replacing a custom destination requires interactive confirmation.
 - `setup update --dry-run` — validate and print the complete plan without changing files.
-- `--component plugin|skill` limits either setup command to one component; `--host claude|codex|both` limits skill targets.
+- `--component plugin|skill` limits either setup command to one component; `--agent claude|codex|both` limits skill targets.
 - `--force` skips custom-destination update confirmation for non-interactive execution; it never bypasses invalid destination/source overlap checks.
 
-Both setup commands are rejected from `batch` and `preview`. `--host` cannot be combined with `--skill-dest`, because a custom skill destination has no host association. Setup uses integrations bundled with the currently installed idac package and does not upgrade the CLI itself.
+Both setup commands are rejected from `batch` and `preview`. `--agent` cannot be combined with `--skill-dest`, because a custom skill destination has no agent association. Setup uses integrations bundled with the currently installed idac package and does not upgrade the CLI itself.
 
 ## Misc commands
 

@@ -127,13 +127,22 @@ def test_setup_help_exposes_dry_run_and_update_only_force(capsys) -> None:
     parser = build_parser()
     install_help = _help_text(parser, "setup", "install", capsys=capsys)
     update_help = _help_text(parser, "setup", "update", capsys=capsys)
+    normalized_install = " ".join(install_help.split())
+    normalized_update = " ".join(update_help.split())
 
     assert "--dry-run" in install_help
     assert "--force" not in install_help
     assert "--dry-run" in update_help
     assert "--force" in update_help
+    assert "--agent" in install_help
+    assert "--host" not in install_help
     assert "--skill-dest" in update_help
     assert "--plugin-dest" in update_help
+    assert "repeat to select both" not in install_help
+    assert "Installation mode (default: symlink)" in normalized_install
+    assert "Installation mode (default: preserve existing mode; symlink for new targets)" in normalized_update
+    assert "bootstrap and runtime are installed beside it" in normalized_update
+    assert "Skip confirmation when replacing custom destinations" in normalized_update
 
 
 def test_function_list_help_mentions_name_filter_regex_and_ignore_case(capsys) -> None:
