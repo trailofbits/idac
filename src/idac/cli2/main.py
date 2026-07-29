@@ -46,7 +46,6 @@ def build_parser(*, prog: str = "idac") -> argparse.ArgumentParser:
     database.register(parser, subparsers)
     function.register(parser, subparsers)
     segment.register(parser, subparsers)
-    setup.register(parser, subparsers)
     targets.register(parser, subparsers)
     top_level.register(parser, subparsers)
     search.register(parser, subparsers)
@@ -58,6 +57,7 @@ def build_parser(*, prog: str = "idac") -> argparse.ArgumentParser:
     python_exec.register(parser, subparsers)
     preview.register(parser, subparsers)
     misc.register(parser, subparsers)
+    setup.register(parser, subparsers)
     finalize_help_tree(parser)
     return parser
 
