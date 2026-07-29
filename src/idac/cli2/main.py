@@ -21,6 +21,7 @@ from .commands import (
     python_exec,
     search,
     segment,
+    setup,
     targets,
     top_level,
     type_commands,
@@ -45,6 +46,7 @@ def build_parser(*, prog: str = "idac") -> argparse.ArgumentParser:
     database.register(parser, subparsers)
     function.register(parser, subparsers)
     segment.register(parser, subparsers)
+    setup.register(parser, subparsers)
     targets.register(parser, subparsers)
     top_level.register(parser, subparsers)
     search.register(parser, subparsers)

@@ -770,6 +770,28 @@ def render_workspace_init(value: Any) -> str:
     return "\n".join(lines)
 
 
+def render_setup(value: Any) -> str:
+    if not isinstance(value, dict):
+        return _fallback(value)
+    action = str(value.get("action") or "setup")
+    phase = str(value.get("phase") or "applied")
+    lines = [f"Setup {action} plan (no changes applied)." if phase == "planned" else f"Setup {action} complete."]
+    has_updates = False
+    for item in value.get("targets") or []:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or "unknown")
+        has_updates = has_updates or status == "updated"
+        component = str(item.get("component") or "setup")
+        name = str(item.get("name") or "target")
+        destination = str(item.get("destination") or "<unknown>")
+        mode = str(item.get("mode") or "unknown")
+        lines.append(f"  {status:9} {component}.{name}: {destination} ({mode})")
+    if phase == "planned" and has_updates:
+        lines.append("Existing destinations listed as updated will be replaced in full.")
+    return "\n".join(lines)
+
+
 TEXT_RENDERERS = build_text_renderers(globals())
 
 

@@ -12,7 +12,7 @@ The command grammar for the `idac` CLI.
 - `function metadata` and JSON `function list` rows include `display_name` when available; JSON `function list` rows also include `section`
 - function-taking commands can resolve a unique demangled C++ name such as `ExampleClass::method_1`; if multiple functions match, use a mangled name, full signature, or address
 - `segment list` lists database segments
-- setup, maintenance, and utility commands live under `misc`
+- bundled integration lifecycle commands live under `setup`; IDA maintenance and utility commands live under `misc`
 
 ## Common reads
 
@@ -93,14 +93,24 @@ function locals rename "sub_08041337" --index 6 --new-name "entry_count"
 
 For a full recovery-pass example and the batch authoring rules, read [workflows.md](workflows.md#batch).
 
+## Setup commands
+
+Setup commands operate on bundled integrations without contacting an IDA target:
+
+- `setup install` — install the GUI bridge and both agent skills. It fails before changing anything if a destination already exists.
+- `setup update` — refresh existing GUI bridge and skill targets and install missing ones. Existing copy/symlink modes are preserved unless `--mode` is passed. Replacing a custom destination requires interactive confirmation.
+- `setup update --dry-run` — validate and print the complete plan without changing files.
+- `--component plugin|skill` limits either setup command to one component; `--host claude|codex|both` limits skill targets.
+- `--force` skips custom-destination update confirmation for non-interactive execution; it never bypasses invalid destination/source overlap checks.
+
+Both setup commands are rejected from `batch` and `preview`. `--host` cannot be combined with `--skill-dest`, because a custom skill destination has no host association. Setup uses integrations bundled with the currently installed idac package and does not upgrade the CLI itself.
+
 ## Misc commands
 
-These setup, maintenance, and utility commands live under `misc`:
+Maintenance and utility commands live under `misc`:
 
 - `misc rename` — rename a function or global symbol. Not available in `batch` or `preview`; commit symbol renames one-off.
 - `misc reanalyze` — re-run IDA analysis on a function or range. Batch-safe; place it between type/prototype mutations and local cleanup.
-- `misc plugin install` — install the GUI bridge plugin; `--force` replaces an existing install. Setup-only; rejected from `batch`.
-- `misc skill install` — install the bundled skill. Setup-only; rejected from `batch`.
 
 ## Bundled docs
 

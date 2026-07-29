@@ -203,7 +203,7 @@ def initialize_workspace(dest: Path, *, force: bool = False) -> dict[str, Any]:
             "repo_root": str(repo_root),
         },
         "next_steps": [
-            "Run `idac misc skill install` if you haven't already",
+            "Run `idac setup install --component skill` if you haven't already",
             "Edit AGENTS.md to set your default target",
             "Commit when the workspace looks right",
         ],

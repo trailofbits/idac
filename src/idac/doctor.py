@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from .install_payload import relative_install_files
 from .metadata import BRIDGE_SOCKET_PREFIX, IDALIB_SOCKET_PREFIX
 from .paths import (
     bridge_registry_paths,
@@ -48,10 +49,6 @@ def _symlink_target(path: Path) -> Path | None:
         return None
 
 
-def _relative_file_set(root: Path) -> set[Path]:
-    return {path.relative_to(root) for path in root.rglob("*") if path.is_file()}
-
-
 def _install_matches_source(install_path: Path, source_path: Path) -> tuple[bool, str, dict[str, Any]]:
     source_resolved = source_path.resolve()
     install_resolved = _symlink_target(install_path)
@@ -72,8 +69,8 @@ def _install_matches_source(install_path: Path, source_path: Path) -> tuple[bool
             details,
         )
 
-    source_files = _relative_file_set(source_path)
-    install_files = _relative_file_set(install_path)
+    source_files = relative_install_files(source_path)
+    install_files = relative_install_files(install_path)
     if source_files != install_files:
         details["missing_files"] = sorted(str(path) for path in source_files - install_files)[:10]
         details["extra_files"] = sorted(str(path) for path in install_files - source_files)[:10]

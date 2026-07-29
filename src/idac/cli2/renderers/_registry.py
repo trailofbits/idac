@@ -70,10 +70,11 @@ _RENDERER_NAMES = {
     "reanalyze": "_fallback",
     "python_exec": "render_python_exec",
     "decompile_bulk": "render_decompile_bulk",
+    "setup": "render_setup",
     "workspace_init": "render_workspace_init",
 }
 
-_CLI_ONLY_RENDERERS = {"doctor", "docs", "targets_cleanup", "decompile_bulk", "workspace_init"}
+_CLI_ONLY_RENDERERS = {"doctor", "docs", "targets_cleanup", "decompile_bulk", "setup", "workspace_init"}
 
 
 def build_text_renderers(namespace: Mapping[str, object]) -> dict[str, Renderer]:

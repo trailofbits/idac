@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-This change de-duplicates and tightens the bundled agent guidance, prompts, and reference docs.
+This release improves bundled integration setup and tightens the agent guidance, prompts, and reference docs.
 
 - Consolidated the three workspace task prompts into one fill-in `prompts/recovery-pass.md` with explicit required fields and `{{...}}` placeholders, and gave the workspace `AGENTS.md` a visible default-target field.
 - Gave each recurring rule (batch linting, selector calibration, capture strategy, class-evidence caveats) a single canonical home across `SKILL.md`, the references, and the workspace template, and unified the `batch --lint --out` command spelling.
-- Documented that `misc rename` is unavailable in `batch`/`preview`, made the "No GUI targets found" recovery diagnose before installing (including the `--force` reinstall flag and the manual plugin-reload handoff), and fixed the misspelled bare `reanalyze` in checklists.
+- Added transactional `setup install` and `setup update` commands for the GUI bridge and agent skills, including dry-run planning, custom-destination confirmation, strict path-overlap validation, rollback, and post-commit cleanup warnings; removed the old installer paths under `misc`.
+- Documented that `misc rename` is unavailable in `batch`/`preview`, retained the manual plugin-reload handoff in GUI recovery guidance, and fixed the misspelled bare `reanalyze` in checklists.
 - Made `idac docs templates` print the template files themselves, converted `checkpoint-note.md` into a placeholder-only skeleton, and rewrote `ida-set-types.md` as an idac-owned reference with the spliced examples repaired.
 
 ## 0.18.0
