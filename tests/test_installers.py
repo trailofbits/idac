@@ -46,6 +46,12 @@ def test_setup_install_symlinks_plugin_and_both_skills(
     assert len(result["targets"]) == 5
     assert {item["status"] for item in result["targets"]} == {"installed"}
     assert all(Path(str(item["destination"])).is_symlink() for item in result["targets"])
+    plugin_targets = _target_rows(result, "plugin")
+    by_name = {item["name"]: Path(str(item["destination"])) for item in plugin_targets}
+    package = Path(__file__).resolve().parents[1] / "src" / "idac"
+    assert by_name["bridge_package"].resolve() == (package / "ida_plugin" / "idac_bridge").resolve()
+    assert by_name["bootstrap"].resolve() == (package / "ida_plugin" / "idac_bridge_plugin.py").resolve()
+    assert by_name["runtime_package"].resolve() == package.resolve()
 
 
 def test_setup_install_skill_for_single_agent(idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path) -> None:
@@ -233,14 +239,19 @@ def test_setup_update_requires_force_when_noninteractive(
     assert (destination / "important.txt").read_text(encoding="utf-8") == "keep"
 
 
-def test_setup_update_applies_after_interactive_confirmation(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+@pytest.mark.parametrize(("answer", "expected_exit_code"), [("yes\n", 0), ("no\n", 1)])
+def test_setup_update_handles_interactive_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys,
+    answer: str,
+    expected_exit_code: int,
 ) -> None:
     destination = tmp_path / "skills" / "idac"
     (destination / "agents").mkdir(parents=True)
     (destination / "SKILL.md").write_text("old", encoding="utf-8")
     (destination / "agents" / "openai.yaml").write_text("old", encoding="utf-8")
-    monkeypatch.setattr(sys, "stdin", _InteractiveInput("yes\n"))
+    monkeypatch.setattr(sys, "stdin", _InteractiveInput(answer))
 
     exit_code = main(
         [
@@ -254,38 +265,16 @@ def test_setup_update_applies_after_interactive_confirmation(
     )
 
     captured = capsys.readouterr()
-    assert exit_code == 0
+    assert exit_code == expected_exit_code
     assert "Setup update plan (no changes applied)." in captured.err
     assert "Existing destinations listed as updated will be replaced in full." in captured.err
     assert "Continue? [y/N]" in captured.err
-    assert (destination / "SKILL.md").read_text(encoding="utf-8").startswith("---")
-
-
-def test_setup_update_cancellation_leaves_destination_untouched(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
-) -> None:
-    destination = tmp_path / "skills"
-    destination.mkdir()
-    (destination / "important.txt").write_text("keep", encoding="utf-8")
-    monkeypatch.setattr(sys, "stdin", _InteractiveInput("no\n"))
-
-    exit_code = main(
-        [
-            "setup",
-            "update",
-            "--component",
-            "skill",
-            "--skill-dest",
-            str(destination),
-        ]
-    )
-
-    captured = capsys.readouterr()
-    assert exit_code == 1
-    assert "Existing destinations listed as updated will be replaced in full." in captured.err
-    assert "setup update cancelled" in captured.err
-    assert (destination / "important.txt").read_text(encoding="utf-8") == "keep"
-    assert not (destination / "SKILL.md").exists()
+    skill_text = (destination / "SKILL.md").read_text(encoding="utf-8")
+    if expected_exit_code == 0:
+        assert skill_text.startswith("---")
+    else:
+        assert "setup update cancelled" in captured.err
+        assert skill_text == "old"
 
 
 @pytest.mark.parametrize(
@@ -355,22 +344,6 @@ def test_setup_rejects_agent_with_custom_skill_destination(
     assert "--agent cannot be combined with --skill-dest" in proc.stderr
 
 
-def test_setup_install_plugin_symlink(idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path) -> None:
-    env = dict(idac_env)
-    env["IDAUSR"] = str(tmp_path / ".idapro")
-
-    result = _run_setup_json(idac_cmd, env, "setup", "install", "--component", "plugin")
-
-    targets = _target_rows(result, "plugin")
-    by_name = {item["name"]: Path(str(item["destination"])) for item in targets}
-    assert len(targets) == 3
-    assert all(destination.is_symlink() for destination in by_name.values())
-    repo_package = Path(__file__).resolve().parents[1] / "src" / "idac"
-    assert by_name["bridge_package"].resolve() == (repo_package / "ida_plugin" / "idac_bridge").resolve()
-    assert by_name["bootstrap"].resolve() == (repo_package / "ida_plugin" / "idac_bridge_plugin.py").resolve()
-    assert by_name["runtime_package"].resolve() == repo_package.resolve()
-
-
 def test_setup_update_keeps_matching_plugin_symlinks_without_recommending_ida_reload(
     idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path
 ) -> None:
@@ -386,41 +359,12 @@ def test_setup_update_keeps_matching_plugin_symlinks_without_recommending_ida_re
     assert {item["status"] for item in targets} == {"unchanged"}
 
 
-def test_setup_install_plugin_copy_at_custom_destination(
-    idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path
-) -> None:
-    env = dict(idac_env)
-    destination = tmp_path / "plugins" / "idac_bridge"
-
-    result = _run_setup_json(
-        idac_cmd,
-        env,
-        "setup",
-        "install",
-        "--component",
-        "plugin",
-        "--mode",
-        "copy",
-        "--plugin-dest",
-        str(destination),
-    )
-
-    targets = _target_rows(result, "plugin")
-    by_name = {item["name"]: Path(str(item["destination"])) for item in targets}
-    assert by_name["bridge_package"] == destination
-    assert by_name["bootstrap"] == destination.parent / "idac_bridge_plugin.py"
-    assert by_name["runtime_package"] == destination.parent / "idac"
-    assert (by_name["bridge_package"] / "__init__.py").exists()
-    assert by_name["bootstrap"].is_file()
-    assert (by_name["runtime_package"] / "cli.py").exists()
-    assert all(not path.is_symlink() for path in by_name.values())
-
-
 def test_setup_update_replaces_plugin_copy_targets(
     idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path
 ) -> None:
     env = dict(idac_env)
-    destination = tmp_path / "plugins" / "idac_bridge"
+    plugins_dir = tmp_path / "plugins"
+    destination = plugins_dir / "idac_bridge"
     install_args = (
         "setup",
         "install",
@@ -428,8 +372,8 @@ def test_setup_update_replaces_plugin_copy_targets(
         "plugin",
         "--mode",
         "copy",
-        "--plugin-dest",
-        str(destination),
+        "--plugin-dir",
+        str(plugins_dir),
     )
     _run_setup_json(idac_cmd, env, *install_args)
     runtime_destination = destination.parent / "idac"
@@ -443,8 +387,8 @@ def test_setup_update_replaces_plugin_copy_targets(
         "update",
         "--component",
         "plugin",
-        "--plugin-dest",
-        str(destination),
+        "--plugin-dir",
+        str(plugins_dir),
         "--force",
     )
 
@@ -456,12 +400,12 @@ def test_setup_update_replaces_plugin_copy_targets(
     assert not (runtime_destination / "stale.txt").exists()
 
 
-def test_setup_plugin_copy_is_importable_without_repo_root(
+def test_setup_plugin_copy_layout_is_importable_without_repo_root(
     idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path, monkeypatch
 ) -> None:
     env = dict(idac_env)
-    destination = tmp_path / "plugins" / "idac_bridge"
-    _run_setup_json(
+    plugins_dir = tmp_path / "plugins"
+    result = _run_setup_json(
         idac_cmd,
         env,
         "setup",
@@ -470,11 +414,22 @@ def test_setup_plugin_copy_is_importable_without_repo_root(
         "plugin",
         "--mode",
         "copy",
-        "--plugin-dest",
-        str(destination),
+        "--plugin-dir",
+        str(plugins_dir),
     )
 
-    plugins_dir = destination.parent
+    targets = _target_rows(result, "plugin")
+    by_name = {item["name"]: Path(str(item["destination"])) for item in targets}
+    assert by_name == {
+        "bridge_package": plugins_dir / "idac_bridge",
+        "bootstrap": plugins_dir / "idac_bridge_plugin.py",
+        "runtime_package": plugins_dir / "idac",
+    }
+    assert (by_name["bridge_package"] / "__init__.py").exists()
+    assert by_name["bootstrap"].is_file()
+    assert (by_name["runtime_package"] / "cli.py").exists()
+    assert all(not path.is_symlink() for path in by_name.values())
+
     saved_modules = {
         name: sys.modules.pop(name)
         for name in list(sys.modules)

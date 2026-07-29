@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,10 +10,8 @@ from typing import Literal
 
 from .install_payload import copytree_ignore
 from .paths import (
-    plugin_bootstrap_install_path,
     plugin_bootstrap_source_path,
     plugin_install_dir,
-    plugin_runtime_package_install_dir,
     plugin_runtime_package_source_dir,
     plugin_source_dir,
     skill_install_dir,
@@ -38,7 +37,7 @@ class SetupRequest:
     components: tuple[SetupComponent, ...] = ("plugin", "skill")
     agent: SkillAgent = "both"
     mode: InstallMode | None = None
-    plugin_destination: Path | None = None
+    plugin_directory: Path | None = None
     skill_destination: Path | None = None
 
 
@@ -99,27 +98,16 @@ def _temporary_sibling(path: Path, *, label: str) -> Path:
     return path.parent / f".{path.name}.idac-{label}-{token}"
 
 
-def _plugin_targets(custom_destination: Path | None) -> list[SetupTarget]:
+def _plugin_targets(custom_directory: Path | None) -> list[SetupTarget]:
     package_source = plugin_source_dir()
     bootstrap_source = plugin_bootstrap_source_path()
     runtime_source = plugin_runtime_package_source_dir()
-    package_destination = custom_destination or plugin_install_dir()
-    if custom_destination is None:
-        bootstrap_destination = plugin_bootstrap_install_path()
-        runtime_destination = plugin_runtime_package_install_dir()
-    else:
-        if package_destination.name == runtime_source.name:
-            raise SetupValidationError(
-                f"--plugin-dest cannot end in `{runtime_source.name}` because the bridge runtime "
-                f"must be installed beside it as `{runtime_source.name}`; use an `idac_bridge` destination"
-            )
-        bootstrap_destination = package_destination.parent / plugin_bootstrap_install_path().name
-        runtime_destination = package_destination.parent / runtime_source.name
-    custom = custom_destination is not None
+    directory = custom_directory or plugin_install_dir().parent
+    custom = custom_directory is not None
     return [
-        SetupTarget("plugin", "bridge_package", package_source, package_destination, True, custom),
-        SetupTarget("plugin", "bootstrap", bootstrap_source, bootstrap_destination, False, custom),
-        SetupTarget("plugin", "runtime_package", runtime_source, runtime_destination, True, custom),
+        SetupTarget("plugin", "bridge_package", package_source, directory / package_source.name, True, custom),
+        SetupTarget("plugin", "bootstrap", bootstrap_source, directory / bootstrap_source.name, False, custom),
+        SetupTarget("plugin", "runtime_package", runtime_source, directory / runtime_source.name, True, custom),
     ]
 
 
@@ -154,7 +142,7 @@ def _skill_targets(agent: SkillAgent, custom_destination: Path | None) -> list[S
 def build_setup_targets(request: SetupRequest) -> list[SetupTarget]:
     targets: list[SetupTarget] = []
     if "plugin" in request.components:
-        targets.extend(_plugin_targets(request.plugin_destination))
+        targets.extend(_plugin_targets(request.plugin_directory))
     if "skill" in request.components:
         targets.extend(_skill_targets(request.agent, request.skill_destination))
     return targets
@@ -174,8 +162,39 @@ def _destination_views(path: Path) -> tuple[Path, ...]:
     return (lexical,) if canonical == lexical else (lexical, canonical)
 
 
+def _filesystem_is_case_insensitive(path: Path) -> bool:
+    absolute = _absolute_path(path)
+    existing = next((candidate for candidate in (absolute, *absolute.parents) if candidate.exists()), None)
+    if sys.platform == "darwin" and existing is not None:
+        try:
+            # Python does not expose macOS's _PC_CASE_SENSITIVE name.
+            return os.pathconf(existing, 11) == 0
+        except (OSError, ValueError):
+            pass
+    existing_paths = (existing, *existing.parents) if existing is not None else ()
+    for candidate in existing_paths:
+        swapped = candidate.name.swapcase()
+        if not swapped or swapped == candidate.name:
+            continue
+        try:
+            return os.path.samefile(candidate, candidate.with_name(swapped))
+        except OSError:
+            continue
+    return os.path.normcase("A") == os.path.normcase("a")
+
+
+def _lexical_paths_overlap(first: Path, second: Path, *, ignore_case: bool = False) -> bool:
+    first_parts = tuple(part.casefold() for part in first.parts) if ignore_case else first.parts
+    second_parts = tuple(part.casefold() for part in second.parts) if ignore_case else second.parts
+    return first_parts == second_parts[: len(first_parts)] or second_parts == first_parts[: len(second_parts)]
+
+
 def _paths_overlap(first: Path, second: Path) -> bool:
-    if first == second or first.is_relative_to(second) or second.is_relative_to(first):
+    if _lexical_paths_overlap(first, second):
+        return True
+    if (_filesystem_is_case_insensitive(first) or _filesystem_is_case_insensitive(second)) and _lexical_paths_overlap(
+        first, second, ignore_case=True
+    ):
         return True
     if _same_existing_path(first, second):
         return True

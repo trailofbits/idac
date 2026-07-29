@@ -163,15 +163,15 @@ def test_setup_cleans_partial_staging_when_copy_fails(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.parametrize(
-    ("plugin_destination", "skill_destination"),
+    ("plugin_directory", "skill_destination"),
     [
-        (Path("integrations/idac_bridge"), Path("integrations")),
-        (Path("integrations"), Path("integrations/skills/idac")),
+        (Path("integrations/plugins"), Path("integrations/plugins/idac_bridge/skill")),
+        (Path("integrations"), Path("integrations/idac/skill")),
     ],
 )
 def test_setup_rejects_nested_custom_destinations_before_staging(
     tmp_path: Path,
-    plugin_destination: Path,
+    plugin_directory: Path,
     skill_destination: Path,
 ) -> None:
     integration_root = tmp_path / "integrations"
@@ -179,7 +179,7 @@ def test_setup_rejects_nested_custom_destinations_before_staging(
         action="update",
         components=("plugin", "skill"),
         mode="copy",
-        plugin_destination=tmp_path / plugin_destination,
+        plugin_directory=tmp_path / plugin_directory,
         skill_destination=tmp_path / skill_destination,
     )
 
@@ -197,12 +197,30 @@ def test_setup_rejects_destination_aliases_that_resolve_to_the_same_path(tmp_pat
     request = setup.SetupRequest(
         action="update",
         components=("plugin", "skill"),
-        plugin_destination=real_parent / "idac_bridge",
+        plugin_directory=real_parent,
         skill_destination=alias_parent / "idac",
     )
 
     with pytest.raises(setup.SetupValidationError, match="setup destinations must not be equal or nested"):
         setup.plan_setup(request)
+
+
+def test_setup_rejects_case_only_aliases_before_destinations_exist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(setup, "_filesystem_is_case_insensitive", lambda _path: True)
+    integration_root = tmp_path / "integrations"
+    request = setup.SetupRequest(
+        action="install",
+        components=("plugin", "skill"),
+        plugin_directory=integration_root,
+        skill_destination=integration_root / "IDAC",
+    )
+
+    with pytest.raises(setup.SetupValidationError, match="setup destinations must not be equal or nested"):
+        setup.plan_setup(request)
+
+    assert not integration_root.exists()
 
 
 def test_setup_rejects_case_insensitive_destination_source_alias(
@@ -256,17 +274,6 @@ def test_setup_rejects_destination_source_overlap_in_both_directions(
 
     assert source.exists()
     assert (source_parent / "OTHER.md").read_text(encoding="utf-8") == "keep"
-
-
-def test_setup_rejects_plugin_destination_named_like_runtime_package(tmp_path: Path) -> None:
-    request = setup.SetupRequest(
-        action="update",
-        components=("plugin",),
-        plugin_destination=tmp_path / "plugins" / "idac",
-    )
-
-    with pytest.raises(setup.SetupValidationError, match="--plugin-dest cannot end in `idac`"):
-        setup.plan_setup(request)
 
 
 def test_setup_plan_marks_alternate_symlink_for_replacement(tmp_path: Path) -> None:

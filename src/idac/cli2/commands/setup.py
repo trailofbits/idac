@@ -28,8 +28,8 @@ def _setup_request(args: argparse.Namespace) -> SetupRequest:
         tuple[SetupComponent, ...],
         (args.component,) if args.component is not None else ("plugin", "skill"),
     )
-    if args.plugin_dest is not None and "plugin" not in components:
-        raise CliUserError("--plugin-dest requires the plugin component")
+    if args.plugin_dir is not None and "plugin" not in components:
+        raise CliUserError("--plugin-dir requires the plugin component")
     if args.skill_dest is not None and "skill" not in components:
         raise CliUserError("--skill-dest requires the skill component")
     if args.agent is not None and "skill" not in components:
@@ -41,7 +41,7 @@ def _setup_request(args: argparse.Namespace) -> SetupRequest:
         components=components,
         agent=cast(SkillAgent, args.agent or "both"),
         mode=cast(InstallMode | None, args.mode),
-        plugin_destination=args.plugin_dest,
+        plugin_directory=args.plugin_dir,
         skill_destination=args.skill_dest,
     )
 
@@ -110,9 +110,9 @@ def _add_setup_options(parser: argparse.ArgumentParser, *, is_update: bool) -> N
         ),
     )
     parser.add_argument(
-        "--plugin-dest",
+        "--plugin-dir",
         type=Path,
-        help="Custom idac_bridge package destination; bootstrap and runtime are installed beside it",
+        help="Custom directory for GUI bridge plugin files",
     )
     parser.add_argument("--skill-dest", type=Path, help="Custom skill destination")
     parser.add_argument(
