@@ -21,6 +21,7 @@ from .commands import (
     python_exec,
     search,
     segment,
+    setup,
     targets,
     top_level,
     type_commands,
@@ -56,6 +57,7 @@ def build_parser(*, prog: str = "idac") -> argparse.ArgumentParser:
     python_exec.register(parser, subparsers)
     preview.register(parser, subparsers)
     misc.register(parser, subparsers)
+    setup.register(parser, subparsers)
     finalize_help_tree(parser)
     return parser
 

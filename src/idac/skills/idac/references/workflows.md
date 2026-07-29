@@ -206,7 +206,7 @@ preview function prototype set "ExampleDerived__method_1" --decl-file "example_m
 
 For `idalib`, `batch` keeps ordered logging while reusing the same open database state for the shared `-c db:<path>` locator. Each step is still a separate request.
 For larger prototype and local-rename passes, prefer `batch` so the mutation order is explicit and the run leaves behind a stable ordered log.
-Setup-only `misc` commands such as `misc plugin install` and `misc skill install` are intentionally rejected from `batch`, and so is `misc rename` — commit symbol renames one-off. `misc reanalyze` is batch-safe and belongs between type/prototype mutations and local cleanup in full recovery batches.
+`setup install` and `setup update` are intentionally rejected from `batch`, and so is `misc rename` — commit symbol renames one-off. `misc reanalyze` is batch-safe and belongs between type/prototype mutations and local cleanup in full recovery batches.
 
 ## Broad discovery defaults
 

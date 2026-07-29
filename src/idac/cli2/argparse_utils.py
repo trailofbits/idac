@@ -352,17 +352,3 @@ def read_decl_or_type_text(
         if normalized:
             return f"{normalized} {placeholder_name};"
     raise CliUserError("missing declaration or type input")
-
-
-def add_install_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--mode",
-        choices=("copy", "symlink"),
-        default="symlink",
-        help="Installation mode",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Replace an existing destination if it already exists",
-    )

@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from idac import doctor
+from idac.install_payload import copytree_ignore
 from idac.metadata import (
     BRIDGE_PLUGIN_NAME,
     GUI_BACKEND_NAME,
@@ -141,20 +142,22 @@ def test_doctor_warns_for_runtime_package_drift_when_bridge_is_live(monkeypatch,
 
 def test_doctor_accepts_copy_install_layout(monkeypatch, tmp_path: Path) -> None:
     source_dir = tmp_path / "plugin-src"
-    source_dir.mkdir()
+    (source_dir / "__pycache__").mkdir(parents=True)
     (source_dir / "__init__.py").write_text("# package\n", encoding="utf-8")
+    (source_dir / "__pycache__" / "__init__.pyc").write_bytes(b"cache")
     bootstrap_source = tmp_path / "idac_bridge_plugin.py"
     bootstrap_source.write_text("# bootstrap\n", encoding="utf-8")
     runtime_package_source = tmp_path / "idac-src"
     runtime_package_source.mkdir()
     (runtime_package_source / "__init__.py").write_text("# idac\n", encoding="utf-8")
+    (runtime_package_source / "runtime.pyo").write_bytes(b"cache")
 
     install_dir = tmp_path / "plugins" / "idac_bridge"
-    shutil.copytree(source_dir, install_dir)
+    shutil.copytree(source_dir, install_dir, ignore=copytree_ignore)
     install_bootstrap = tmp_path / "plugins" / "idac_bridge_plugin.py"
     shutil.copy2(bootstrap_source, install_bootstrap)
     install_runtime_package = tmp_path / "plugins" / "idac"
-    shutil.copytree(runtime_package_source, install_runtime_package)
+    shutil.copytree(runtime_package_source, install_runtime_package, ignore=copytree_ignore)
 
     monkeypatch.setattr(doctor, "plugin_source_dir", lambda: source_dir)
     monkeypatch.setattr(doctor, "plugin_bootstrap_source_path", lambda: bootstrap_source)

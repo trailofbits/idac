@@ -67,12 +67,13 @@ def _copied_fixture_db(copy_database, tiny_database: Path) -> str:
     return f"db:{copy_database(tiny_database)}"
 
 
-def test_root_help_shows_misc_and_hides_old_names(capsys) -> None:
+def test_root_help_shows_setup_and_misc_and_hides_old_names(capsys) -> None:
     parser = build_parser()
     help_text = _help_text(parser, capsys=capsys)
 
     assert "docs" in help_text
     assert "misc" in help_text
+    assert "setup" in help_text
     assert "decompilemany" in help_text
     assert "strings" not in help_text
 
@@ -85,7 +86,7 @@ def test_root_help_mentions_global_context_forwarding(capsys) -> None:
     assert "--timeout TIMEOUT" in help_text
 
 
-def test_root_full_help_shows_misc_and_hides_old_function_show(capsys) -> None:
+def test_root_full_help_shows_setup_and_hides_removed_installers(capsys) -> None:
     parser = build_parser()
 
     with pytest.raises(SystemExit) as exc:
@@ -98,8 +99,11 @@ def test_root_full_help_shows_misc_and_hides_old_function_show(capsys) -> None:
     assert "# idac docs" in help_text
     assert "# idac misc" in help_text
     assert "# idac misc reanalyze" in help_text
-    assert "# idac misc plugin install" in help_text
-    assert "# idac misc skill install" in help_text
+    assert "# idac setup" in help_text
+    assert "# idac setup install" in help_text
+    assert "# idac setup update" in help_text
+    assert "# idac misc plugin" not in help_text
+    assert "# idac misc skill" not in help_text
     assert "# idac segment list" in help_text
     assert "# idac targets list" in help_text
     assert "# idac targets cleanup" in help_text
@@ -117,6 +121,22 @@ def test_function_help_uses_metadata_and_prototype(capsys) -> None:
     assert "callers" in help_text
     assert "callees" in help_text
     assert "prototype" in help_text
+
+
+def test_setup_help_exposes_supported_options(capsys) -> None:
+    parser = build_parser()
+    install_help = _help_text(parser, "setup", "install", capsys=capsys)
+    update_help = _help_text(parser, "setup", "update", capsys=capsys)
+
+    assert "--dry-run" in install_help
+    assert "--force" not in install_help
+    assert "--dry-run" in update_help
+    assert "--force" in update_help
+    assert "--agent" in install_help
+    assert "--host" not in install_help
+    assert "--skill-dest" in update_help
+    assert "--plugin-dir" in update_help
+    assert "--plugin-dest" not in update_help
 
 
 def test_function_list_help_mentions_name_filter_regex_and_ignore_case(capsys) -> None:

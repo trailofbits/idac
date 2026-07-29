@@ -199,7 +199,7 @@ The bundled `idac` skill supports both Claude Code and Codex equally.
   - `~/.claude/skills/idac`
   - `~/.codex/skills/idac`
 - custom install destination:
-  - `idac misc skill install --dest /custom/path/idac`
+  - `idac setup install --component skill --skill-dest /custom/path/idac`
 
 For fixture-driven class tests, prefer updating and validating:
 

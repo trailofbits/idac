@@ -13,7 +13,7 @@ idac targets cleanup
 idac targets list
 ```
 
-If no targets appear, either the `idac_bridge` plugin is not loaded in the current GUI session or stale bridge runtime files were masking it (`targets cleanup` removes those; add `--out <path>` to keep the full result). If `doctor` reports the plugin missing, run `idac misc plugin install` (add `--force` to replace an existing install). idac cannot reload the plugin itself — ask the user to reload the `idac_bridge` plugin in the IDA GUI, or restart IDA, then rerun `targets list`.
+If no targets appear, either the `idac_bridge` plugin is not loaded in the current GUI session or stale bridge runtime files were masking it (`targets cleanup` removes those; add `--out <path>` to keep the full result). If `doctor` reports the plugin missing or stale, run `idac setup update --component plugin`; the command refreshes existing targets and installs missing ones. idac cannot reload the plugin itself — ask the user to reload the `idac_bridge` plugin in the IDA GUI, or restart IDA, then rerun `targets list`.
 
 This section is only about GUI rows. Headless targets opened through `database open` appear in `targets list --json` with `backend: "idalib"` and should be used with `-c "db:/path"`.
 

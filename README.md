@@ -97,9 +97,10 @@ git clone https://github.com/trailofbits/idac.git
 cd idac
 uv tool install .            # installs the `idac` command on your PATH
 idac doctor                  # verify IDA install, license, and bridge
-idac misc plugin install     # GUI bridge plugin
-idac misc skill install      # Claude Code + Codex skill
+idac setup install           # GUI bridge + Claude Code and Codex skills
 ```
+
+After upgrading the CLI with the same package manager, run `idac setup update` to refresh the bundled GUI bridge and skills. Replacing an existing custom destination requires confirmation; use `--dry-run` to inspect the plan and `--force` to apply a reviewed custom-path update non-interactively. Setup updates integrations from the currently installed CLI package; it does not upgrade the CLI itself.
 
 Talk to a live GUI session:
 
@@ -168,7 +169,8 @@ Use `idac <command> --help` for one subcommand, `idac --full-help` for the compl
 | Batch | `batch`, `batch --lint`, `preview` |
 | IDAPython | `py exec` |
 | Workspace | `workspace init` |
-| Maintenance | `misc reanalyze`, `database open/save/close`, `targets cleanup`, `misc plugin`, `misc skill` |
+| Setup | `setup install`, `setup update` |
+| Maintenance | `misc reanalyze`, `database open/save/close`, `targets cleanup` |
 
 ### Output
 
@@ -262,10 +264,10 @@ idac py exec --code "result = {'entry': hex(idc.get_inf_attr(idc.INF_START_EA))}
 A bundled skill in [src/idac/skills/idac](src/idac/skills/idac) teaches Claude Code and Codex to prefer `idac` commands over ad hoc shell or raw IDAPython for RE work.
 
 ```bash
-idac misc skill install
+idac setup install --component skill
 ```
 
-This installs into both `~/.claude/skills/idac` and `~/.codex/skills/idac`; both agents auto-discover skills from their `skills/` directories. Once installed, the skill loads automatically when relevant. For a ready-to-fill task prompt covering anything from a light analysis pass to class-family recovery, run `idac workspace init <dir>` to scaffold a workspace containing `prompts/recovery-pass.md`.
+This installs into both `~/.claude/skills/idac` and `~/.codex/skills/idac`; both agents auto-discover skills from their `skills/` directories. After upgrading idac, refresh them with `idac setup update --component skill`. Once installed, the skill loads automatically when relevant. For a ready-to-fill task prompt covering anything from a light analysis pass to class-family recovery, run `idac workspace init <dir>` to scaffold a workspace containing `prompts/recovery-pass.md`.
 
 ## Development
 
