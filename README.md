@@ -90,15 +90,19 @@ The same command works against a live GUI session — drop `-c` and `idac` auto-
 
 ## Quick start
 
-Clone and install the CLI, then wire up the GUI plugin and agent skill:
+Install the CLI from [PyPI](https://pypi.org/project/idac/), then wire up the GUI plugin and agent skill:
 
 ```bash
-git clone https://github.com/trailofbits/idac.git
-cd idac
-uv tool install .            # installs the `idac` command on your PATH
+uv tool install idac         # installs the `idac` command on your PATH
 idac doctor                  # verify IDA install, license, and bridge
 idac misc plugin install     # GUI bridge plugin
 idac misc skill install      # Claude Code + Codex skill
+```
+
+To install the latest development version straight from git instead:
+
+```bash
+uv tool install git+https://github.com/trailofbits/idac.git
 ```
 
 Talk to a live GUI session:
@@ -270,9 +274,17 @@ This installs into both `~/.claude/skills/idac` and `~/.codex/skills/idac`; both
 ## Development
 
 ```bash
-uv sync
+git clone https://github.com/trailofbits/idac.git
+cd idac
+uv sync          # project venv with an editable install; run via `uv run idac ...`
 make test        # run tests
 make check       # format + lint + test + audit
+```
+
+To put an `idac` on your PATH that tracks your checkout, install it as editable:
+
+```bash
+uv tool install -e .
 ```
 
 See [docs/development.md](docs/development.md) for fixture regeneration, live GUI tests, and local tooling details.
