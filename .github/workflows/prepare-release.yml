@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
+      actions: write
     env:
       REQUESTED_VERSION: ${{ inputs.version }}
     steps:
@@ -77,17 +79,40 @@ jobs:
           echo "branch=$release_branch" >> "$GITHUB_OUTPUT"
           echo "commit=$release_commit" >> "$GITHUB_OUTPUT"
 
+      - name: Open release pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_BRANCH: ${{ steps.commit.outputs.branch }}
+        run: |
+          pr_url=$(gh pr create \
+            --base main \
+            --head "$RELEASE_BRANCH" \
+            --title "Prepare release v$RELEASE_VERSION" \
+            --body "Merging this pull request will publish release v$RELEASE_VERSION automatically.")
+          echo "url=$pr_url" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger required checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_BRANCH: ${{ steps.commit.outputs.branch }}
+        run: |
+          # Pull requests opened with GITHUB_TOKEN never receive pull_request
+          # events, so dispatch the required checks onto the release branch.
+          gh workflow run ci.yml --ref "$RELEASE_BRANCH"
+          gh workflow run zizmor.yml --ref "$RELEASE_BRANCH"
+
       - name: Show pull request link
         env:
-          RELEASE_BRANCH: ${{ steps.commit.outputs.branch }}
           RELEASE_COMMIT: ${{ steps.commit.outputs.commit }}
+          PR_URL: ${{ steps.pr.outputs.url }}
         run: |
           {
             echo "## Release v$RELEASE_VERSION is ready"
             echo
             echo "Commit: \`$RELEASE_COMMIT\`"
             echo
-            echo "[Open the release pull request](https://github.com/$GITHUB_REPOSITORY/compare/main...$RELEASE_BRANCH?expand=1)"
+            echo "Release pull request: $PR_URL"
             echo
-            echo "Merging this pull request will publish the release automatically."
+            echo "Merging the pull request will publish the release automatically."
           } >> "$GITHUB_STEP_SUMMARY"
