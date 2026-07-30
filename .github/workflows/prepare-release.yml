@@ -1,0 +1,93 @@
+name: prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release; leave blank to bump the minor version
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Create release branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      REQUESTED_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: main
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: false
+
+      - name: Bump version
+        run: |
+          if test -n "$REQUESTED_VERSION"; then
+            uv version "$REQUESTED_VERSION" --no-sync
+          else
+            uv version --bump minor --no-sync
+          fi
+
+          release_version=$(uv version --short)
+          release_tags=$(git ls-remote --tags origin 'v*' | cut -f2 | sed -e 's|^refs/tags/||' -e '/\^{}$/d')
+          RELEASE_VERSION="$release_version" RELEASE_TAGS="$release_tags" uv run .github/scripts/check_release_version.py
+
+          if git diff --quiet -- pyproject.toml uv.lock; then
+            echo "v$release_version does not change the version files" >&2
+            exit 1
+          fi
+
+          echo "RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
+
+      - name: Create release branch
+        id: commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_branch="release/v$RELEASE_VERSION"
+
+          if git ls-remote --exit-code origin "refs/heads/$release_branch" >/dev/null; then
+            echo "$release_branch already exists; delete it before preparing this release again" >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml uv.lock
+          git commit -m "Prepare release v$RELEASE_VERSION"
+
+          release_commit=$(git rev-parse HEAD)
+          gh auth setup-git
+          git push origin "HEAD:refs/heads/$release_branch"
+
+          echo "branch=$release_branch" >> "$GITHUB_OUTPUT"
+          echo "commit=$release_commit" >> "$GITHUB_OUTPUT"
+
+      - name: Show pull request link
+        env:
+          RELEASE_BRANCH: ${{ steps.commit.outputs.branch }}
+          RELEASE_COMMIT: ${{ steps.commit.outputs.commit }}
+        run: |
+          {
+            echo "## Release v$RELEASE_VERSION is ready"
+            echo
+            echo "Commit: \`$RELEASE_COMMIT\`"
+            echo
+            echo "[Open the release pull request](https://github.com/$GITHUB_REPOSITORY/compare/main...$RELEASE_BRANCH?expand=1)"
+            echo
+            echo "Merging this pull request will publish the release automatically."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -3,6 +3,8 @@ name = "idac"
 version = "0.18.0"
 description = "Agent-friendly CLI for IDA with GUI and idalib backends"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "Jay Little / Trail of Bits", email = "jay@trailofbits.com" }
 ]
