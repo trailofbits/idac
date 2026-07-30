@@ -3,6 +3,7 @@
 # ///
 """Validate RELEASE_VERSION against RELEASE_TAGS."""
 
+import contextlib
 import os
 import sys
 
@@ -14,10 +15,8 @@ if release.local is not None:
 
 versions = []
 for tag in os.environ["RELEASE_TAGS"].split():
-    try:
+    with contextlib.suppress(InvalidVersion):
         versions.append(Version(tag))
-    except InvalidVersion:
-        pass
 
 if release in versions:
     sys.exit(f"v{release} has already been released")
