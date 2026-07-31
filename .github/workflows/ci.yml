@@ -1,14 +1,15 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
   merge_group:
   workflow_dispatch:
 
 permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
@@ -29,6 +30,11 @@ jobs:
 
   test:
     name: Test (IDA ${{ matrix.ida-version }})
+    # The steps below run only in the merge queue. On PRs they are all
+    # skipped and the job succeeds immediately, which satisfies the required
+    # status checks so the PR can be queued. A job-level `if` would not work:
+    # it suppresses matrix expansion, so the required per-version check names
+    # would never be reported.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -42,11 +48,13 @@ jobs:
             ida-installer: release/9.4/ida-pro/ida-pro_94_x64linux.run
     steps:
       - name: Check out repository
+        if: github.event_name == 'merge_group'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install IDA Pro
+        if: github.event_name == 'merge_group'
         id: ida
         uses: HexRaysSA/ida-hcli-actions/install-ida@2ff7f4e7c466809cfae6ea20c81264bdb6a33d49 # v1.1.0
         with:
@@ -56,9 +64,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install uv
+        if: github.event_name == 'merge_group'
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           python-version: "3.12"
 
       - name: Test
+        if: github.event_name == 'merge_group'
         run: make test
