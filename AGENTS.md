@@ -208,6 +208,48 @@ For fixture-driven class tests, prefer updating and validating:
 - `README.md`
 - `src/idac/skills/idac/`
 
+## Release Process
+
+Releases are automated end to end by GitHub Actions. Do not bump the version
+in `pyproject.toml`/`uv.lock` by hand, create `v*` tags, or publish to PyPI
+manually — the workflows own all of that.
+
+To cut a release:
+
+1. Dispatch the `prepare release` workflow on `main`:
+
+   ```bash
+   gh workflow run prepare-release.yml                   # bump the minor version
+   gh workflow run prepare-release.yml -f version=X.Y.Z  # or release an explicit version
+   ```
+
+2. Wait for the run to finish. It commits the version bump to a new
+   `release/vX.Y.Z` branch:
+
+   ```bash
+   gh run watch "$(gh run list --workflow=prepare-release.yml --limit 1 --json databaseId -q '.[0].databaseId')"
+   git ls-remote origin 'refs/heads/release/*'
+   ```
+
+3. Open a pull request from the release branch:
+
+   ```bash
+   gh pr create --head release/vX.Y.Z --title "Prepare release vX.Y.Z" \
+     --body "Merging this pull request publishes vX.Y.Z automatically."
+   ```
+
+4. Merge the PR through the merge queue like any other PR. Once a `release/*`
+   PR merges into `main`, the `publish release` workflow tags the merge
+   commit, creates the GitHub release, and publishes to PyPI. No further
+   action is needed.
+
+Notes:
+
+- The new version must be strictly newer than every existing `v*` tag; the
+  prepare workflow fails otherwise.
+- If the `release/vX.Y.Z` branch already exists from an earlier attempt,
+  delete it before dispatching the workflow again.
+
 ## Agent Guardrails
 
 - Do not modify the real `~/.idapro/plugins` contents as part of routine repo work.
