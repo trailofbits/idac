@@ -1,13 +1,14 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
   merge_group:
 
 permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
@@ -28,6 +29,9 @@ jobs:
 
   test:
     name: Test (IDA ${{ matrix.ida-version }})
+    # Runs only in the merge queue; on PRs the job is skipped, which still
+    # satisfies the required status check so the PR can be queued.
+    if: github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     permissions:
       contents: read
