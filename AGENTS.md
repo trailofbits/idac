@@ -245,6 +245,11 @@ To cut a release:
 
 Notes:
 
+- The prepare workflow has Claude draft the `CHANGELOG.md` section for the new
+  version on the release branch (requires the `ANTHROPIC_API_KEY` actions
+  secret); review and edit that entry as part of the release PR. The changelog
+  covers user-facing changes only, so CI, release tooling, tests, and internal
+  refactoring stay out of it even when they dominate the release.
 - The new version must be strictly newer than every existing `v*` tag; the
   prepare workflow fails otherwise.
 - If the `release/vX.Y.Z` branch already exists from an earlier attempt,

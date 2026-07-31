@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.19.0
 
-This change de-duplicates and tightens the bundled agent guidance, prompts, and reference docs.
+This release de-duplicates and tightens the bundled agent guidance, prompts, and reference docs.
 
 - Consolidated the three workspace task prompts into one fill-in `prompts/recovery-pass.md` with explicit required fields and `{{...}}` placeholders, and gave the workspace `AGENTS.md` a visible default-target field.
 - Gave each recurring rule (batch linting, selector calibration, capture strategy, class-evidence caveats) a single canonical home across `SKILL.md`, the references, and the workspace template, and unified the `batch --lint --out` command spelling.
