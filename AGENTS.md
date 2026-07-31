@@ -250,6 +250,9 @@ Notes:
   secret); review and edit that entry as part of the release PR. The changelog
   covers user-facing changes only, so CI, release tooling, tests, and internal
   refactoring stay out of it even when they dominate the release.
+- The GitHub release notes are the new version's `CHANGELOG.md` section plus a
+  compare link, so editing that section in the release PR is the way to change
+  what the release page says. Publishing fails if the section is missing.
 - The new version must be strictly newer than every existing `v*` tag; the
   prepare workflow fails otherwise.
 - If the `release/vX.Y.Z` branch already exists from an earlier attempt,

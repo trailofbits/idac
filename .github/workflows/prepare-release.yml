@@ -65,6 +65,8 @@ jobs:
           github_token: ${{ github.token }}
           prompt: |
             Write the CHANGELOG.md entry for idac ${{ env.RELEASE_VERSION }}.
+            Publishing the release copies this section verbatim into the
+            GitHub release notes, so it is what users read first.
 
             Review the history since the previous release:
             `git log --first-parent ${{ env.PREVIOUS_TAG }}..HEAD`, using

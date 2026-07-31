@@ -114,11 +114,42 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
       - name: Download distributions
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: distributions
           path: dist/
+
+      # Release notes come from CHANGELOG.md so the release page and the repo
+      # tell the same story. `--generate-notes` would list merged PRs instead.
+      - name: Build release notes
+        env:
+          RELEASE_VERSION: ${{ needs.build.outputs.release-version }}
+          COMPARE_URL: ${{ github.server_url }}/${{ github.repository }}/compare
+        run: |
+          awk -v version="$RELEASE_VERSION" '
+            $0 == "## " version {found = 1; next}
+            found && /^## / {exit}
+            found {print}
+          ' CHANGELOG.md >release-notes.md
+
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "CHANGELOG.md has no entry for $RELEASE_VERSION" >&2
+            exit 1
+          fi
+
+          previous_tag=$(git tag --list 'v*' --sort=-v:refname | grep -vxF "v$RELEASE_VERSION" | head -1)
+          if test -n "$previous_tag"; then
+            printf '\n**Full changelog**: %s/%s...v%s\n' \
+              "$COMPARE_URL" "$previous_tag" "$RELEASE_VERSION" >>release-notes.md
+          fi
 
       - name: Create GitHub release
         env:
@@ -128,7 +159,7 @@ jobs:
         run: |
           # Keep existing release assets unchanged on reruns.
           if ! gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
-            gh release create "v$RELEASE_VERSION" dist/* --generate-notes --verify-tag
+            gh release create "v$RELEASE_VERSION" dist/* --notes-file release-notes.md --verify-tag
           fi
 
   publish:
