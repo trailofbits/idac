@@ -159,7 +159,10 @@ jobs:
         run: |
           # Keep existing release assets unchanged on reruns.
           if ! gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
-            gh release create "v$RELEASE_VERSION" dist/* --notes-file release-notes.md --verify-tag
+            gh release create "v$RELEASE_VERSION" dist/* \
+              --title "v$RELEASE_VERSION" \
+              --notes-file release-notes.md \
+              --verify-tag
           fi
 
   publish:
