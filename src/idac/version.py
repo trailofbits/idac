@@ -1,1 +1,3 @@
-VERSION = "0.18.0"
+from importlib.metadata import version
+
+VERSION = version("idac")
