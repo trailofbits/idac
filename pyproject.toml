@@ -1,6 +1,6 @@
 [project]
 name = "idac"
-version = "0.19.0"
+version = "0.19.1"
 description = "Agent-friendly CLI for IDA with GUI and idalib backends"
 readme = "README.md"
 license = "Apache-2.0"

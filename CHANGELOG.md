@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.1
+
+This patch release fixes the version that `idac` reports about itself.
+
+- Fixed `idac --version` reporting a stale hardcoded version instead of the installed package version.
+
 ## 0.19.0
 
 This release de-duplicates and tightens the bundled agent guidance, prompts, and reference docs.
