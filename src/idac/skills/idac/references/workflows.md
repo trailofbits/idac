@@ -20,13 +20,13 @@ Read this for safe mutation, batch, selector calibration, broad discovery, and p
 ```bash
 idac doctor
 idac targets list --json
-idac function metadata "sub_08041337" -c "pid:<pid>"
-idac decompile "sub_08041337" -c "pid:<pid>"
-idac decompile "sub_08041337" -o "/tmp/sub_08041337.txt" -c "pid:<pid>"
-idac xrefs "sub_08041337" -c "pid:<pid>"
+idac function metadata "sub_08041337" --instance "<record-id>"
+idac decompile "sub_08041337" --instance "<record-id>"
+idac decompile "sub_08041337" -o "/tmp/sub_08041337.txt" --instance "<record-id>"
+idac xrefs "sub_08041337" --instance "<record-id>"
 ```
 
-If only one IDA GUI window is open, you can often omit `-c`.
+Omit the selector only when exactly one READY Nexus instance exists.
 If target discovery is failing rather than merely unknown, read [targets-and-backends.md](targets-and-backends.md) or [troubleshooting.md](troubleshooting.md) before treating diagnostics as part of the normal read workflow.
 
 Live GUI notes:
@@ -34,28 +34,28 @@ Live GUI notes:
 - if a command will be parsed, use `--json`
 - for parsed-read and `--out` defaults, read [cli.md](cli.md)
 - for a single large decompile, use `-o/--out` on `decompile`; reserve `--out-file` and `--out-dir` for `decompilemany`
-- run one `idac` command at a time per GUI target; the bridge serializes requests internally, and background parallel commands can fill the queue or make mutation ordering unclear
+- run one `idac` command at a time per target; Nexus serializes IDA work, and
+  background parallel commands can fill the queue or make mutation ordering unclear
 
 ## Open a binary
 
 For detailed context selection and first-time import guidance, read [targets-and-backends.md](targets-and-backends.md).
 
 ```bash
-idac database open "/path/to/binary" --json
 idac targets list --json
-idac database show -c "db:/path/to/binary" --json
-idac decompile "main" -c "db:/path/to/binary" --f5
+idac database show -c "/path/to/binary" --json
+idac decompile "main" -c "/path/to/binary" --f5
 ```
 
 ## Work from an existing database file
 
 ```bash
 idac doctor
-idac database show -c "db:sample.i64"
-idac decompile "sub_08041337" -c "db:sample.i64"
-idac decompile "sub_08041337" --f5 -c "db:sample.i64"
-idac decompilemany "sub_0804" --out-dir "/tmp/function_decompile" -c "db:sample.i64"
-idac ctree "sub_08041337" -c "db:sample.i64"
+idac database show -c sample.i64
+idac decompile "sub_08041337" -c sample.i64
+idac decompile "sub_08041337" --f5 -c sample.i64
+idac decompilemany "sub_0804" --out-dir "/tmp/function_decompile" -c sample.i64
+idac ctree "sub_08041337" -c sample.i64
 ```
 
 ## Recover type information around a function
@@ -107,7 +107,7 @@ idac function prototype show "sub_08041337"
 idac decompile "sub_08041337"
 ```
 
-Symbol renames go through `misc rename <identifier> <new_name>`, which is rejected from both `batch` and `preview`: check the current name first (`function metadata`), commit the rename one-off, and confirm with readback.
+Symbol renames go through `misc rename <identifier> <new_name>`. Preview them one-off before committing; they remain rejected from `batch` so each symbol rename has an explicit readback boundary.
 Add `--propagate-callers` when you want `function prototype set` to also apply the new callee type at matching caller call sites.
 Use `function prototype check` first when the declaration uses custom calling conventions, usercall annotations, or newly imported support types.
 Use `type check` before large imports; use `type deps <name>` after import when the dependency-expanded declaration is the clearest audit artifact.
@@ -131,7 +131,7 @@ The command writes one `.c` artifact per function plus `manifest.json`. Add `--d
 For symbol-rich families, run one `decompilemany "<family>" --out-dir ...` capture before the first mutation so you can grep every constructor, destructor, parser, and helper locally. After import and reanalysis, redecompile only the functions you must verify (with `--f5`); do not redo the family-wide dump.
 During type or prototype recovery, prefer `decompile --f5` and `decompilemany --f5` so discovery and verification artifacts reflect the latest imported types and prototype changes.
 For ordinary exploration and routine readback, rerun a one-off decompile with `--f5` or `--no-cache` only when the output looks stale after reanalysis.
-If legacy `type declare` import rejects template-heavy or newer C++ syntax, retry the same import with `--clang`.
+If the default `type declare` parser rejects template-heavy or newer C++ syntax, retry the same import with `--clang`.
 Before rename-heavy cleanup, fix the shared helper prototypes that dominate the caller bodies, then reanalyze those callers and reread the locals. Prototype cleanup usually improves trustworthiness more than cosmetic renames do.
 
 ## Selector calibration
@@ -181,8 +181,8 @@ Batch files should:
 
 - use one `idac` subcommand per line
 - omit the leading `idac`
-- omit `-c`, `--timeout`, and `--format`
-- omit per-command `--out` for mutation logging; use child `--out` only when that specific read command must write its own artifact
+- omit `-c`, `--instance`, `--timeout`, and `--format`; target and timeout options belong on the wrapper and are rejected on child commands
+- omit per-command `--out` for mutation logging; mutating child `--out` is rejected, while read-only children may use it for their own artifacts
 - prefer `--decl-file` for long type or prototype text
 - always pass `--out` to `batch` so the full step log is captured in a stable artifact
 - keep related `--decl-file`, `--functions-file`, and explicit child artifact paths next to the batch file; relative child paths are resolved from the batch file directory
@@ -204,9 +204,14 @@ function locals retype "ExampleDerived__method_1" --index 7 --decl-file "example
 preview function prototype set "ExampleDerived__method_1" --decl-file "example_method_1.h"
 ```
 
-For `idalib`, `batch` keeps ordered logging while reusing the same open database state for the shared `-c db:<path>` locator. Each step is still a separate request.
+`batch` keeps ordered logging while reusing one Nexus handle for the selected context.
+Each step remains a separate operation within that session.
+The wrapper artifact starts as `pending`, is checkpointed after every completed line, and becomes terminal only after the Nexus session closes. Ctrl-C writes an `interrupted` terminal record and exits 130.
 For larger prototype and local-rename passes, prefer `batch` so the mutation order is explicit and the run leaves behind a stable ordered log.
-Setup-only `misc` commands such as `misc plugin install` and `misc skill install` are intentionally rejected from `batch`, and so is `misc rename` — commit symbol renames one-off. `misc reanalyze` is batch-safe and belongs between type/prototype mutations and local cleanup in full recovery batches.
+Setup commands such as `setup gui` and `setup skill` are intentionally rejected from
+`batch`, and so is `misc rename` — preview and commit symbol renames one-off. `misc reanalyze` is
+batch-safe and belongs between type/prototype mutations and local cleanup in full
+recovery batches.
 
 ## Broad discovery defaults
 

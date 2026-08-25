@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "idac",
+  "displayName": "idac",
+  "version": "0.19.1",
+  "description": "Drive IDA Pro through the idac CLI for decompilation, inspection, type recovery, and database mutation workflows",
+  "author": {
+    "name": "Trail of Bits",
+    "email": "opensource@trailofbits.com",
+    "url": "https://github.com/trailofbits"
+  },
+  "homepage": "https://github.com/trailofbits/idac",
+  "repository": "https://github.com/trailofbits/idac",
+  "license": "Apache-2.0",
+  "keywords": [
+    "ida-pro",
+    "reverse-engineering",
+    "binary-analysis"
+  ]
+}

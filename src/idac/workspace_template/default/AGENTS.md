@@ -19,9 +19,10 @@ errors, `references/cli.md` (`idac docs cli`) is canonical.
 
 Default target: (none set — ask before assuming one)
 
-Replace the parenthetical above with a context selector such as `db:/path/to/firmware.i64`
-or `pid:1234`. A filled-in **Context** value in a task prompt overrides this default; if
-both are missing, ask instead of guessing.
+Replace the parenthetical above with a context selector such as
+`-c /path/to/firmware.i64` or `--instance <record-id>`. A filled-in **Context** value in
+a task prompt overrides this default; if both are missing, omit a selector only when
+exactly one READY Nexus instance exists. Otherwise ask instead of guessing.
 
 ## Conventions
 

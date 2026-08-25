@@ -315,7 +315,7 @@ The value 2 will be represented as `mystruct.d-1`
  __custom(dtid, fid)
 ```
 
-where dtid is the name of a custom data type and fid is the name of a custom data format. The custom type and format must be registered by a plugin beforehand, at the database opening time. Otherwise, custom data type and format ids will be displayed instead of names.
+where dtid is the name of a custom data type and fid is the name of a custom data format. The custom type and format must be registered by an IDA extension before the database is loaded. Otherwise, custom data type and format ids will be displayed instead of names.
 
 ### Data representation: tabular form
 

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BIN_DIR="${FIXTURES_BUILD_DIR:-$ROOT_DIR/fixtures/build}"
 IDB_DIR="${FIXTURES_IDB_DIR:-$ROOT_DIR/fixtures/idb}"
-IDA_BIN="${IDA_IDAT:-/Applications/IDA Professional 9.3.app/Contents/MacOS/idat}"
+IDA_BIN="${IDA_IDAT:-/Applications/IDA Professional 9.4.app/Contents/MacOS/idat}"
 
 mkdir -p "$IDB_DIR"
 

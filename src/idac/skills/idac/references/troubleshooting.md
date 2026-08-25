@@ -1,50 +1,66 @@
 # Troubleshooting
 
-Read this when bridge/backend state, mutation failures, stale decompiler output, or sandbox socket access is unclear.
+Read this when Nexus discovery, target selection, runtime compatibility, mutations, or
+decompiler readback is unclear.
 
-## No GUI targets found
+## No READY Nexus instances found
 
 Diagnose before installing anything:
 
 ```bash
 idac doctor
-idac targets list
-idac targets cleanup
-idac targets list
+idac targets list --json
 ```
 
-If no targets appear, either the `idac_bridge` plugin is not loaded in the current GUI session or stale bridge runtime files were masking it (`targets cleanup` removes those; add `--out <path>` to keep the full result). If `doctor` reports the plugin missing, run `idac misc plugin install` (add `--force` to replace an existing install). idac cannot reload the plugin itself — ask the user to reload the `idac_bridge` plugin in the IDA GUI, or restart IDA, then rerun `targets list`.
+For a live GUI, run `idac setup gui` when `doctor` reports that the matching Nexus
+component is missing, then restart IDA or load the component as required by IDA. The
+supported versions are ida-nexus 0.7.0, ida-domain 0.5.1, IDA 9.4+, and Python 3.11+.
+Any mismatch is an error.
 
-This section is only about GUI rows. Headless targets opened through `database open` appear in `targets list --json` with `backend: "idalib"` and should be used with `-c "db:/path"`.
-
-## Agent sandbox cannot reach the bridge socket
-
-Both backends use Unix sockets (default runtime dir: `/tmp/idac`, controlled by `IDAC_RUNTIME_DIR`). If your environment blocks Unix socket connections, *every* live GUI command will fail with errors like "Failed to contact IDA GUI bridge".
-
-The bridge socket does not distinguish read-only vs mutating operations. If read-only commands succeed but a mutation fails, focus on the reported IDA/database failure mode (for example: IDA undo disabled for `preview`, a read-only database, missing types, or a rejected declaration) rather than sandbox socket permissions.
-
-## Multiple GUI targets are open
-
-Use an explicit selector from `targets list`:
+For headless work, pass the `.i64` or binary path directly:
 
 ```bash
-idac targets list
-idac decompile "sub_08041337" -c "pid:<pid>"
+idac database show -c /path/to/sample.i64 --json
 ```
 
-## Open a binary with `idalib`
+Nexus will reuse a matching instance or start a managed worker. If startup fails, fix
+the reported IDA, license, path, or version problem; idac does not switch execution
+mechanisms.
 
-The `idalib` backend can open a binary that IDA recognizes. For the canonical command sequence, timeout guidance, and `main` fallback, read [targets-and-backends.md](targets-and-backends.md#database-context).
+## A record is BLOCKED or unavailable
 
-## `idalib` changes did not reach disk
+`targets list --json` preserves the Nexus `state` and `detail`. A command attaches only
+to a READY record. BLOCKED, stale, busy, or disconnected records are not silently
+replaced, and an operation is not retried after a connection failure. Resolve the
+reported owner/version/liveness problem or select another known target explicitly.
 
-That is expected until you save the open database. `database close -c "db:sample.i64"` saves before closing by default; use `database close -c "db:sample.i64" --discard` to abandon pending changes.
+## Multiple READY instances are open
+
+Use the exact record ID from `targets list`:
 
 ```bash
-idac database save -c "db:sample.i64"
-idac database close -c "db:sample.i64"
-idac database close -c "db:sample.i64" --discard
+idac targets list --json
+idac decompile "sub_08041337" --instance "<record-id>"
 ```
+
+Alternatively, use `-c PATH` to select an `.i64` or binary identity. With no selector,
+idac proceeds only when exactly one READY instance exists.
+
+## Headless analysis takes a long time
+
+Headless opens request auto-analysis and wait for it before dispatch. A first binary
+import may therefore take much longer than later commands. Supply a deliberate Nexus
+timeout when its defaults are too short. Live GUI attachment never forces analysis.
+
+## Changes did not reach disk
+
+Successful headless mutations are checkpointed when the command releases its Nexus
+lease; the managed worker then remains warm for five idle minutes. If a save fails, the
+command reports the failure.
+
+Live GUI mutations deliberately remain unsaved. Checkpoint them explicitly with
+`idac database save`, using `--instance RECORD_ID` or `-c PATH` when selection would
+otherwise be ambiguous.
 
 ## `function prototype set` reports unknown type(s)
 
@@ -61,18 +77,18 @@ If a local type exists but its dependencies are unclear, use `type deps <name>` 
 
 ## Preview did not persist
 
-That is expected. `preview` applies the mutation, captures the result, and undoes it before returning.
+That is expected. `preview` applies the mutation, captures the result, and restores the prior state before returning.
 
 ```bash
 idac preview -o "/tmp/preview.json" comment set "sub_08041337" "entry point"
 ```
 
-Preview performs the real mutation before undoing it, so the readback reflects the temporary changed state.
+Preview performs the real mutation before restoring it, so the readback reflects the temporary changed state.
 
 For `function locals update`, `function locals rename`, and `function locals retype`, preview always returns the full before/after local list.
 For `function locals apply`, preview also returns before/after local lists, so use it when a single function has many coordinated local changes.
 
-Preview payloads are structured JSON or JSONL objects; see [cli.md](cli.md#preview) for the top-level key list. For mutating commands, `before` and `after` capture the temporary state around the undo cycle, and `result` contains the command-specific return payload.
+Preview payloads are structured JSON or JSONL objects; see [cli.md](cli.md#preview) for the top-level key list. For mutating commands, `before` and `after` capture the temporary state around the rollback cycle, and `result` contains the command-specific return payload.
 
 For `type declare` previews, `replaced_types` is the list of local types whose declarations changed in the preview. It is informational, not a failure signal. If a familiar framework typedef such as `CFDateRef` appears there, verify the local type directly with `type show` before treating it as a regression.
 
@@ -102,7 +118,7 @@ idac function locals list "sub_08041337" --json --out "/tmp/sub_08041337.locals.
 ```
 
 `--f5` forces a fresh Hex-Rays pass instead of reusing cached pseudocode.
-If the issue is backend-related, rerun `doctor` first.
+If the issue appears related to the selected instance or runtime, rerun `doctor` first.
 
 ## Large readback is hard to inspect inline
 

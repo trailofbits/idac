@@ -2,6 +2,9 @@
 
 ## Local setup
 
+`idac` requires Python 3.11 or newer and pins its IDA integration stack to
+`ida-nexus==0.7.0` (protocol 6) and `ida-domain==0.5.1`.
+
 ```bash
 uv sync
 ```
@@ -17,95 +20,103 @@ make audit
 uv run idac --full-help
 ```
 
-## Testing
-
-Run the test suite:
+Install the matching IDA GUI component when testing a live desktop session:
 
 ```bash
-uv sync
+uv run idac setup gui
+uv run idac doctor
+```
+
+`setup gui` delegates installation to pinned `ida-hcli==0.19.2` and installs the
+`ida-nexus` v0.7.0 release with ida-domain 0.5.1. Do not copy integration files into
+IDA by hand.
+
+## Testing
+
+The suite has two main layers, split by the `requires_ida` marker:
+
+- `make test-unit` runs parser, client-session, remote-bundle, renderer, and helper
+  tests without IDA.
+- `make test-integration` drives real Nexus-managed IDA 9.4+ workers against copied
+  fixture databases. The tests are skipped when a supported licensed IDA installation
+  is unavailable.
+- `make coverage` runs the full suite with line coverage. Work executed inside IDA is
+  outside the local Python coverage process, so use the integration assertions—not
+  the local percentage—to judge the remote operation bundle.
+
+Start with focused tests for the surface being changed, then run the broader suite:
+
+```bash
+uv run pytest -q tests/test_nexus_session.py tests/test_remote_ops.py
+uv run pytest -q tests/test_ops_helpers.py tests/test_preview.py
+uv run pytest -q -m requires_ida
 uv run pytest -q
 ```
 
-The suite has two layers, split by the `requires_ida` marker:
+## Nexus execution structure
 
-- `make test-unit` — no IDA required; runs in a few seconds.
-- `make test-integration` — talks to a real idalib daemon against the committed
-  fixture databases; needs a licensed local IDA install. These tests are
-  auto-skipped when no install is discovered.
-- `make coverage` — full suite with line coverage. Note that integration tests
-  execute the CLI in subprocesses, so their coverage is not attributed; judge
-  modules with dedicated `test_idalib_*` files by those tests, not the percentage.
+`src/idac/nexus.py` is the sole client-side IDA integration boundary. It uses public
+ida-nexus APIs for discovery, selection, database handles, leases, analysis waits,
+execution, and saves. Keep these invariants when changing it:
 
-When changing the operation layer, start with targeted suites before broad runs:
+- `-c/--context` is a filesystem path to an `.i64` or input binary;
+  `--instance` is an exact Nexus discovery record ID.
+- A top-level invocation owns one lazily opened handle. Batch and preview children reuse
+  it and cannot switch contexts.
+- Headless opens request auto-analysis and wait for completion; attaching to a live GUI
+  does not force analysis. The default headless analysis wait is finite (120 seconds),
+  and an explicit `--timeout` overrides it. Analysis or compatibility failure retires
+  the newly opened headless worker with `save=False`.
+- Headless leases use a 300-second keepalive. Successful headless mutations are saved
+  before another remote request or release; GUI saves remain explicit.
+- Selection, timeout, disconnect, remote, and version failures propagate without retry,
+  target switching, or alternate execution paths.
+- Retiring poisoned headless state may briefly retry only Nexus `instance_busy` or
+  `instance_shared` responses on the same exact worker while its prior lease callback
+  finishes. This cleanup never redispatches the interrupted idac operation.
+- A failed mutating dispatch or arbitrary Python execution has an uncertain IDB outcome.
+  Remote failures are treated as dirty so headless finalization attempts one checkpoint;
+  a failed headless save poisons the session and retires its exact worker with
+  `save=False`, preventing an implicit retry at keepalive expiry. A failed preview or
+  locally interrupted request follows the same discard path after prior completed steps
+  have been checkpointed.
+- Import only supported ida-nexus exports. Do not depend on its private registry,
+  authentication, or HTTP implementation.
 
-```bash
-uv run pytest -q tests/test_ops_helpers.py
-uv run pytest -q tests/test_preview.py
-uv run pytest -q tests/test_idalib_types.py
-uv run pytest -q tests/test_idalib_name_locals_semantics.py
-uv run pytest -q tests/test_idalib_struct_enum_semantics.py
-uv run pytest -q tests/test_vtable_helpers.py
-```
+`src/idac/remote_ops.py` is uploaded as one self-contained `RemoteModule` source asset.
+IDA does not import the local `idac` package. Keep request state and IDA objects out of
+module globals, accept and return JSON-native values, and keep the source comfortably
+below Nexus's 4 MiB upload ceiling.
 
-These cover most of the high-churn operation surfaces:
+The registry in the remote source owns IDA handlers, mutation flags, and preview
+support. Keep its exported operation set in parity with the client operation list and
+renderer coverage. Preview applies a real mutation, reads the temporary state, and
+restores it through IDA undo or an operation-specific rollback within one remote execution.
 
-- operation manifest / dispatch / preview plumbing
-- `type declare` parsing, diagnostics, alias rewrites, and bisect behavior
-- local variable mutation semantics
-- struct / enum preview round-trips
-- vtable slot and pointer-width helpers
+For type declaration internals, keep `DeclarationChunk` through parsing, diagnosis,
+and bisect flows; convert it to plain dictionaries only at serialization boundaries.
+For reusable remote behavior, add a meaningful helper only when it reduces genuine
+duplication or complexity. Keep one-off operations inline instead of introducing tiny
+forwarding functions.
 
-## Operation Layer Structure
+## Fixture binaries
 
-`src/idac/ops/runtime.py` is the shared toolkit layer. Put reusable IDA lookups, normalization, and helper reads there when they are likely to be shared across multiple command families.
+The repository includes fixture binaries and `.i64` databases under
+[fixtures](../fixtures). The committed class-recovery artifacts are Mach-O ARM64 files
+generated on macOS/Apple Silicon.
 
-The live operation modules in `src/idac/ops/families/` should stay focused on:
+Representative sources and helpers:
 
-- command-specific orchestration
-- request validation and user-facing error messages
-- typed request/result models and result shaping
+- [fixtures/src/handler_hierarchy.cpp](../fixtures/src/handler_hierarchy.cpp)
+- [fixtures/src/handler_hierarchy.hpp](../fixtures/src/handler_hierarchy.hpp)
+- [fixtures/scripts/build_handler_hierarchy.sh](../fixtures/scripts/build_handler_hierarchy.sh)
+- [fixtures/scripts/make_handler_hierarchy_idbs.sh](../fixtures/scripts/make_handler_hierarchy_idbs.sh)
 
-For operation metadata:
+### IDA isolation
 
-- `src/idac/ops/manifest.py` is the source of truth for supported operations, mutation flags, and preview metadata
-- `src/idac/ops/dispatch.py` should derive handler registration from the operation manifest and typed registry, not maintain a parallel operation list
-- `src/idac/ops/preview.py` should remain a thin wrapper around `PreviewSpec` behavior
-- `src/idac/ops/helpers/` should hold shared parameter parsing and matching helpers that do not belong on `IdaRuntime`
-
-For `type declare` internals:
-
-- keep `DeclarationChunk` as the internal representation through parse, diagnostics, and bisect flows
-- convert to plain dicts only at boundaries that actually need serialized output
-- prefer small helpers for optional bisect / trial-parse control flow instead of growing `_type_declare` inline
-
-For preview behavior:
-
-- preview mode performs a real mutation under IDA undo, then captures the before/after state and undoes it
-- remember that previewed mutating operations apply the change before undoing it
-- if preview formatting changes, prefer putting defaults on `PreviewSpec` rather than duplicating fallback logic in the wrapper
-
-For output and transport boundaries:
-
-- `src/idac/cli2/renderers/__init__.py` owns text rendering
-- `src/idac/transport/schema.py` owns wire request/response schema definitions
-
-### Fixture binaries
-
-The repo includes fixture binaries and IDA databases under [fixtures](../fixtures).
-The committed fixture binaries and `.i64` databases are Mach-O ARM64 artifacts generated on macOS/Apple Silicon.
-
-Representative class-recovery fixture artifacts:
-
-- source: [fixtures/src/handler_hierarchy.cpp](../fixtures/src/handler_hierarchy.cpp)
-- importable type header: [fixtures/src/handler_hierarchy.hpp](../fixtures/src/handler_hierarchy.hpp)
-- build helper: [fixtures/scripts/build_handler_hierarchy.sh](../fixtures/scripts/build_handler_hierarchy.sh)
-- database helper: [fixtures/scripts/make_handler_hierarchy_idbs.sh](../fixtures/scripts/make_handler_hierarchy_idbs.sh)
-
-### IDA batch runs and fixture regeneration
-
-When regenerating fixture `.i64` files or running any workflow that invokes `idat`, avoid using the live `~/.idapro` directly. A globally installed `idac_bridge_plugin.py` can import the current checkout and break batch analysis if the repo is mid-change.
-
-Use an isolated `IDAUSR` that keeps the license/config files but leaves `plugins/` empty:
+Fixture generation and tests that start IDA must not use the live `~/.idapro` profile.
+Create an isolated `IDAUSR`, copy only the license/configuration files that IDA needs,
+and leave its integration directory empty unless the test explicitly installs Nexus:
 
 ```bash
 tmpdir=$(mktemp -d /tmp/idac-test-idapro.XXXXXX)
@@ -116,34 +127,41 @@ mkdir -p "$tmpdir/plugins"
 export IDAUSR="$tmpdir"
 ```
 
-Then regenerate the committed class fixture artifacts:
+Then regenerate the class fixture artifacts:
 
 ```bash
 bash fixtures/scripts/build_handler_hierarchy.sh
 bash fixtures/scripts/make_handler_hierarchy_idbs.sh
 ```
 
-If `idat` logs mention plugin import errors from `~/.idapro/plugins/idac_bridge_plugin.py`, rerun with the isolated `IDAUSR` before assuming the fixture or CLI code is at fault.
+The shared pytest fixture creates equivalent per-test isolation. When a live-GUI test
+needs Nexus installed, point `IDAUSR` at that isolated profile before running
+`idac setup gui`.
 
-### Test coverage
+## Live Nexus GUI tests
 
-Current suite covers:
-
-- GUI transport
-- `idalib` backend reads
-- type/struct/enum commands
-- class commands and `type declare --replace`
-- local variable commands
-- preview behavior
-- timeout handling
-- `doctor`
-- `ctree`
-- `reanalyze`
-
-### Live GUI tests
-
-Optional live GUI transport coverage uses a real Unix socket bridge service and is skipped by default:
+Optional live desktop coverage is skipped by default. Start IDA 9.4+ with the matching
+Nexus component loaded, use `idac targets list --json` to obtain the exact record ID
+of a disposable database, then run:
 
 ```bash
-IDAC_RUN_LIVE_GUI_TESTS=1 uv run pytest -q -m gui_live tests/test_gui_transport_live.py
+IDAC_RUN_NEXUS_GUI_TESTS=1 \
+IDAC_NEXUS_GUI_RECORD_ID='<record-id>' \
+uv run pytest -q -m nexus_gui_live
 ```
+
+This test previews a comment mutation, commits it without saving, proves a copied on-disk
+database is unchanged, reattaches to prove the edit remains live in GUI memory, explicitly
+saves it, checks that copy in a fresh headless worker, then restores and saves the original
+comment. It never auto-selects a GUI target. Because an explicit
+database save also checkpoints unrelated pending GUI edits, do not point it at a working
+database.
+
+The normal integration suite uses Nexus-managed headless workers and does not require a
+desktop session.
+
+## Continuous integration
+
+Pull requests run lint and the no-IDA unit suite. Merge-queue runs additionally install
+IDA 9.4 and execute the complete Nexus integration suite. Keep the pinned client,
+in-IDA component, and ida-domain version synchronized whenever this baseline changes.

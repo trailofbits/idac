@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased
+
 ## 0.19.1
 
 This patch release fixes the version that `idac` reports about itself.

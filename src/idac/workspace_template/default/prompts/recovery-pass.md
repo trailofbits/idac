@@ -5,7 +5,7 @@ single function to a multi-target type/prototype recovery effort.
 
 ## Setup
 
-- **Context**: {{CONTEXT}} (e.g. `-c db:/path/to/file.i64` or `-c pid:1234`)
+- **Context**: {{CONTEXT}} (e.g. `-c /path/to/file.i64` or `--instance <record-id>`)
 - **Target**: {{TARGET}} (symbol, function, type, class, family, module, or behavior)
 - **Scope**: {{SCOPE}} (the exact boundary of this pass: what is in and what is out)
 - **Objective**: {{OBJECTIVE}} (what should become readable, typed, or evidenced)
@@ -22,8 +22,8 @@ topics on demand:
 
 - `idac docs cli` — command grammar and output behavior
 - `idac docs workflows` — safe mutation loop, batch, selector calibration, readback
-- `idac docs targets` — context/backend selection and opening binaries
-- `idac docs troubleshooting` — bridge, backend, or stale-result issues
+- `idac docs targets` — Nexus context selection and opening binaries
+- `idac docs troubleshooting` — Nexus runtime, selection, or stale-result issues
 
 ## Pass contract
 

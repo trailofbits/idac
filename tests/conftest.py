@@ -1,57 +1,84 @@
 from __future__ import annotations
 
-import contextlib
 import functools
 import json
 import os
 import shutil
-import signal
+import subprocess
 import sys
 import tempfile
-import time
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-_LIVE_GUI_ENV = "IDAC_RUN_LIVE_GUI_TESTS"
+_LIVE_GUI_ENV = "IDAC_RUN_NEXUS_GUI_TESTS"
 
-# Modules whose tests all talk to a real idalib daemon and therefore need a
-# local IDA install; individual tests elsewhere use @pytest.mark.requires_ida.
-_REQUIRES_IDA_MODULE_PREFIX = "test_idalib_"
-_REQUIRES_IDA_MODULES = {"test_preview", "test_output_limits"}
+# Integration modules that open real databases through Nexus. Keep this list
+# explicit so unit tests for the Nexus client itself remain runnable without IDA.
+_REQUIRES_IDA_MODULES = {
+    "test_nexus_batch",
+    "test_nexus_binary_workflow",
+    "test_nexus_bookmarks",
+    "test_nexus_classes",
+    "test_nexus_ctree",
+    "test_nexus_function_inspection_search",
+    "test_nexus_headless_lifecycle",
+    "test_nexus_locals",
+    "test_nexus_name_locals_semantics",
+    "test_nexus_proto_comments",
+    "test_nexus_reads",
+    "test_nexus_reanalyze_python",
+    "test_nexus_struct_enum_semantics",
+    "test_nexus_types",
+    "test_output_limits",
+    "test_preview",
+}
 
 
 @functools.lru_cache(maxsize=1)
-def _idalib_available() -> bool:
-    # Mirror bootstrap_idapro's search order: idapro may already be importable
-    # from the venv/site-packages, otherwise it is discovered from an install
-    # dir. Checking only install dirs would skip integration tests that would
-    # actually run.
-    import importlib.util
+def _nexus_ida_available() -> bool:
+    """Report whether ida-nexus has a configured idalib installation."""
 
-    if importlib.util.find_spec("idapro") is not None:
-        return True
-    from idac.transport.idalib_common import candidate_ida_dirs
-
+    configured = os.environ.get("IDADIR")
+    if not configured:
+        idausr = Path(os.environ.get("IDAUSR", Path.home() / ".idapro")).expanduser()
+        config_path = Path(str(idausr).split(os.pathsep)[0]) / "ida-config.json"
+        try:
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            paths = payload.get("Paths", {})
+            configured = paths.get("ida-install-dir") if isinstance(paths, dict) else None
+        except (OSError, TypeError, json.JSONDecodeError):
+            return False
+    if not isinstance(configured, str) or not configured.strip():
+        return False
+    ida_dir = Path(configured).expanduser()
     try:
-        return any((ida_dir / "idalib" / "python").exists() for ida_dir in candidate_ida_dirs())
+        return any(
+            path.is_file()
+            for path in (
+                ida_dir / "libidalib.so",
+                ida_dir / "libidalib.dylib",
+                ida_dir / "idalib.dll",
+                ida_dir / "Contents" / "MacOS" / "libidalib.dylib",
+            )
+        )
     except OSError:
         return False
 
 
 def pytest_collection_modifyitems(config, items) -> None:
     requires_ida = pytest.mark.requires_ida
-    skip_no_ida = pytest.mark.skip(reason="no local IDA install with idalib found; integration tests skipped")
-    skip_live = pytest.mark.skip(reason=f"set {_LIVE_GUI_ENV}=1 to run gui_live integration tests")
+    skip_no_ida = pytest.mark.skip(reason="no local IDA installation configured for ida-nexus")
+    skip_live = pytest.mark.skip(reason=f"set {_LIVE_GUI_ENV}=1 to run nexus_gui_live integration tests")
     run_gui_live = os.environ.get(_LIVE_GUI_ENV) == "1"
     for item in items:
         module_name = item.module.__name__.rpartition(".")[2]
-        if module_name.startswith(_REQUIRES_IDA_MODULE_PREFIX) or module_name in _REQUIRES_IDA_MODULES:
+        if module_name in _REQUIRES_IDA_MODULES:
             item.add_marker(requires_ida)
-        if "requires_ida" in item.keywords and not _idalib_available():
+        if "requires_ida" in item.keywords and not _nexus_ida_available():
             item.add_marker(skip_no_ida)
-        if "gui_live" in item.keywords and not run_gui_live:
+        if "nexus_gui_live" in item.keywords and not run_gui_live:
             item.add_marker(skip_live)
 
 
@@ -107,37 +134,32 @@ def idac_cmd() -> list[str]:
     return [sys.executable, "-m", "idac"]
 
 
-def _cleanup_runtime_dir(runtime_dir: Path) -> None:
-    for registry_path in runtime_dir.glob("idac-idalib-*.json"):
-        try:
-            payload = json.loads(registry_path.read_text(encoding="utf-8"))
-            pid = int(payload.get("pid", 0))
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            pid = 0
-        if pid > 0:
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGTERM)
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline:
-        live = False
-        for registry_path in runtime_dir.glob("idac-idalib-*.json"):
-            try:
-                payload = json.loads(registry_path.read_text(encoding="utf-8"))
-                pid = int(payload.get("pid", 0))
-            except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                pid = 0
-            if pid <= 0:
-                continue
-            try:
-                os.kill(pid, 0)
-            except OSError:
-                continue
-            live = True
-            break
-        if not live:
-            break
-        time.sleep(0.05)
-    shutil.rmtree(runtime_dir, ignore_errors=True)
+def _shutdown_nexus_workers(env: dict[str, str]) -> None:
+    """Stop fixture-owned headless instances through ida-nexus's public API."""
+
+    code = """
+from ida_nexus import DatabaseHandle, InstanceState, discover_databases, wait_database_released
+
+for discovered in discover_databases(timeout=1.0):
+    if discovered.state is not InstanceState.READY or discovered.instance.backend != "idalib":
+        continue
+    instance = discovered.instance
+    handle = DatabaseHandle.attach(instance, keepalive=0.0)
+    try:
+        handle.shutdown_database(save=True)
+    finally:
+        handle.close()
+    if not wait_database_released(instance, timeout=20.0):
+        raise TimeoutError(f"Nexus worker did not release {instance.record_id}")
+"""
+    subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
 
 
 def _prepare_isolated_idausr(source: Path, target: Path) -> None:
@@ -160,12 +182,13 @@ def idac_env() -> dict[str, str]:
     idausr_dir = Path(tempfile.mkdtemp(prefix="idac-test-idapro-"))
     source_idausr = Path(env.get("IDAUSR", Path.home() / ".idapro")).expanduser()
     _prepare_isolated_idausr(source_idausr, idausr_dir)
-    env["IDAC_RUNTIME_DIR"] = str(runtime_dir)
+    env["IDA_NEXUS_STATE_DIR"] = str(runtime_dir)
     env["IDAUSR"] = str(idausr_dir)
     try:
         yield env
     finally:
-        _cleanup_runtime_dir(runtime_dir)
+        _shutdown_nexus_workers(env)
+        shutil.rmtree(runtime_dir, ignore_errors=True)
         shutil.rmtree(idausr_dir, ignore_errors=True)
 
 

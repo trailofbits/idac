@@ -2,19 +2,17 @@
 
 ## Repo Overview
 
-`idac` is a CLI for IDA Pro with two execution paths:
-
-- `gui`: talks to a live IDA desktop session through the bridge plugin
-- `idalib`: opens `.i64` / `.idb` files in a short-lived headless worker
+`idac` is an ida-nexus-backed CLI for IDA Pro. The same public Nexus API attaches
+to live GUI databases and opens `.i64` databases or binaries in managed headless
+workers. There is no alternate transport or compatibility fallback.
 
 Most implementation lives under `src/idac`:
 
-- `src/idac/cli2/`: command registration and argument parsing
-- `src/idac/ops/`: typed operation families, manifest, dispatch, preview execution, runtime helpers, and shared helper modules
-- `src/idac/cli2/renderers/`: text rendering
-- `src/idac/transport/schema.py`: wire request/response schema
-- `src/idac/transport/`: GUI bridge transport and `idalib` worker transport
-- `src/idac/ida_plugin/`: IDA GUI bridge plugin code
+- `src/idac/cli/`: command registration, argument parsing, batch/preview orchestration, and text rendering
+- `src/idac/nexus.py`: public ida-nexus discovery, selection, lifecycle, compatibility, and execution boundary
+- `src/idac/remote_ops.py`: the self-contained operation module uploaded through `ida_nexus.RemoteModule`
+- `src/idac/operations.py`: the retained public operation inventory
+- `src/idac/doctor.py` and `src/idac/setup.py`: exact-stack diagnostics and installation
 - `tests/`: CLI and backend coverage
 - `fixtures/`: committed binaries, databases, logs, and source used by tests
 - `docs/` and `src/idac/skills/idac/`: user-facing command docs and agent-oriented usage guidance
@@ -25,8 +23,9 @@ Most implementation lives under `src/idac`:
 - Prefer targeted tests first, then broader validation if the change touches shared behavior.
 - Treat committed fixture artifacts as part of the product surface. If you change fixture symbols, fixture source, or docs/examples that depend on them, regenerate the fixture outputs too.
 - Do not revert unrelated worktree changes. This repo may contain user-owned untracked recovery artifacts and local editor files.
-- In `src/idac/cli2`, keep `argparse.Namespace` at the parser boundary. Use direct `args.foo` access for fields guaranteed by that subcommand, and reserve `vars(args).get(...)` for wrapper or `argparse.SUPPRESS` cases.
-- For command-local argument normalization in `src/idac/cli2/commands/`, prefer a focused `_foo_params(args) -> dict[str, object]` builder rather than spreading selector/default coercion through handlers.
+- In `src/idac/cli`, keep `argparse.Namespace` at the parser boundary. Use direct `args.foo` access for fields guaranteed by that subcommand, and reserve `vars(args).get(...)` for wrapper or `argparse.SUPPRESS` cases.
+- For command-local argument normalization in `src/idac/cli/commands/`, prefer a focused `_foo_params(args) -> dict[str, object]` builder rather than spreading selector/default coercion through handlers.
+- Do not add tiny one- to three-expression helpers unless they own a meaningful responsibility or remove real duplication.
 - When request-building logic becomes nontrivial, add a focused unit test for the builder itself in addition to end-to-end CLI coverage.
 
 ## Reverse-Engineering Defaults
@@ -57,8 +56,10 @@ make format
 make lint
 make test
 make check
-uv run pytest -q tests/test_idalib_classes.py
-IDAC_RUN_LIVE_GUI_TESTS=1 uv run pytest -q -m gui_live tests/test_gui_transport_live.py
+uv run pytest -q -m "not requires_ida"
+uv run pytest -q -m requires_ida
+IDAC_RUN_NEXUS_GUI_TESTS=1 IDAC_NEXUS_GUI_RECORD_ID='<record-id>' \
+  uv run pytest -q -m nexus_gui_live
 ```
 
 Prefer targeted `idac <command> --help` when you already know the likely command family. Use `idac --full-help` when you need the full command tree in one pass.
@@ -67,33 +68,26 @@ Prefer targeted `idac <command> --help` when you already know the likely command
 
 When changing commands or request/response shapes:
 
-- update CLI wiring in `src/idac/cli.py`
-- update the operation implementation in `src/idac/ops/`
-- update renderers/schema if output shape changed
+- update CLI wiring in `src/idac/cli/`
+- update the operation implementation and registry in `src/idac/remote_ops.py`
+- update `src/idac/operations.py` and renderers if the operation/output surface changed
 - update tests and any affected docs under `README.md`, `docs/`, or `src/idac/skills/idac/`
 
 When changing the operation layer, keep these boundaries in mind:
 
-- `src/idac/ops/runtime.py` is the shared toolkit for reusable IDA-facing helpers. Prefer adding cross-operation lookup, normalization, and readback helpers there instead of duplicating them across op modules.
-- keep `src/idac/ops/families/` focused on command-family orchestration, typed request/result models, and user-facing error messages
-- `src/idac/ops/manifest.py` is the source of truth for supported ops, mutation flags, and preview metadata
-- `src/idac/ops/dispatch.py` should derive handler registration from the manifest and registry, not maintain a parallel operation list
-- `src/idac/ops/preview.py` should stay thin. If preview behavior changes, prefer encoding defaults and policy in `PreviewSpec` rather than branching in wrappers.
-- `src/idac/cli2/renderers/__init__.py` owns text rendering. Before adding another formatter, look for an existing helper or adjacent renderer that can absorb the behavior.
+- `src/idac/remote_ops.py` must remain importable outside IDA, self-contained, JSON-native, and free of imports from the local `idac` package.
+- `remote_ops.dispatch(db, op, params, preview)` is the only uploaded dispatch entrypoint; do not add alternate wire paths or per-operation uploads.
+- Keep the remote operation registry immutable and request state local. Do not add process-global mutable caches or compatibility handlers.
+- `src/idac/cli/renderers/__init__.py` owns text rendering. Before adding another formatter, look for an existing helper or adjacent renderer that can absorb the behavior.
 - for `type declare`, keep `DeclarationChunk` as the internal representation through parse / diagnose / bisect flows and only convert to plain dicts at the API boundary when needed by tests or wire output
 - if you are tempted to add a module-level wrapper around an `IdaRuntime` method, prefer calling the runtime instance method directly unless tests or external callers genuinely need the free function
-- shared non-runtime helpers should live under `src/idac/ops/helpers/`
 
-When changing GUI bridge behavior:
+When changing Nexus behavior:
 
-- check both `plugin/` and `src/idac/transport/gui.py`
-- keep protocol expectations aligned across the plugin and the CLI transport
-- add or update the optional `gui_live` test when the Unix socket contract changes
-
-When changing `idalib` behavior:
-
-- inspect `src/idac/transport/idalib.py` and `src/idac/transport/idalib_worker.py`
-- use targeted `idalib` tests before running the whole suite
+- use only supported public `ida_nexus` Python exports; do not read its private registry, issue raw HTTP requests, or add MCP/legacy fallbacks
+- preserve exact READY-record selection, one session per top-level command, a 300-second lease keepalive, headless autoanalysis, and headless save-on-successful-mutation semantics
+- validate the pinned remote stack before dispatch and fail closed on any mismatch
+- add or update `tests/test_nexus_session.py` and the optional `nexus_gui_live` coverage when lifecycle behavior changes
 
 ## Fixtures
 
@@ -121,7 +115,7 @@ When running fixture-generation commands or any test flow that opens IDA or `ida
 
 Reason:
 
-- the installed `~/.idapro/plugins/idac_bridge_plugin.py` can import the current checkout and break batch runs if the repo is mid-change
+- globally installed IDA plugins can import local packages or otherwise change batch behavior while the checkout is mid-change
 - fixture regeneration should not depend on whatever plugins happen to be installed globally
 - tests and fixture refreshes should not mutate the user's real IDA profile
 
@@ -158,16 +152,23 @@ bash fixtures/scripts/build_tiny.sh
 bash fixtures/scripts/make_idbs.sh
 ```
 
-If `idat` logs show plugin import errors from `~/.idapro/plugins/idac_bridge_plugin.py`, rerun with an isolated `IDAUSR` before assuming the fixture or code under test is broken.
+If `idat` logs show plugin import errors, rerun with an isolated `IDAUSR` before assuming the fixture or code under test is broken.
 
 ## Test Guidance
 
 Normal repo tests can run without `IDAUSR`, but keep the isolated directory exported when you are doing fixture refreshes or any workflow that may spawn `idat`.
 
+Test durable behavior, not implementation shape. Prefer public CLI/API results, persisted
+state, wire contracts, and required lifecycle or safety invariants. Do not assert private
+helper boundaries, incidental call order, mock choreography, source layout, or constants
+that have no user-visible effect. Avoid duplicating the same behavior at several layers;
+keep the lowest-cost test that exercises the real contract. A refactor that preserves
+behavior should not require rewriting tests.
+
 Typical commands:
 
 ```bash
-uv run pytest -q tests/test_idalib_classes.py
+uv run pytest -q tests/test_nexus_classes.py
 uv run pytest -q
 ```
 
@@ -176,9 +177,9 @@ Useful targeted suites for operation-layer work:
 ```bash
 uv run pytest -q tests/test_ops_helpers.py
 uv run pytest -q tests/test_preview.py
-uv run pytest -q tests/test_idalib_types.py
-uv run pytest -q tests/test_idalib_name_locals_semantics.py
-uv run pytest -q tests/test_idalib_struct_enum_semantics.py
+uv run pytest -q tests/test_nexus_types.py
+uv run pytest -q tests/test_nexus_name_locals_semantics.py
+uv run pytest -q tests/test_nexus_struct_enum_semantics.py
 uv run pytest -q tests/test_vtable_helpers.py
 ```
 
@@ -189,7 +190,10 @@ These are especially useful when editing:
 - local-variable mutation and preview behavior
 - class / vtable helper logic
 
-Optional live GUI transport coverage is marked with `@pytest.mark.gui_live` and skipped unless `IDAC_RUN_LIVE_GUI_TESTS=1` is set.
+Optional live GUI Nexus coverage is marked with `@pytest.mark.nexus_gui_live` and
+skipped unless `IDAC_RUN_NEXUS_GUI_TESTS=1` and an exact
+`IDAC_NEXUS_GUI_RECORD_ID` are set. Use only a disposable GUI database: the test
+explicitly saves, verifies an on-disk snapshot, and then restores a temporary comment.
 
 ## Skill Install Targets
 
@@ -199,12 +203,12 @@ The bundled `idac` skill supports both Claude Code and Codex equally.
   - `~/.claude/skills/idac`
   - `~/.codex/skills/idac`
 - custom install destination:
-  - `idac misc skill install --dest /custom/path/idac`
+  - `idac setup skill --dest /custom/path/idac`
 
 For fixture-driven class tests, prefer updating and validating:
 
 - `tests/conftest.py`
-- `tests/test_idalib_classes.py`
+- `tests/test_nexus_classes.py`
 - `README.md`
 - `src/idac/skills/idac/`
 

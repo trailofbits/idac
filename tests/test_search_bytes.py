@@ -4,15 +4,23 @@ from types import SimpleNamespace
 
 import pytest
 
-from idac.ops.base import OperationContext
-from idac.ops.families.search import SearchBytesRequest, SearchMatch, _search_bytes
-from idac.ops.runtime import IdaOperationError, IdaRuntime, SegmentRange
+from idac import remote_ops
+
+OperationContext = remote_ops.OperationContext
+IdaOperationError = remote_ops.IdaOperationError
+IdaRuntime = remote_ops.IdaRuntime
+SegmentRange = remote_ops.SegmentRange
+
+
+def _run_search(runtime: IdaRuntime, params: dict[str, object]):
+    spec = remote_ops._OPERATIONS["search_bytes"]
+    assert spec.parse is not None
+    return remote_ops.payload_from_model(spec.run(OperationContext(runtime=runtime), spec.parse(params)))
 
 
 class _CompiledPattern:
-    def __init__(self, pattern: str, ea: int) -> None:
+    def __init__(self, pattern: str) -> None:
         self.pattern = pattern
-        self.ea = ea
 
     def __len__(self) -> int:
         return 1
@@ -21,13 +29,12 @@ class _CompiledPattern:
 class _CompiledBinpatVecFactory:
     def __init__(self, *, error: str | None = None) -> None:
         self.error = error
-        self.calls: list[tuple[int, str, int, int]] = []
 
     def parse(self, ea: int, text: str, radix: int, strlit_encoding: int) -> _CompiledPattern:
-        self.calls.append((ea, text, radix, strlit_encoding))
+        del ea, radix, strlit_encoding
         if self.error is not None:
             raise RuntimeError(self.error)
-        return _CompiledPattern(text, ea)
+        return _CompiledPattern(text)
 
 
 class _FakeIdaBytes:
@@ -38,20 +45,14 @@ class _FakeIdaBytes:
     def __init__(self, *, matches: list[int] | None = None, parse_error: str | None = None) -> None:
         self.compiled_binpat_vec_t = _CompiledBinpatVecFactory(error=parse_error)
         self._matches = [] if matches is None else list(matches)
-        self.bin_search_calls: list[tuple[int, int, str, int, int]] = []
-        self.find_bytes_called = False
 
     def bin_search(self, start_ea: int, end_ea: int, compiled, flags: int) -> tuple[int, int]:
-        self.bin_search_calls.append((start_ea, end_ea, compiled.pattern, compiled.ea, flags))
+        del compiled, flags
         for index, match in enumerate(self._matches):
             if start_ea <= match < end_ea:
                 self._matches.pop(index)
                 return match, 0
         return _FakeIdaApi.BADADDR, 0
-
-    def find_bytes(self, *args, **kwargs) -> int:
-        self.find_bytes_called = True
-        raise AssertionError("search bytes should not call ida_bytes.find_bytes")
 
 
 class _FakeIdaApi:
@@ -105,26 +106,16 @@ class _FakeRuntime(IdaRuntime):
         )
 
 
-def test_search_bytes_compiles_pattern_once_and_uses_bin_search() -> None:
+def test_search_bytes_returns_matches_in_address_order() -> None:
     ida_bytes = _FakeIdaBytes(matches=[0x1010, 0x1020])
     runtime = _FakeRuntime(ida_bytes)
 
-    result = _search_bytes(
-        OperationContext(runtime=runtime),
-        SearchBytesRequest(pattern="aa bb", segment="__TEXT", start="0x1000", end="0x1030", limit=2),
+    result = _run_search(
+        runtime,
+        {"pattern": "aa bb", "segment": "__TEXT", "start": "0x1000", "end": "0x1030", "limit": 2},
     )
 
-    assert result.results == (
-        SearchMatch(address="0x1010"),
-        SearchMatch(address="0x1020"),
-    )
-    assert ida_bytes.compiled_binpat_vec_t.calls == [(0x1000, "aa bb", 16, -1)]
-    assert [call[:4] for call in ida_bytes.bin_search_calls] == [
-        (0x1000, 0x1030, "aa bb", 0x1000),
-        (0x1011, 0x1030, "aa bb", 0x1000),
-        (0x1021, 0x1030, "aa bb", 0x1000),
-    ]
-    assert ida_bytes.find_bytes_called is False
+    assert result["results"] == [{"address": "0x1010"}, {"address": "0x1020"}]
 
 
 def test_search_bytes_reports_invalid_pattern_as_user_error() -> None:
@@ -132,41 +123,36 @@ def test_search_bytes_reports_invalid_pattern_as_user_error() -> None:
     runtime = _FakeRuntime(ida_bytes)
 
     with pytest.raises(IdaOperationError, match="invalid byte pattern: bad digit"):
-        _search_bytes(
-            OperationContext(runtime=runtime),
-            SearchBytesRequest(pattern="zz", segment="__TEXT", start="0x1000", end="0x1030", limit=5),
+        _run_search(
+            runtime,
+            {"pattern": "zz", "segment": "__TEXT", "start": "0x1000", "end": "0x1030", "limit": 5},
         )
-
-    assert ida_bytes.bin_search_calls == []
-    assert ida_bytes.find_bytes_called is False
 
 
 def test_search_bytes_returns_empty_results_when_no_matches_found() -> None:
     ida_bytes = _FakeIdaBytes(matches=[])
     runtime = _FakeRuntime(ida_bytes)
 
-    result = _search_bytes(
-        OperationContext(runtime=runtime),
-        SearchBytesRequest(pattern="aa bb", segment="__TEXT", start="0x1000", end="0x1030", limit=5),
+    result = _run_search(
+        runtime,
+        {"pattern": "aa bb", "segment": "__TEXT", "start": "0x1000", "end": "0x1030", "limit": 5},
     )
 
-    assert result.results == ()
-    assert result.truncated is False
-    assert ida_bytes.find_bytes_called is False
+    assert result["results"] == []
+    assert result["truncated"] is False
 
 
 def test_search_bytes_marks_results_truncated_when_limit_is_hit() -> None:
     ida_bytes = _FakeIdaBytes(matches=[0x1010, 0x1020])
     runtime = _FakeRuntime(ida_bytes)
 
-    result = _search_bytes(
-        OperationContext(runtime=runtime),
-        SearchBytesRequest(pattern="aa bb", segment="__TEXT", start="0x1000", end="0x1030", limit=1),
+    result = _run_search(
+        runtime,
+        {"pattern": "aa bb", "segment": "__TEXT", "start": "0x1000", "end": "0x1030", "limit": 1},
     )
 
-    assert result.results == (SearchMatch(address="0x1010"),)
-    assert result.truncated is True
-    assert ida_bytes.find_bytes_called is False
+    assert result["results"] == [{"address": "0x1010"}]
+    assert result["truncated"] is True
 
 
 def test_search_bytes_walks_each_matching_segment_range() -> None:
@@ -177,18 +163,13 @@ def test_search_bytes_walks_each_matching_segment_range() -> None:
         SegmentRange(name="__TEXT:__stubs", start_ea=0x2000, end_ea=0x2030),
     )
 
-    result = _search_bytes(
-        OperationContext(runtime=runtime),
-        SearchBytesRequest(pattern="aa bb", segment="__TEXT", start=None, end=None, limit=10),
-    )
+    result = _run_search(runtime, {"pattern": "aa bb", "segment": "__TEXT", "limit": 10})
 
-    assert result.results == (
-        SearchMatch(address="0x1010"),
-        SearchMatch(address="0x2018"),
-    )
-    assert [call[:2] for call in ida_bytes.bin_search_calls] == [
-        (0x1000, 0x1030),
-        (0x1011, 0x1030),
-        (0x2000, 0x2030),
-        (0x2019, 0x2030),
+    assert result["results"] == [
+        {"address": "0x1010"},
+        {"address": "0x2018"},
+    ]
+    assert result["ranges"] == [
+        {"name": "__TEXT:__text", "start": "0x1000", "end": "0x1030"},
+        {"name": "__TEXT:__stubs", "start": "0x2000", "end": "0x2030"},
     ]

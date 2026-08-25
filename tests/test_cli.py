@@ -1,91 +1,93 @@
 from __future__ import annotations
 
-import contextlib
 import json
-import os
-import shutil
-import signal
-import tempfile
-import time
 from pathlib import Path
-from types import SimpleNamespace
+from typing import Any, ClassVar
 
 import pytest
 
 from idac.cli import build_parser, main
-from idac.cli2 import batch as batch_module
-from idac.cli2.errors import CliUserError
-from idac.cli2.result import CommandResult
-
-FIXTURE_DB = "db:fixtures/idb/tiny.i64"
-
-
-def _help_text(parser, *args: str, capsys) -> str:
-    with pytest.raises(SystemExit):
-        parser.parse_args([*list(args), "--help"])
-    return capsys.readouterr().out
+from idac.nexus import NexusSessionError
 
 
 @pytest.fixture
-def short_runtime_dir(monkeypatch):
-    runtime_dir = Path(tempfile.mkdtemp(prefix="idacrt-", dir="/tmp"))
-    monkeypatch.setenv("IDAC_RUNTIME_DIR", str(runtime_dir))
-    try:
-        yield runtime_dir
-    finally:
-        for registry_path in runtime_dir.glob("idac-idalib-*.json"):
-            try:
-                pid = int(json.loads(registry_path.read_text(encoding="utf-8")).get("pid", 0))
-            except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                pid = 0
-            if pid > 0:
-                with contextlib.suppress(ProcessLookupError):
-                    os.kill(pid, signal.SIGTERM)
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            live = False
-            for registry_path in runtime_dir.glob("idac-idalib-*.json"):
-                try:
-                    pid = int(json.loads(registry_path.read_text(encoding="utf-8")).get("pid", 0))
-                except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                    pid = 0
-                if pid <= 0:
-                    continue
-                try:
-                    os.kill(pid, 0)
-                except OSError:
-                    continue
-                live = True
-                break
-            if not live:
-                break
-            time.sleep(0.05)
-        shutil.rmtree(runtime_dir, ignore_errors=True)
+def fake_nexus(monkeypatch):
+    class FakeNexusSession:
+        instances: ClassVar[list[FakeNexusSession]] = []
+        discovered: ClassVar[list[dict[str, object]]] = []
+
+        def __init__(
+            self,
+            locator: str | None = None,
+            instance_id: str | None = None,
+            timeout: float | None = None,
+        ) -> None:
+            self.locator = locator
+            self.instance_id = instance_id
+            self.timeout = timeout
+            self.calls: list[dict[str, Any]] = []
+            self.closed = False
+            self.__class__.instances.append(self)
+
+        def execute_operation(
+            self,
+            op: str,
+            params: dict[str, Any],
+            *,
+            preview: bool,
+            operation_label: str,
+        ) -> Any:
+            self.calls.append(
+                {
+                    "op": op,
+                    "params": params,
+                    "preview": preview,
+                }
+            )
+            if preview:
+                return {
+                    "before": {"text": None},
+                    "after": {"text": params.get("text")},
+                    "result": {"changed": True},
+                    "preview_mode": "rollback"
+                    if op
+                    in {"bookmark_add", "bookmark_set", "bookmark_delete", "comment_set", "comment_delete", "name_set"}
+                    else "undo",
+                    "persisted": False,
+                }
+            if op == "database_info":
+                return {"database": self.locator, "record_id": self.instance_id}
+            return {"op": op, "params": params}
+
+        def execute_python(
+            self,
+            source: str,
+            *,
+            filename: str,
+            operation_label: str,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                {
+                    "source": source,
+                }
+            )
+            return {"result": {"result": 7, "result_repr": "7"}, "stdout": "hello\n", "stderr": ""}
+
+        def save_database(self) -> dict[str, Any]:
+            self.calls.append({"save": True})
+            return {"saved": True, "database": self.locator}
+
+        def list_targets(self) -> list[dict[str, object]]:
+            return list(self.__class__.discovered)
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr("idac.nexus.NexusSession", FakeNexusSession)
+    return FakeNexusSession
 
 
-def _copied_fixture_db(copy_database, tiny_database: Path) -> str:
-    return f"db:{copy_database(tiny_database)}"
-
-
-def test_root_help_shows_misc_and_hides_old_names(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, capsys=capsys)
-
-    assert "docs" in help_text
-    assert "misc" in help_text
-    assert "decompilemany" in help_text
-    assert "strings" not in help_text
-
-
-def test_root_help_mentions_global_context_forwarding(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, capsys=capsys)
-
-    assert "-c LOCATOR" in help_text
-    assert "--timeout TIMEOUT" in help_text
-
-
-def test_root_full_help_shows_misc_and_hides_old_function_show(capsys) -> None:
+def test_help_describes_nexus_surface(capsys) -> None:
     parser = build_parser()
 
     with pytest.raises(SystemExit) as exc:
@@ -93,2008 +95,570 @@ def test_root_full_help_shows_misc_and_hides_old_function_show(capsys) -> None:
 
     assert exc.value.code == 0
     help_text = capsys.readouterr().out
-    assert "# idac function metadata" in help_text
-    assert "# idac function show" not in help_text
-    assert "# idac docs" in help_text
-    assert "# idac misc" in help_text
-    assert "# idac misc reanalyze" in help_text
-    assert "# idac misc plugin install" in help_text
-    assert "# idac misc skill install" in help_text
-    assert "# idac segment list" in help_text
-    assert "# idac targets list" in help_text
-    assert "# idac targets cleanup" in help_text
-    assert "# idac doctor check" not in help_text
-    assert "# idac doctor targets" not in help_text
-    assert "# idac doctor cleanup" not in help_text
-    assert "# idac search strings" in help_text
+    assert "-c PATH" in help_text
+    assert "--instance RECORD_ID" in help_text
+    assert "ida-nexus" in help_text
+    assert "# idac setup gui" in help_text
+    assert "# idac setup skill" in help_text
+    assert "# idac database show" in help_text
+    assert "# idac database save" in help_text
 
 
-def test_function_help_uses_metadata_and_prototype(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "function", capsys=capsys)
-
-    assert "metadata" in help_text
-    assert "callers" in help_text
-    assert "callees" in help_text
-    assert "prototype" in help_text
-
-
-def test_function_list_help_mentions_name_filter_regex_and_ignore_case(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "function", "list", capsys=capsys)
-    normalized_help = " ".join(help_text.split())
-
-    assert "NAME_FILTER" in help_text
-    assert "not a list of function names" in normalized_help
-    assert "--limit" in help_text
-    assert "--demangle" in help_text
-    assert "--regex" in help_text
-    assert "--ignore-case" in help_text
-
-
-def test_database_help_omits_segments(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "database", capsys=capsys)
-
-    assert "show" in help_text
-    assert "segments" not in help_text
-
-
-def test_database_segments_command_is_not_registered(capsys) -> None:
+@pytest.mark.parametrize("value", ["0", "nan"])
+def test_timeout_rejects_nonpositive_or_nonfinite_values(
+    value: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     parser = build_parser()
 
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["database", "segments"])
-
-    assert exc.value.code == 2
-    assert "invalid choice" in capsys.readouterr().err
-
-
-def test_segment_list_help_mentions_filter_regex_and_ignore_case(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "segment", "list", capsys=capsys)
-
-    assert "SEGMENT_FILTER" in help_text
-    assert "--regex" in help_text
-    assert "--ignore-case" in help_text
-
-
-def test_search_help_lists_bytes_and_strings(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "search", capsys=capsys)
-
-    assert "bytes" in help_text
-    assert "strings" in help_text
-
-
-def test_search_strings_help_mentions_scan_flag(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "search", "strings", capsys=capsys)
-
-    assert "TEXT_FILTER" in help_text
-    assert "--scan" in help_text
-    assert "defined strings" in help_text
-    assert "examples:" in help_text
-
-
-def test_search_bytes_help_clarifies_ida_byte_pattern(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "search", "bytes", capsys=capsys)
-    normalized_help = " ".join(help_text.split())
-
-    assert "BYTE_PATTERN" in help_text
-    assert "IDA byte pattern" in normalized_help
-    assert "not a regex" in normalized_help
-    assert "examples:" in help_text
-
-
-def test_preview_help_mentions_wrapped_command_and_out(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "preview", capsys=capsys)
-    normalized_help = " ".join(help_text.split())
-
-    assert "COMMAND..." in help_text
-    assert "without the leading `idac`" in normalized_help
-    assert "requires --out" in normalized_help
-    assert "examples:" in help_text
-
-
-def test_batch_help_mentions_file_format_and_relative_paths(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "batch", capsys=capsys)
-    normalized_help = " ".join(help_text.split())
-
-    assert "BATCH_FILE" in help_text
-    assert "one shell-like idac subcommand per line" in normalized_help
-    assert "relative child paths" in normalized_help
-    assert "preview lines are allowed" in normalized_help
-
-
-def test_locals_help_clarifies_selector_and_new_name(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "function", "locals", "rename", capsys=capsys)
-    normalized_help = " ".join(help_text.split())
-
-    assert "LOCAL_SELECTOR" in help_text
-    assert "--new-name" in help_text
-    assert "prefer --local-id or --index" in normalized_help
-    assert "examples:" in help_text
-
-
-def test_doctor_help_is_direct_health_check(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "doctor", capsys=capsys)
-
-    assert "--backend" not in help_text
-    assert "-c LOCATOR" not in help_text
-    assert "--timeout" in help_text
-    assert "--json" in help_text
-    assert "check" not in help_text
-    assert "targets" not in help_text
-    assert "cleanup" not in help_text
-    assert "plugin" not in help_text
-    assert "skill" not in help_text
-
-
-def test_docs_default_prints_agent_oriented_index(capsys) -> None:
-    exit_code = main(["docs"])
-
-    assert exit_code == 0
-    output = capsys.readouterr().out
-    assert "Use `idac docs TOPIC`" in output
-    assert "Start here:" in output
-    assert "CLI and operation help:" in output
-    assert "IDA reference:" in output
-    assert "Workflows:" in output
-    assert "Workspace resources:" in output
-    assert "idac docs guide" in output
-    assert "idac docs cli" in output
-    assert "idac docs workflows" in output
-    assert "idac docs class-recovery" in output
-    assert output.index("idac docs guide") < output.index("idac docs troubleshooting")
-    assert output.index("idac docs cli") < output.index("idac docs troubleshooting")
-    assert output.index("idac docs troubleshooting") < output.index("idac docs ida-cpp-type-details")
-    assert output.index("idac docs ida-cpp-type-details") < output.index("idac docs workflows")
-
-
-def test_docs_guide_prints_frontmatter_stripped_skill_body(capsys) -> None:
-    exit_code = main(["docs", "guide"])
-
-    assert exit_code == 0
-    output = capsys.readouterr().out
-    assert output.startswith("# idac")
-    assert "---" not in output.splitlines()[:3]
-    assert "## Critical defaults" in output
-    assert "## Reference index" in output
-
-
-def test_docs_skill_alias_prints_guide(capsys) -> None:
-    exit_code = main(["docs", "skill"])
-
-    assert exit_code == 0
-    output = capsys.readouterr().out
-    assert output.startswith("# idac")
-    assert "## Critical defaults" in output
-
-
-def test_docs_topic_prints_bundled_reference(capsys) -> None:
-    exit_code = main(["docs", "cli"])
-
-    assert exit_code == 0
-    output = capsys.readouterr().out
-    assert "# idac Quick Reference" in output
-    assert "The command grammar for the `idac` CLI." in output
-
-
-def test_docs_large_topic_prints_inline(capsys) -> None:
-    exit_code = main(["docs", "class-recovery"])
-
-    assert exit_code == 0
-    output = capsys.readouterr().out
-    assert "# Class Recovery" in output
-    assert "## Practical caveat" in output
-
-
-def test_docs_templates_prints_template_files(capsys) -> None:
-    exit_code = main(["docs", "templates"])
-
-    assert exit_code == 0
-    output = capsys.readouterr().out
-    assert "# Template Files" in output
-    assert "`checkpoint-note.md`:" in output
-    assert "### Open Questions" in output
-    assert "`prototype-pass.idac`:" in output
-    assert "function prototype check" in output
-    assert "`rename-pass.idac`:" in output
-    assert "`locals-jq-snippets.sh`:" in output
-
-
-def test_docs_list_prints_available_topics(capsys) -> None:
-    exit_code = main(["docs", "--list"])
-
-    assert exit_code == 0
-    output = capsys.readouterr().out
-    assert "Start here:" in output
-    assert "guide" in output
-    assert "CLI and operation help:" in output
-    assert "IDA reference:" in output
-    assert "Workspace resources:" in output
-    assert "cli" in output
-    assert "workflows" in output
-    assert "class-recovery" in output
-    assert "ida-cpp-type-details" in output
-    assert "prototype-pass" not in output
-    assert "prompt-class-recovery-pass" not in output
-    assert "claude-workspace" not in output
-    assert "\n  skill " not in output
-    assert output.index("  guide") < output.index("  cli")
-    assert output.index("  cli") < output.index("  troubleshooting")
-    assert output.index("  troubleshooting") < output.index("  targets")
-    assert output.index("  targets") < output.index("  ida-cpp-type-details")
-    assert output.index("  ida-advanced-type-annotations") < output.index("  workflows")
-
-
-def test_docs_json_includes_topic_metadata(capsys) -> None:
-    exit_code = main(["docs", "workspace", "--json"])
-
-    assert exit_code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["topic"] == "workspace"
-    assert payload["title"] == "Workspace Instructions"
-    assert "AGENTS.md" in payload["path"]
-    assert "# Workspace" in payload["text"]
-
-
-def test_docs_rejects_unknown_topic(capsys) -> None:
-    exit_code = main(["docs", "nope"])
-
-    assert exit_code == 1
-    error = capsys.readouterr().err
-    assert "unknown docs topic: nope" in error
-    assert "prototype-pass" not in error
-    assert "prompt-class-recovery-pass" not in error
-
-
-def test_docs_rejects_root_context(capsys) -> None:
-    exit_code = main(["-c", "db:/tmp/demo.i64", "docs"])
-
-    assert exit_code == 1
-    assert "`idac docs` does not accept -c/--context" in capsys.readouterr().err
-
-
-def test_targets_help_keeps_list_cleanup_only(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "targets", capsys=capsys)
-
-    assert "list" in help_text
-    assert "cleanup" in help_text
-    assert "plugin" not in help_text
-    assert "skill" not in help_text
-
-
-def test_old_doctor_subcommands_are_not_registered(capsys) -> None:
-    parser = build_parser()
-
-    for subcommand in ("check", "targets", "cleanup"):
-        with pytest.raises(SystemExit) as exc:
-            parser.parse_args(["doctor", subcommand])
-
-        assert exc.value.code == 2
-        assert f"unrecognized arguments: {subcommand}" in capsys.readouterr().err
-
-
-def test_doctor_backend_option_is_not_registered(capsys) -> None:
-    parser = build_parser()
-
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["doctor", "--backend", "gui"])
-
-    assert exc.value.code == 2
-    assert "unrecognized arguments: --backend gui" in capsys.readouterr().err
-
-
-def test_doctor_context_is_not_registered(capsys) -> None:
-    parser = build_parser()
-
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["doctor", "-c", "db:/tmp/demo.i64"])
-
-    assert exc.value.code == 2
-    assert "unrecognized arguments: -c db:/tmp/demo.i64" in capsys.readouterr().err
-
-
-def test_doctor_rejects_root_context(capsys) -> None:
-    exit_code = main(["-c", "db:/tmp/demo.i64", "doctor"])
-
-    assert exit_code == 1
-    assert "`idac doctor` does not accept -c/--context" in capsys.readouterr().err
-
-
-def test_doctor_accepts_root_timeout(capsys, monkeypatch) -> None:
-    captured = {}
-
-    def fake_run_doctor(**kwargs):
-        captured.update(kwargs)
-        return {
-            "backend": ["idalib"],
-            "healthy": True,
-            "status": "ok",
-            "checks": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.doctor.run_doctor", fake_run_doctor)
-
-    exit_code = main(["--timeout", "2.5", "doctor"])
-
-    assert exit_code == 0
-    assert captured == {"scope": "all", "timeout": 2.5}
-    assert "status: ok" in capsys.readouterr().out
-
-
-def test_targets_list_sends_contextual_gui_list_targets_request(capsys, monkeypatch) -> None:
-    captured = {}
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {
-            "ok": True,
-            "result": [
-                {
-                    "selector": "pid:1234",
-                    "status": "active",
-                    "module": "tiny",
-                    "pid": 1234,
-                }
-            ],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.targets.send_request", fake_send_request)
-
-    exit_code = main(["targets", "list", "-c", "pid:1234"])
-
-    assert exit_code == 0
-    assert captured["request"].op == "list_targets"
-    assert captured["request"].backend == "gui"
-    assert captured["request"].target == "pid:1234"
-    assert "pid:1234 (gui, tiny)" in capsys.readouterr().out
-
-
-def test_targets_list_aggregates_gui_and_idalib_targets(capsys, monkeypatch) -> None:
-    captured = []
-
-    def fake_send_request(request):
-        captured.append(request)
-        if request.backend == "gui":
-            return {
-                "ok": True,
-                "result": [
-                    {
-                        "selector": "pid:1234",
-                        "module": "tiny-gui",
-                        "instance_pid": 1234,
-                        "active": True,
-                    }
-                ],
-                "warnings": [],
-            }
-        return {
-            "ok": True,
-            "result": [
-                {
-                    "selector": "tiny.i64",
-                    "filename": "/tmp/tiny.i64",
-                    "module": "tiny",
-                    "instance_pid": 5678,
-                    "active": True,
-                }
-            ],
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.targets.send_request", fake_send_request)
-
-    exit_code = main(["targets", "list"])
-
-    assert exit_code == 0
-    assert [request.backend for request in captured] == ["gui", "idalib"]
-    assert captured[0].timeout == 2.0
-    assert captured[1].timeout is None
-    output = capsys.readouterr().out
-    assert "pid:1234 [active] (gui, tiny-gui, pid=1234)" in output
-    assert "tiny.i64 [active] (idalib, tiny, pid=5678)" in output
-
-
-def test_targets_list_db_context_queries_and_filters_idalib(capsys, monkeypatch) -> None:
-    captured = {}
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {
-            "ok": True,
-            "result": [
-                {
-                    "selector": "tiny.i64",
-                    "filename": "/tmp/tiny.i64",
-                    "module": "tiny",
-                    "instance_pid": 5678,
-                    "active": True,
-                },
-                {
-                    "selector": "other.i64",
-                    "filename": "/tmp/other.i64",
-                    "module": "other",
-                    "instance_pid": 8765,
-                    "active": True,
-                },
-            ],
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.targets.send_request", fake_send_request)
-
-    exit_code = main(["targets", "list", "-c", "db:/tmp/tiny.i64"])
-
-    assert exit_code == 0
-    assert captured["request"].backend == "idalib"
-    assert captured["request"].database == "/tmp/tiny.i64"
-    output = capsys.readouterr().out
-    assert "tiny.i64 [active] (idalib, tiny, pid=5678)" in output
-    assert "other.i64" not in output
-
-
-def test_targets_list_keeps_idalib_rows_when_gui_listing_fails(capsys, monkeypatch) -> None:
-    from idac.transport import BackendError
-
-    def fake_send_request(request):
-        if request.backend == "gui":
-            raise BackendError("GUI bridge timed out")
-        return {
-            "ok": True,
-            "result": [
-                {
-                    "selector": "tiny.i64",
-                    "filename": "/tmp/tiny.i64",
-                    "module": "tiny",
-                    "instance_pid": 5678,
-                    "active": True,
-                }
-            ],
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.targets.send_request", fake_send_request)
-
-    exit_code = main(["targets", "list"])
-
-    assert exit_code == 0
-    captured = capsys.readouterr()
-    assert "tiny.i64 [active] (idalib, tiny, pid=5678)" in captured.out
-    assert "warning: failed to list gui: GUI bridge timed out" in captured.err
-
-
-def test_targets_cleanup_uses_cleanup_runner(capsys, monkeypatch) -> None:
-    monkeypatch.setattr(
-        "idac.cli2.commands.targets.run_doctor_cleanup",
-        lambda: {
-            "runtime_dir": "/tmp/idac",
-            "removed_count": 1,
-            "kept_count": 2,
-            "missing_count": 0,
-        },
-    )
-
-    exit_code = main(["targets", "cleanup"])
-
-    assert exit_code == 0
-    assert "removed: 1" in capsys.readouterr().out
-
-
-def test_py_help_only_exposes_exec(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "py", capsys=capsys)
-
-    assert "{exec}" in help_text
-    assert "eval" not in help_text
-
-
-def test_decompilemany_help_mentions_file_and_output_modes(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "decompilemany", capsys=capsys)
-    normalized_help = " ".join(help_text.split())
-
-    assert "FUNCTION_FILTER" in help_text
-    assert "--file" in help_text
-    assert "--functions-file" in help_text
-    assert "--out-file" in help_text
-    assert "--out-dir" in help_text
-    assert "--regex" in help_text
-    assert "--disasm" in help_text
-    assert "--ctree" in help_text
-    assert "This is not a list of function names" in normalized_help
-    assert "one per line" in normalized_help
-    assert "examples:" in help_text
-
-
-def test_decompilemany_accepts_functions_file_alias(tmp_path: Path) -> None:
-    parser = build_parser()
-    functions_file = tmp_path / "funcs.txt"
-    out_dir = tmp_path / "decomp"
-
-    args = parser.parse_args(["decompilemany", "--functions-file", str(functions_file), "--out-dir", str(out_dir)])
-
-    assert args.file == functions_file
-    assert args.out_dir == out_dir
-
-
-def test_decompilemany_rejects_multiple_positional_exact_functions(tmp_path: Path, capsys) -> None:
-    out_dir = tmp_path / "decomp"
-
-    exit_code = main(["decompilemany", "main", "add", "--out-dir", str(out_dir), "-c", "db:/tmp/demo.i64"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "decompilemany accepts one FUNCTION_FILTER" in captured.err
-    assert "--functions-file/--file" in captured.err
-
-
-def test_type_list_help_uses_type_filter(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "type", "list", capsys=capsys)
-    normalized_help = " ".join(help_text.split())
-
-    assert "TYPE_FILTER" in help_text
-    assert "requires --out" in normalized_help
-    assert "Interpret TYPE_FILTER" in normalized_help
-
-
-def test_type_declare_help_clarifies_decl_file_and_examples(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "type", "declare", capsys=capsys)
-    normalized_help = " ".join(help_text.split())
-
-    assert "--decl-file" in help_text
-    assert "C/C++ declarations" in normalized_help
-    assert "--bisect" in help_text
-    assert "--clang" in help_text
-    assert "examples:" in help_text
-
-
-def test_type_class_candidates_help_uses_candidate_filter(capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, "type", "class", "candidates", capsys=capsys)
-    normalized_help = " ".join(help_text.split())
-
-    assert "CANDIDATE_FILTER" in help_text
-    assert "Use --kind to narrow candidate categories" in normalized_help
-    assert "Interpret CANDIDATE_FILTER" in normalized_help
+    with pytest.raises(SystemExit) as caught:
+        parser.parse_args(["targets", "list", f"--timeout={value}"])
+    assert caught.value.code == 2
+
+    assert "--timeout must be a positive finite number" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
-    ("command_args", "filter_name"),
+    ("locator", "message"),
     [
-        (("type", "class", "list"), "CLASS_FILTER"),
-        (("type", "struct", "list"), "STRUCT_FILTER"),
-        (("type", "enum", "list"), "ENUM_FILTER"),
+        ("db:sample.i64", "legacy db:/pid:/module: context locators were removed"),
+        ("sample.idb", "32-bit .idb databases are not supported"),
     ],
 )
-def test_type_family_list_help_uses_specific_filters(command_args: tuple[str, ...], filter_name: str, capsys) -> None:
-    parser = build_parser()
-    help_text = _help_text(parser, *command_args, capsys=capsys)
-    normalized_help = " ".join(help_text.split())
-
-    assert filter_name in help_text
-    assert f"Interpret {filter_name}" in normalized_help
+def test_removed_context_forms_fail_closed(locator: str, message: str, capsys) -> None:
+    assert main(["-c", locator, "database", "show", "--json"]) == 1
+    assert message in capsys.readouterr().err
 
 
-def test_workspace_init_runs_on_public_cli(tmp_path: Path, capsys) -> None:
-    dest = tmp_path / "workspace"
+def test_missing_context_path_fails_before_creating_session(tmp_path: Path, fake_nexus, capsys) -> None:
+    missing = tmp_path / "missing.bin"
+    Path(f"{missing}.i64").touch()
 
-    exit_code = main(["workspace", "init", str(dest), "--format", "json"])
+    assert main(["-c", str(missing), "database", "show", "--json"]) == 1
+    assert f"context path is not a file: {missing}" in capsys.readouterr().err
+    assert fake_nexus.instances == []
 
-    assert exit_code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["initialized"] is True
-    assert payload["display_destination"] == str(dest)
-    assert payload["created"] == [
-        ".claude/",
-        ".claude/settings.json",
-        ".codex/",
-        ".codex/config.toml",
-        ".codex/rules/",
-        ".codex/rules/default.rules",
-        ".gitignore",
-        "AGENTS.md",
-        "CLAUDE.md",
-        "audit/",
-        "audit/.gitkeep",
-        "headers/",
-        "headers/recovered/",
-        "headers/recovered/.gitkeep",
-        "headers/vendor/",
-        "headers/vendor/.gitkeep",
-        "prompts/",
-        "prompts/recovery-pass.md",
-        "scripts/",
-        "scripts/.gitkeep",
-        "references/",
-        "references/class-recovery.md",
-        "references/cli.md",
-        "references/ida-advanced-type-annotations.md",
-        "references/ida-cpp-type-details.md",
-        "references/ida-set-types.md",
-        "references/targets-and-backends.md",
-        "references/templates/",
-        "references/templates/README.md",
-        "references/templates/checkpoint-note.md",
-        "references/templates/locals-jq-snippets.sh",
-        "references/templates/prototype-pass.idac",
-        "references/templates/rename-pass.idac",
-        "references/troubleshooting.md",
-        "references/workflows.md",
-        ".idac/",
-        ".idac/tmp/",
+
+@pytest.mark.parametrize("use_symlink", [False, True])
+def test_output_cannot_overwrite_selected_database(
+    use_symlink: bool,
+    tmp_path: Path,
+    fake_nexus,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    database = tmp_path / "sample.i64"
+    database.write_bytes(b"database sentinel")
+    out_path = database
+    if use_symlink:
+        out_path = tmp_path / "output.json"
+        out_path.symlink_to(database)
+
+    assert main(["-c", str(database), "database", "show", "--out", str(out_path)]) == 1
+
+    assert database.read_bytes() == b"database sentinel"
+    assert "must not overwrite the selected input or database" in capsys.readouterr().err
+    assert fake_nexus.instances == []
+
+
+def test_output_cannot_overwrite_database_created_for_binary(tmp_path: Path, fake_nexus, capsys) -> None:
+    binary = tmp_path / "sample.bin"
+    database = Path(f"{binary}.i64")
+    binary.write_bytes(b"binary sentinel")
+    database.write_bytes(b"database sentinel")
+
+    assert main(["-c", str(binary), "database", "show", "--out", str(database)]) == 1
+
+    assert binary.read_bytes() == b"binary sentinel"
+    assert database.read_bytes() == b"database sentinel"
+    assert "must not overwrite the selected input or database" in capsys.readouterr().err
+    assert fake_nexus.instances == []
+
+
+def test_instance_output_cannot_overwrite_discovered_database(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "selected.i64"
+    database.write_bytes(b"database sentinel")
+    fake_nexus.discovered = [
+        {
+            "record_id": "record-42",
+            "state": "ready",
+            "idb_path": str(database),
+            "exe_path": None,
+        }
     ]
-    assert (dest / "AGENTS.md").exists()
-    assert (dest / "prompts" / "recovery-pass.md").exists()
-    assert (dest / ".codex" / "config.toml").exists()
 
+    assert main(["--instance", "record-42", "database", "show", "--out", str(database)]) == 1
 
-def test_main_incomplete_group_command_returns_group_help(capsys) -> None:
-    exit_code = main(["function"])
+    assert database.read_bytes() == b"database sentinel"
+    assert "must not overwrite the selected input or database" in capsys.readouterr().err
+    assert len(fake_nexus.instances) == 1
+    assert fake_nexus.instances[0].calls == []
+    assert fake_nexus.instances[0].closed is True
 
-    assert exit_code == 2
-    captured = capsys.readouterr()
-    assert "usage: idac function " in captured.out
-    assert "metadata" in captured.out
 
+def test_output_cannot_overwrite_command_input_file(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    declarations = tmp_path / "types.h"
+    database.touch()
+    declarations.write_text("typedef int preserved_type;\n", encoding="utf-8")
 
-def test_type_list_without_pattern_requires_out(capsys) -> None:
-    exit_code = main(["type", "list", "-c", FIXTURE_DB])
-
-    assert exit_code == 1
-    assert "rerun with a pattern or `--out <path>`" in capsys.readouterr().err
-
-
-@pytest.mark.requires_ida
-def test_function_metadata_smoke(capsys, copy_database, tiny_database: Path, short_runtime_dir) -> None:
-    fixture_db = _copied_fixture_db(copy_database, tiny_database)
-    exit_code = main(["function", "metadata", "main", "-c", fixture_db])
-
-    assert exit_code == 0
-    output = capsys.readouterr().out
-    assert "main @ 0x100000460" in output
-    assert "prototype:" in output
-
-
-def test_root_context_forwards_to_direct_command(monkeypatch, tmp_path: Path) -> None:
-    captured = {}
-    out_path = tmp_path / "main.c"
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {"ok": True, "result": {"text": "int main(void)\n{\n  return 0;\n}\n"}, "warnings": []}
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["-c", "db:/tmp/demo.i64", "--timeout", "7", "decompile", "main", "--out", str(out_path)])
-
-    assert exit_code == 0
-    assert captured["request"].backend == "idalib"
-    assert captured["request"].database == "/tmp/demo.i64"
-    assert captured["request"].timeout == 7.0
-
-
-def test_busy_backend_error_explains_serialized_requests(monkeypatch, capsys) -> None:
-    def fake_send_request(request):
-        return {
-            "ok": False,
-            "error": "idac-gui dispatcher queue is full (16/16)",
-            "error_kind": "busy",
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["-c", "pid:84428", "function", "metadata", "main"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "queue is full" in captured.err
-    assert "requests for one target are serialized" in captured.err
-    assert "batch/decompilemany" in captured.err
-
-
-def test_root_context_forwards_to_nested_command(monkeypatch, capsys) -> None:
-    captured = {}
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {
-            "ok": True,
-            "result": {"address": "0x1000", "name": "main", "prototype": "int main(void)"},
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["-c", "pid:84428", "function", "metadata", "main", "--format", "json"])
-
-    assert exit_code == 0
-    assert captured["request"].backend == "gui"
-    assert captured["request"].target == "pid:84428"
-    assert json.loads(capsys.readouterr().out)["name"] == "main"
-
-
-def test_single_idalib_target_is_auto_selected(monkeypatch, capsys) -> None:
-    captured = {}
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {
-            "ok": True,
-            "result": {"address": "0x1000", "name": "main", "prototype": "int main(void)"},
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.context.list_gui_discovered_instances", lambda warnings=None: [])
-    monkeypatch.setattr("idac.cli2.context.list_gui_instances", lambda *, timeout=None, warnings=None: [])
-    monkeypatch.setattr(
-        "idac.cli2.context.list_idalib_instances",
-        lambda: [SimpleNamespace(database_path="/tmp/only-open.i64")],
-    )
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["function", "metadata", "main", "--format", "json"])
-
-    assert exit_code == 0
-    assert captured["request"].backend == "idalib"
-    assert captured["request"].database == "/tmp/only-open.i64"
-    assert json.loads(capsys.readouterr().out)["name"] == "main"
-
-
-def test_command_local_context_overrides_root_context(monkeypatch, tmp_path: Path) -> None:
-    captured = {}
-    out_path = tmp_path / "main.c"
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {"ok": True, "result": {"text": "int main(void)\n{\n  return 0;\n}\n"}, "warnings": []}
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(
-        [
-            "-c",
-            "db:/tmp/root.i64",
-            "decompile",
-            "main",
-            "-c",
-            "db:/tmp/child.i64",
-            "--out",
-            str(out_path),
-        ]
-    )
-
-    assert exit_code == 0
-    assert captured["request"].database == "/tmp/child.i64"
-
-
-def test_function_locals_rename_accepts_index_without_positional_selector(capsys, monkeypatch) -> None:
-    captured = {}
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {"ok": True, "result": {"locals": []}, "warnings": []}
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(
-        [
-            "function",
-            "locals",
-            "rename",
-            "main",
-            "--index",
-            "4",
-            "--new-name",
-            "msgBufferPtr",
-            "-c",
-            "db:/tmp/demo.i64",
-        ]
-    )
-
-    assert exit_code == 0
-    assert captured["request"].params["identifier"] == "main"
-    assert captured["request"].params["index"] == 4
-    assert captured["request"].params["new_name"] == "msgBufferPtr"
-    assert capsys.readouterr().err == ""
-
-
-def test_function_locals_rename_rejects_ambiguous_single_positional_with_stable_selector(capsys) -> None:
-    parser = build_parser()
-
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["function", "locals", "rename", "main", "v4", "-c", "db:/tmp/demo.i64"])
-
-    assert exc.value.code == 2
-    assert "--new-name" in capsys.readouterr().err
-
-
-def test_function_locals_retype_accepts_local_id_without_positional_selector(capsys, monkeypatch) -> None:
-    captured = {}
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {"ok": True, "result": {"locals": []}, "warnings": []}
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(
-        [
-            "function",
-            "locals",
-            "retype",
-            "main",
-            "--local-id",
-            "stack(16)@0x100000460",
-            "--decl",
-            "unsigned int msgBufferPtr;",
-            "-c",
-            "db:/tmp/demo.i64",
-        ]
-    )
-
-    assert exit_code == 0
-    assert captured["request"].params["identifier"] == "main"
-    assert captured["request"].params["local_id"] == "stack(16)@0x100000460"
-    assert captured["request"].params["decl"] == "unsigned int msgBufferPtr;"
-    assert capsys.readouterr().err == ""
-
-
-def test_function_locals_retype_accepts_type_shorthand(capsys, monkeypatch) -> None:
-    captured = {}
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {"ok": True, "result": {"locals": []}, "warnings": []}
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(
-        [
-            "function",
-            "locals",
-            "retype",
-            "main",
-            "--index",
-            "4",
-            "--type",
-            "unsigned int",
-            "-c",
-            "db:/tmp/demo.i64",
-        ]
-    )
-
-    assert exit_code == 0
-    assert captured["request"].params["identifier"] == "main"
-    assert captured["request"].params["index"] == 4
-    assert captured["request"].params["decl"] == "unsigned int __idac_local;"
-    assert capsys.readouterr().err == ""
-
-
-def test_function_locals_retype_rejects_positional_selector_with_stable_selector(capsys) -> None:
-    exit_code = main(
-        [
-            "function",
-            "locals",
-            "retype",
-            "main",
-            "v4",
-            "--index",
-            "4",
-            "--decl",
-            "unsigned int msgBufferPtr;",
-            "-c",
-            "db:/tmp/demo.i64",
-        ]
-    )
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "do not combine a positional selector with --local-id or --index" in captured.err
-
-
-def test_function_locals_update_rejects_multiple_stable_selectors(capsys) -> None:
-    exit_code = main(
-        [
-            "function",
-            "locals",
-            "update",
-            "main",
-            "--local-id",
-            "stack(16)@0x100000460",
-            "--index",
-            "4",
-            "--rename",
-            "msgBufferPtr",
-            "-c",
-            "db:/tmp/demo.i64",
-        ]
-    )
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "--local-id and --index are mutually exclusive" in captured.err
-
-
-def test_function_locals_update_rejects_positional_selector_with_stable_selector(capsys) -> None:
-    exit_code = main(
-        [
-            "function",
-            "locals",
-            "update",
-            "main",
-            "v4",
-            "--index",
-            "4",
-            "--rename",
-            "msgBufferPtr",
-            "-c",
-            "db:/tmp/demo.i64",
-        ]
-    )
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "do not combine a positional selector with --local-id or --index" in captured.err
-
-
-def test_preview_requires_out_outside_batch(capsys) -> None:
-    exit_code = main(["preview", "-c", FIXTURE_DB, "function", "metadata", "main"])
-
-    assert exit_code == 1
-    assert "preview requires `--out <path.json|path.jsonl>`" in capsys.readouterr().err
-
-
-def test_preview_rejects_non_previewable_misc_command(tmp_path: Path, capsys) -> None:
-    out_path = tmp_path / "preview.json"
-
-    exit_code = main(["preview", "-o", str(out_path), "misc", "rename", "main", "renamed"])
-
-    assert exit_code == 1
-    assert "command is not available in preview mode" in capsys.readouterr().err
-
-
-def test_root_context_forwards_to_preview_wrapper(tmp_path: Path, monkeypatch) -> None:
-    captured = {}
-    out_path = tmp_path / "preview.json"
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {
-            "ok": True,
-            "result": {
-                "before": {"comment": None},
-                "after": {"comment": "entry point"},
-                "result": {"comment": "entry point"},
-                "preview_mode": "undo",
-                "persisted": False,
-            },
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(
-        ["-c", "db:/tmp/demo.i64", "preview", "-o", str(out_path), "comment", "set", "main", "entry point"]
-    )
-
-    assert exit_code == 0
-    assert captured["request"].backend == "idalib"
-    assert captured["request"].database == "/tmp/demo.i64"
-
-
-@pytest.mark.requires_ida
-def test_batch_allows_preview_and_writes_jsonl(
-    tmp_path: Path, copy_database, tiny_database: Path, short_runtime_dir
-) -> None:
-    fixture_db = _copied_fixture_db(copy_database, tiny_database)
-    batch_path = tmp_path / "commands.txt"
-    out_path = tmp_path / "batch.jsonl"
-    batch_path.write_text(
-        "\n".join(
+    assert (
+        main(
             [
-                f"function metadata main -c {fixture_db}",
-                f'preview -c {fixture_db} comment set main "entry point"',
+                "-c",
+                str(database),
+                "type",
+                "check",
+                "--decl-file",
+                str(declarations),
+                "--out",
+                str(declarations),
             ]
         )
-        + "\n",
-        encoding="utf-8",
+        == 1
     )
 
-    exit_code = main(["batch", str(batch_path), "-o", str(out_path)])
-
-    assert exit_code == 0
-    rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(rows) == 2
-    assert rows[0]["command"].startswith("function metadata")
-    assert rows[1]["command"].startswith("preview ")
-    assert rows[1]["result"]["after"]["comment"] == "entry point"
+    assert declarations.read_text(encoding="utf-8") == "typedef int preserved_type;\n"
+    assert "must not overwrite the --decl-file input" in capsys.readouterr().err
+    assert fake_nexus.instances == []
 
 
-def test_batch_resolves_preview_wrapped_relative_paths(tmp_path: Path, capsys, monkeypatch) -> None:
-    batch_dir = tmp_path / "batch"
-    cwd = tmp_path / "cwd"
-    batch_dir.mkdir()
-    cwd.mkdir()
-    decl_file = batch_dir / "sub_401000.h"
-    decl_file.write_text("int sub_401000(void);\n", encoding="utf-8")
-    batch_path = batch_dir / "commands.idac"
-    batch_path.write_text(
-        "preview -c db:/tmp/demo.i64 function prototype set sub_401000 --decl-file sub_401000.h\n",
-        encoding="utf-8",
-    )
-    captured = {}
+def test_preview_output_cannot_overwrite_wrapped_input_file(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    declarations = tmp_path / "types.h"
+    database.touch()
+    declarations.write_text("typedef int preserved_type;\n", encoding="utf-8")
 
-    def fake_preview_execute(parsed, *, root_parser):
-        captured["decl_file"] = parsed.decl_file
-        return CommandResult(
-            render_op="proto_set",
-            value={
-                "before": {"prototype": "int sub_401000(void);"},
-                "after": {"prototype": "int sub_401000(void);"},
-                "result": {"prototype": "int sub_401000(void);"},
-                "preview_mode": "undo",
-                "persisted": False,
-            },
-        )
-
-    monkeypatch.setattr("idac.cli2.preview.execute_parsed", fake_preview_execute)
-    monkeypatch.chdir(cwd)
-
-    exit_code = main(["batch", str(batch_path)])
-
-    assert exit_code == 0
-    assert captured["decl_file"] == decl_file
-    assert json.loads(capsys.readouterr().out)["ok"] is True
-
-
-def test_root_context_forwards_to_batch_children(tmp_path: Path, capsys, monkeypatch) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("function metadata main\n", encoding="utf-8")
-    captured = {}
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {"ok": True, "result": {"address": "0x1000", "name": "main"}, "warnings": []}
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["-c", "db:/tmp/demo.i64", "batch", str(batch_path)])
-
-    assert exit_code == 0
-    assert captured["request"].backend == "idalib"
-    assert captured["request"].database == "/tmp/demo.i64"
-    assert json.loads(capsys.readouterr().out)["ok"] is True
-
-
-def test_batch_with_out_still_prints_failures_to_stderr(tmp_path: Path, capsys, monkeypatch) -> None:
-    batch_path = tmp_path / "commands.txt"
-    out_path = tmp_path / "batch.json"
-    batch_path.write_text("function metadata missing_symbol -c db:/tmp/demo.i64\n", encoding="utf-8")
-
-    def fake_send_request(request):
-        return {"ok": False, "error": "symbol not found: missing_symbol", "warnings": []}
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["batch", str(batch_path), "-o", str(out_path)])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "batch line 1:" in captured.err
-    assert "symbol not found: missing_symbol" in captured.err
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert payload["results"][0]["stderr"] == "symbol not found: missing_symbol"
-
-
-def test_batch_reports_renderer_failures_with_structured_fallback(tmp_path: Path, capsys, monkeypatch) -> None:
-    batch_path = tmp_path / "commands.txt"
-    out_path = tmp_path / "batch.json"
-    batch_path.write_text("function metadata main -c db:/tmp/demo.i64\n", encoding="utf-8")
-
-    monkeypatch.setattr(
-        "idac.cli2.batch.execute_parsed",
-        lambda parsed, *, root_parser: CommandResult(
-            render_op="function_show",
-            value={"address": "0x1000", "name": "main"},
-            exit_code=1,
-        ),
-    )
-
-    def broken_renderer(value) -> str:
-        raise RuntimeError("boom")
-
-    monkeypatch.setitem(batch_module.TEXT_RENDERERS, "function_show", broken_renderer)
-
-    exit_code = main(["batch", str(batch_path), "-o", str(out_path)])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "renderer failure while formatting function_show: RuntimeError: boom" in captured.err
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    stderr_text = payload["results"][0]["stderr"]
-    assert "renderer failure while formatting function_show: RuntimeError: boom" in stderr_text
-    assert '"name": "main"' in stderr_text
-
-
-def test_batch_preserves_missing_timeout_error_in_structured_output(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    out_path = tmp_path / "batch.json"
-    batch_path.write_text('search bytes "74 69 6e 79" --segment __TEXT\n', encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "-o", str(out_path)])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "`idac search bytes` requires --timeout" in captured.err
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert payload["results"][0]["stderr"] == "`idac search bytes` requires --timeout"
-
-
-def test_batch_rejects_mutating_commands_without_out_before_execution(tmp_path: Path, capsys, monkeypatch) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("comment set main entry\n", encoding="utf-8")
-
-    def fake_send_request(request):
-        raise AssertionError("mutating batch command should not execute without --out")
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["batch", str(batch_path), "-c", "db:/tmp/demo.i64"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "mutating batch commands require `--out <path.json|path.jsonl>`" in captured.err
-    assert "line is 1: comment set main entry" in captured.err
-
-
-def test_batch_lint_reports_mutating_without_out_before_execution(tmp_path: Path, capsys, monkeypatch) -> None:
-    batch_path = tmp_path / "commands.txt"
-    decl_file = tmp_path / "types.h"
-    decl_file.write_text("typedef int sample_type;\n", encoding="utf-8")
-    batch_path.write_text("type declare --decl-file types.h\n", encoding="utf-8")
-
-    def fake_execute(parsed, *, root_parser):
-        raise AssertionError("batch lint should not execute child commands")
-
-    monkeypatch.setattr("idac.cli2.batch.execute_parsed", fake_execute)
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "mutating batch command requires wrapper --out" in captured.out
-
-
-def test_batch_lint_writes_report_and_warns_on_name_local_selector_after_type_phase(
-    tmp_path: Path, capsys, monkeypatch
-) -> None:
-    batch_path = tmp_path / "commands.txt"
-    out_path = tmp_path / "lint.json"
-    decl_file = tmp_path / "types.h"
-    decl_file.write_text("typedef int sample_type;\n", encoding="utf-8")
-    batch_path.write_text(
-        "\n".join(
+    assert (
+        main(
             [
-                "type declare --decl-file types.h",
-                "function locals update main v1 --rename count",
+                "preview",
+                "-c",
+                str(database),
+                "--out",
+                str(declarations),
+                "type",
+                "declare",
+                "--decl-file",
+                str(declarations),
             ]
         )
-        + "\n",
-        encoding="utf-8",
+        == 1
     )
 
-    def fake_execute(parsed, *, root_parser):
-        raise AssertionError("batch lint should not execute child commands")
-
-    monkeypatch.setattr("idac.cli2.batch.execute_parsed", fake_execute)
-
-    exit_code = main(["batch", str(batch_path), "--lint", "-o", str(out_path)])
-
-    assert exit_code == 0
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert payload["mode"] == "lint"
-    assert payload["commands_total"] == 2
-    assert payload["warnings_total"] == 1
-    assert "name-only local selector after type/prototype/reanalysis work" in payload["warnings"][0]["message"]
-    capsys.readouterr()
+    assert declarations.read_text(encoding="utf-8") == "typedef int preserved_type;\n"
+    assert "must not overwrite the wrapped --decl-file input" in capsys.readouterr().err
+    assert len(fake_nexus.instances) == 1
+    assert fake_nexus.instances[0].calls == []
+    assert fake_nexus.instances[0].closed is True
 
 
-def test_batch_lint_reports_command_local_validation_errors(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    out_path = tmp_path / "lint.json"
-    batch_path.write_text("function locals update main v1\n", encoding="utf-8")
+def test_context_path_dispatches_operation_and_closes_session(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    database.touch()
 
-    exit_code = main(["batch", str(batch_path), "--lint", "-o", str(out_path)])
+    assert main(["-c", str(database), "--timeout", "12.5", "database", "show", "--json"]) == 0
 
-    assert exit_code == 1
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert payload["ok"] is False
-    assert payload["errors_total"] == 1
-    assert payload["results"][0]["status"] == "failed"
-    assert "at least one of --rename or declaration input is required" in payload["results"][0]["stderr"]
-    capsys.readouterr()
-
-
-def test_batch_lint_rejects_incomplete_command_groups(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("function\ntype struct\n", encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 1
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is False
-    assert payload["errors_total"] == 2
-    assert payload["results"][0]["exit_code"] == 2
-    assert "usage: idac function" in payload["results"][0]["stderr"]
-    assert payload["results"][1]["exit_code"] == 2
-    assert "usage: idac type struct" in payload["results"][1]["stderr"]
-
-
-def test_batch_lint_reports_disasm_missing_selector(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("disasm\n", encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "disasm requires a function or --start/--end" in captured.out
-
-
-def test_batch_lint_reports_type_list_missing_pattern_or_out(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("type list\n", encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "this list can be very large" in captured.out
-
-
-def test_batch_lint_accepts_disasm_range_and_type_list_filter(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("disasm --start 0x1000 --end 0x1010\ntype list Foo\n", encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is True
-    assert payload["commands_linted"] == 2
-
-
-def test_batch_lint_rejects_forwarded_context_for_no_context_commands(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("docs cli\n", encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint", "-c", "db:/tmp/demo.i64"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "`idac docs` does not accept -c/--context" in captured.out
-
-
-def test_batch_lint_rejects_forwarded_timeout_for_no_context_commands(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("docs cli\n", encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint", "--timeout", "1"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "`idac docs` does not accept --timeout" in captured.out
-
-
-def test_batch_lint_reports_missing_relative_input_file(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("type check --decl-file missing.h\n", encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "decl_file path does not exist" in captured.out
-
-
-def test_batch_lint_reports_missing_required_timeout(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text('search bytes "74 69 6e 79" --segment __TEXT\n', encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "`idac search bytes` requires --timeout" in captured.out
-
-
-def test_batch_lint_accepts_batch_safe_no_context_commands(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("docs cli\ndoctor\n", encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is True
-    assert payload["commands_total"] == 2
-    assert payload["commands_linted"] == 2
-    assert payload["errors"] == []
-
-
-def test_batch_lint_reports_preview_wrapped_missing_input_file(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("preview function prototype set main --decl-file missing.h\n", encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "decl_file path does not exist" in captured.out
-
-
-def test_batch_lint_reports_preview_wrapped_missing_required_timeout(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text('preview search bytes "74 69 6e 79" --segment __TEXT\n', encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "`idac search bytes` requires --timeout" in captured.out
-
-
-def test_batch_lint_reports_preview_wrapped_unsupported_command(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text('preview py exec --code "result = 1"\n', encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "command is not available in preview mode" in captured.out
-
-
-def test_batch_lint_rejects_preview_wrapped_incomplete_command_group(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    batch_path.write_text("preview function\n", encoding="utf-8")
-
-    exit_code = main(["batch", str(batch_path), "--lint"])
-
-    assert exit_code == 1
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ok"] is False
-    assert payload["errors_total"] == 1
-    assert payload["results"][0]["exit_code"] == 2
-    assert "usage: idac function" in payload["results"][0]["stderr"]
-
-
-def test_batch_records_missing_local_apply_file_in_ordered_output(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    out_path = tmp_path / "batch.json"
-    batch_path.write_text(
-        "function locals apply -c db:/tmp/demo.i64 main --json-file missing-locals.json\n",
-        encoding="utf-8",
+    session = fake_nexus.instances[0]
+    assert (session.locator, session.instance_id, session.timeout, session.closed) == (
+        str(database),
+        None,
+        12.5,
+        True,
     )
-
-    exit_code = main(["batch", str(batch_path), "-o", str(out_path)])
-
-    assert exit_code == 1
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert payload["ok"] is False
-    assert payload["commands_failed"] == 1
-    row = payload["results"][0]
-    assert row["status"] == "failed"
-    assert row["exit_code"] == 1
-    assert "failed to read local apply JSON file" in row["stderr"]
-    capsys.readouterr()
+    assert len(session.calls) == 1
+    assert session.calls[0]["op"] == "database_info"
+    assert session.calls[0]["params"] == {}
+    assert session.calls[0]["preview"] is False
+    assert json.loads(capsys.readouterr().out) == {"database": str(database), "record_id": None}
 
 
-def test_batch_preserves_argparse_error_in_structured_output(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    out_path = tmp_path / "batch.json"
-    batch_path.write_text("does-not-exist\n", encoding="utf-8")
+def test_operation_error_remains_primary_when_cli_session_close_also_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    database = tmp_path / "sample.i64"
+    database.touch()
 
-    exit_code = main(["batch", str(batch_path), "-o", str(out_path)])
+    class FailingSession:
+        def __init__(self, **kwargs: object) -> None:
+            self.options = kwargs
 
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "invalid choice: 'does-not-exist'" in captured.err
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert "invalid choice: 'does-not-exist'" in payload["results"][0]["stderr"]
+        def execute_operation(self, *args: object, **kwargs: object) -> object:
+            raise NexusSessionError("operation failed", kind="operation_failed")
+
+        def close(self) -> None:
+            raise NexusSessionError("lease release failed", kind="release_failed")
+
+    monkeypatch.setattr("idac.nexus.NexusSession", FailingSession)
+
+    assert main(["-c", str(database), "database", "show", "--json"]) == 1
+
+    assert capsys.readouterr().err.splitlines() == [
+        "operation failed",
+        "note: Nexus session finalization also failed: lease release failed",
+    ]
 
 
-def test_batch_persists_completed_rows_when_interrupted_mid_batch(tmp_path: Path, capsys, monkeypatch) -> None:
-    batch_path = tmp_path / "commands.txt"
-    out_path = tmp_path / "batch.jsonl"
-    batch_path.write_text("docs cli\ndocs cli\n", encoding="utf-8")
+def test_keyboard_interrupt_exits_130_without_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    database = tmp_path / "sample.i64"
+    database.touch()
 
-    from idac.cli2 import batch as batch_module
-    from idac.cli2.result import CommandResult
+    class InterruptedSession:
+        def __init__(self, **kwargs: object) -> None:
+            self.options = kwargs
 
-    calls = {"count": 0}
-
-    def fake_execute(parsed, *, root_parser):
-        calls["count"] += 1
-        if calls["count"] == 2:
+        def execute_operation(self, *args: object, **kwargs: object) -> object:
             raise KeyboardInterrupt
-        return CommandResult(render_op="docs", value={"ok": True})
 
-    monkeypatch.setattr(batch_module, "_execute_batch_args", fake_execute)
+        def close(self) -> None:
+            return None
 
-    with pytest.raises(KeyboardInterrupt):
-        main(["batch", str(batch_path), "-o", str(out_path)])
+    monkeypatch.setattr("idac.nexus.NexusSession", InterruptedSession)
 
-    rows = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(rows) == 1
-    assert rows[0]["line"] == 1
-    assert rows[0]["status"] == "ok"
-    capsys.readouterr()
+    assert main(["-c", str(database), "database", "show", "--json"]) == 130
+
+    assert capsys.readouterr().err.strip() == "interrupted"
 
 
-def test_batch_records_incomplete_command_groups_in_structured_output(tmp_path: Path, capsys) -> None:
-    batch_path = tmp_path / "commands.txt"
-    out_path = tmp_path / "batch.json"
-    batch_path.write_text("function\nmisc\n", encoding="utf-8")
+def test_exact_instance_and_implicit_ready_selection_reach_public_session(fake_nexus, capsys) -> None:
+    assert main(["--instance", "record-42", "database", "show", "--json"]) == 0
+    first_output = json.loads(capsys.readouterr().out)
+    assert main(["database", "show", "--json"]) == 0
+    second_output = json.loads(capsys.readouterr().out)
 
-    exit_code = main(["batch", str(batch_path), "-o", str(out_path)])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "usage: idac function" in captured.err
-    assert "usage: idac misc" in captured.err
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert payload["commands_failed"] == 2
-    assert payload["results"][0]["exit_code"] == 2
-    assert payload["results"][1]["exit_code"] == 2
-    assert "usage: idac function" in payload["results"][0]["stderr"]
-    assert "usage: idac misc" in payload["results"][1]["stderr"]
+    assert [(item.locator, item.instance_id, item.closed) for item in fake_nexus.instances] == [
+        (None, "record-42", True),
+        (None, None, True),
+    ]
+    assert first_output == {"database": None, "record_id": "record-42"}
+    assert second_output == {"database": None, "record_id": None}
 
 
-def test_type_declare_failure_returns_exit_1_and_stderr(capsys, monkeypatch) -> None:
-    def fake_send_request(request):
-        return {
-            "ok": True,
-            "result": {
-                "aliases_applied": [],
-                "bisect": None,
-                "declaration_count": 1,
-                "diagnostics": [
-                    {
-                        "kind": "unterminated_declaration",
-                        "line": 1,
-                        "message": "declaration does not end with a top-level semicolon",
-                    }
-                ],
-                "errors": 1,
-                "imported_types": [],
-                "replace": False,
-                "replaced_types": [],
-                "success": False,
-            },
-            "warnings": [],
-        }
+def test_mutation_command_and_database_save_use_session_api(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    database.touch()
 
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
+    assert main(["-c", str(database), "comment", "set", "0x401000", "entry", "--json"]) == 0
+    assert main(["-c", str(database), "database", "save", "--json"]) == 0
 
-    exit_code = main(["type", "declare", "-c", "db:/tmp/demo.i64", "--decl", "struct broken { int x;"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    payload = json.loads(captured.out)
-    assert payload["success"] is False
-    assert "type declare failed:" in captured.err
-    assert "line 1:" in captured.err
+    operation_call = fake_nexus.instances[0].calls[0]
+    assert operation_call["op"] == "comment_set"
+    assert operation_call["params"] == {"address": "0x401000", "text": "entry", "scope": "line"}
+    assert operation_call["preview"] is False
+    assert fake_nexus.instances[1].calls == [{"save": True}]
+    assert all(item.closed for item in fake_nexus.instances)
+    assert '"saved": true' in capsys.readouterr().out
 
 
-def test_prototype_check_failure_returns_exit_1_and_stderr(capsys, monkeypatch) -> None:
-    def fake_send_request(request):
-        return {
-            "ok": True,
-            "result": {
-                "address": "0x401000",
-                "success": False,
-                "parsed": False,
-                "is_function": False,
-                "arglocs_calculated": None,
-                "unknown_types": [],
-                "diagnostics": ["IDA failed to parse the prototype declaration"],
-            },
-            "warnings": [],
-        }
+def test_preview_reuses_wrapper_session_and_never_commits_mutation(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    artifact = tmp_path / "preview.json"
+    database.touch()
 
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(
-        [
-            "function",
-            "prototype",
-            "check",
-            "-c",
-            "db:/tmp/demo.i64",
-            "target",
-            "--decl",
-            "int target(",
-        ]
+    assert (
+        main(
+            [
+                "preview",
+                "-c",
+                str(database),
+                "-o",
+                str(artifact),
+                "comment",
+                "set",
+                "0x401000",
+                "entry",
+            ]
+        )
+        == 0
     )
 
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    payload = json.loads(captured.out)
-    assert payload["success"] is False
-    assert "function prototype check failed:" in captured.err
-    assert "IDA failed to parse the prototype declaration" in captured.err
+    assert len(fake_nexus.instances) == 1
+    session = fake_nexus.instances[0]
+    assert session.closed is True
+    assert session.calls[0]["preview"] is True
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert payload["before"] == {"text": None}
+    assert payload["after"] == {"text": "entry"}
+    assert payload["undo"] == {"mode": "rollback", "persisted": False, "status": "ok"}
+    assert "wrote preview data" in capsys.readouterr().err
 
 
-def test_preview_failure_writes_artifact_and_stderr_summary(tmp_path: Path, capsys, monkeypatch) -> None:
-    out_path = tmp_path / "preview.json"
+def test_preview_does_not_publish_success_artifact_before_session_closes(
+    tmp_path: Path,
+    fake_nexus,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    database = tmp_path / "sample.i64"
+    artifact = tmp_path / "preview.json"
+    database.touch()
 
-    def fake_send_request(request):
-        return {
-            "ok": True,
-            "result": {
-                "aliases_applied": [],
-                "bisect": None,
-                "before": {"type_count": 1},
-                "after": {"type_count": 1},
-                "diagnostics": [
-                    {
-                        "kind": "unterminated_declaration",
-                        "line": 1,
-                        "message": "declaration does not end with a top-level semicolon",
-                    }
-                ],
-                "errors": 1,
-                "imported_types": [],
-                "replace": False,
-                "replaced_types": [],
-                "result": {"success": False},
-                "success": False,
-            },
-            "warnings": [],
-        }
+    def fail_close(self) -> None:
+        self.closed = True
+        raise NexusSessionError("lease release failed", kind="release_failed")
 
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
+    monkeypatch.setattr(fake_nexus, "close", fail_close)
+
+    assert (
+        main(
+            [
+                "preview",
+                "-c",
+                str(database),
+                "-o",
+                str(artifact),
+                "comment",
+                "set",
+                "0x401000",
+                "entry",
+            ]
+        )
+        == 1
+    )
+
+    assert not artifact.exists()
+    assert capsys.readouterr().err.strip() == "lease release failed"
+
+
+def test_preview_child_cannot_switch_nexus_target(tmp_path: Path, fake_nexus, capsys) -> None:
+    outer = tmp_path / "outer.i64"
+    inner = tmp_path / "inner.i64"
+    outer.touch()
+    inner.touch()
 
     exit_code = main(
         [
             "preview",
-            "-o",
-            str(out_path),
             "-c",
-            "db:/tmp/demo.i64",
-            "type",
-            "declare",
-            "--decl",
-            "struct broken { int x;",
+            str(outer),
+            "-o",
+            str(tmp_path / "preview.json"),
+            "comment",
+            "set",
+            "0x401000",
+            "entry",
+            "-c",
+            str(inner),
         ]
     )
 
     assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "type declare failed:" in captured.err
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert payload["status"] == "failed"
-    assert any("type declare failed:" in line for line in payload["stderr"])
+    assert "child commands cannot switch Nexus targets" in capsys.readouterr().err
+    assert len(fake_nexus.instances) == 1
+    assert fake_nexus.instances[0].calls == []
 
 
-def test_decompilemany_failure_prints_stderr_summary(tmp_path: Path, capsys, monkeypatch) -> None:
-    out_dir = tmp_path / "out"
-
-    monkeypatch.setattr(
-        "idac.cli2.commands.top_level._decompilemany_targets",
-        lambda args: [
-            {"identifier": "ok", "name": "ok", "address": "0x1"},
-            {"identifier": "bad", "name": "bad", "address": "0x2"},
-        ],
-    )
-
-    def fake_single(args, *, identifier: str) -> dict[str, object]:
-        if identifier == "bad":
-            raise CliUserError("symbol not found: bad")
-        return {"text": "int ok(void) { return 0; }\n"}
-
-    monkeypatch.setattr("idac.cli2.commands.top_level._run_single_decompile", fake_single)
-
-    exit_code = main(["decompilemany", "demo", "--out-dir", str(out_dir), "-c", "db:/tmp/demo.i64"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "out_dir:" in captured.out
-    assert "decompilemany failed for 1/2 function(s)" in captured.err
-    assert "bad: symbol not found: bad" in captured.err
-    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["functions_failed"] == 1
-
-
-def test_decompilemany_out_file_keeps_raw_text_with_json_suffix(tmp_path: Path, capsys, monkeypatch) -> None:
-    out_file = tmp_path / "combined.json"
-
-    monkeypatch.setattr(
-        "idac.cli2.commands.top_level._decompilemany_targets",
-        lambda args: [
-            {"identifier": "first", "name": "first", "address": "0x1"},
-            {"identifier": "second", "name": "second", "address": "0x2"},
-        ],
-    )
-
-    def fake_single(args, *, identifier: str) -> dict[str, object]:
-        return {"text": f"int {identifier}(void) {{ return 0; }}\n"}
-
-    monkeypatch.setattr("idac.cli2.commands.top_level._run_single_decompile", fake_single)
-
-    exit_code = main(["decompilemany", "demo", "--out-file", str(out_file), "-c", "db:/tmp/demo.i64"])
-
-    assert exit_code == 0
-    capsys.readouterr()
-    content = out_file.read_text(encoding="utf-8")
-    assert content.startswith("int first(void)")
-    assert "\nint second(void)" in content
-    with pytest.raises(json.JSONDecodeError):
-        json.loads(content)
-
-
-def test_decompilemany_writes_optional_disasm_and_ctree_artifacts(tmp_path: Path, capsys, monkeypatch) -> None:
-    out_dir = tmp_path / "out"
-
-    monkeypatch.setattr(
-        "idac.cli2.commands.top_level._decompilemany_targets",
-        lambda args: [{"identifier": "main", "name": "main", "address": "0x1000"}],
-    )
-    monkeypatch.setattr(
-        "idac.cli2.commands.top_level._run_single_decompile",
-        lambda args, *, identifier: {"text": "int main(void) { return 0; }\n"},
-    )
-
-    def fake_text_op(args, *, op: str, identifier: str) -> dict[str, object]:
-        return {"text": f"{op} for {identifier}\n"}
-
-    monkeypatch.setattr("idac.cli2.commands.top_level._run_single_text_op", fake_text_op)
+def test_preview_child_cannot_override_wrapper_timeout(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    database.touch()
 
     exit_code = main(
-        ["decompilemany", "main", "--out-dir", str(out_dir), "--disasm", "--ctree", "-c", "db:/tmp/demo.i64"]
+        [
+            "preview",
+            "-c",
+            str(database),
+            "--timeout",
+            "12",
+            "-o",
+            str(tmp_path / "preview.json"),
+            "comment",
+            "set",
+            "0x401000",
+            "entry",
+            "--timeout",
+            "1",
+        ]
     )
 
-    assert exit_code == 0
+    assert exit_code == 1
+    assert "child commands cannot set --timeout" in capsys.readouterr().err
+    assert len(fake_nexus.instances) == 1
+    assert fake_nexus.instances[0].timeout == 12.0
+    assert fake_nexus.instances[0].calls == []
+
+
+def test_preview_child_inherits_wrapper_timeout_for_validation(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    artifact = tmp_path / "preview.json"
+    database.touch()
+
+    assert (
+        main(
+            [
+                "preview",
+                "-c",
+                str(database),
+                "--timeout",
+                "12",
+                "-o",
+                str(artifact),
+                "search",
+                "bytes",
+                "90",
+                "--segment",
+                ".text",
+            ]
+        )
+        == 0
+    )
+
+    assert len(fake_nexus.instances) == 1
+    session = fake_nexus.instances[0]
+    assert session.timeout == 12.0
+    assert [call["op"] for call in session.calls] == ["search_bytes"]
+    assert json.loads(artifact.read_text(encoding="utf-8"))["status"] == "ok"
     capsys.readouterr()
-    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
-    entry = manifest["functions"][0]
-    assert entry["address"] == "0x1000"
-    assert entry["artifacts"]["decompile"].endswith(".c")
-    assert entry["artifacts"]["disasm"].endswith(".asm")
-    assert entry["artifacts"]["ctree"].endswith(".ctree")
-    assert Path(entry["artifacts"]["decompile"]).stem.endswith("_0x1000")
-    assert Path(entry["artifacts"]["decompile"]).read_text(encoding="utf-8").startswith("int main")
-    assert Path(entry["artifacts"]["disasm"]).read_text(encoding="utf-8") == "disasm for main\n"
-    assert Path(entry["artifacts"]["ctree"]).read_text(encoding="utf-8") == "ctree for main\n"
 
 
-def test_decompilemany_rejects_optional_artifacts_with_out_file(tmp_path: Path, capsys) -> None:
-    out_file = tmp_path / "combined.c"
+def test_batch_reuses_one_wrapper_session_for_all_children(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    batch_file = tmp_path / "read.idac"
+    database.touch()
+    batch_file.write_text("database show --json\ndatabase show --json\n", encoding="utf-8")
 
-    exit_code = main(["decompilemany", "main", "--out-file", str(out_file), "--disasm", "-c", "db:/tmp/demo.i64"])
+    assert main(["batch", "-c", str(database), str(batch_file)]) == 0
 
-    assert exit_code == 1
+    assert len(fake_nexus.instances) == 1
+    session = fake_nexus.instances[0]
+    assert [call["op"] for call in session.calls] == ["database_info", "database_info"]
+    assert session.closed is True
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["commands_succeeded"] == 2
+    assert payload["commands_failed"] == 0
+
+
+def test_batch_children_inherit_wrapper_timeout_for_validation(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    batch_file = tmp_path / "search.idac"
+    database.touch()
+    batch_file.write_text("search bytes 90 --segment .text\n", encoding="utf-8")
+
+    assert main(["batch", "-c", str(database), "--timeout", "12", str(batch_file)]) == 0
+
+    assert len(fake_nexus.instances) == 1
+    session = fake_nexus.instances[0]
+    assert session.timeout == 12.0
+    assert [call["op"] for call in session.calls] == ["search_bytes"]
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["commands_succeeded"] == 1
+    assert payload["commands_failed"] == 0
+
+
+def test_batch_child_cannot_override_wrapper_timeout(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    batch_file = tmp_path / "read.idac"
+    database.touch()
+    batch_file.write_text("database show --timeout 1 --json\n", encoding="utf-8")
+
+    assert main(["batch", "-c", str(database), "--timeout", "12", str(batch_file)]) == 1
+
+    assert len(fake_nexus.instances) == 1
+    session = fake_nexus.instances[0]
+    assert session.timeout == 12.0
+    assert session.calls == []
     captured = capsys.readouterr()
-    assert "decompilemany --disasm/--ctree require --out-dir" in captured.err
-    assert not out_file.exists()
-
-
-def test_decompilemany_long_artifact_stems_keep_suffix_and_stable_digest(tmp_path: Path, capsys, monkeypatch) -> None:
-    name = "VeryLongTemplateName_" + ("MiddleComponent_" * 12) + "ImportantTail"
-    manifests = []
-
-    monkeypatch.setattr(
-        "idac.cli2.commands.top_level._decompilemany_targets",
-        lambda args: [{"identifier": "0x1000", "name": name, "address": "0x1000"}],
-    )
-
-    for index, body in enumerate(("return 0", "return 1")):
-        out_dir = tmp_path / f"out_{index}"
-
-        def fake_single(args, *, identifier: str, body: str = body) -> dict[str, object]:
-            return {"text": f"int demo(void) {{ {body}; }}\n"}
-
-        monkeypatch.setattr("idac.cli2.commands.top_level._run_single_decompile", fake_single)
-
-        exit_code = main(["decompilemany", "demo", "--out-dir", str(out_dir), "-c", "db:/tmp/demo.i64"])
-
-        assert exit_code == 0
-        capsys.readouterr()
-        manifests.append(json.loads((out_dir / "manifest.json").read_text(encoding="utf-8")))
-
-    first_entry = manifests[0]["functions"][0]
-    second_entry = manifests[1]["functions"][0]
-    stem = first_entry["artifact_stem"]
-    assert first_entry["address"] == "0x1000"
-    assert first_entry["filename_truncated"] is True
-    assert stem == second_entry["artifact_stem"]
-    assert stem.startswith("VeryLongTemplateName_")
-    assert "ImportantTail" in stem
-    assert stem.endswith("_0x1000")
-    assert len(Path(first_entry["artifact_path"]).stem) <= 180
-
-
-def test_doctor_with_out_prints_error_summary(tmp_path: Path, capsys, monkeypatch) -> None:
-    out_path = tmp_path / "doctor.json"
-
-    captured = {}
-
-    def fake_run_doctor(**kwargs):
-        captured.update(kwargs)
-        return {
-            "backend": [],
-            "healthy": False,
-            "status": "error",
-            "checks": [
-                {
-                    "component": "gui",
-                    "name": "bridge_targets",
-                    "status": "error",
-                    "summary": "no running GUI bridge instances found",
-                }
-            ],
-        }
-
-    monkeypatch.setattr(
-        "idac.cli2.commands.doctor.run_doctor",
-        fake_run_doctor,
-    )
-
-    exit_code = main(["doctor", "--out", str(out_path)])
-
-    assert exit_code == 1
-    assert captured["scope"] == "all"
-    assert "database" not in captured
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "doctor failed: status=error" in captured.err
-    assert "gui.bridge_targets: no running GUI bridge instances found" in captured.err
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert payload["healthy"] is False
-
-
-def test_function_list_with_out_prints_count_summary(tmp_path: Path, capsys, monkeypatch) -> None:
-    out_path = tmp_path / "functions.json"
-
-    def fake_send_request(request):
-        return {
-            "ok": True,
-            "result": [
-                {"address": "0x1000", "name": "CMessag::init"},
-                {"address": "0x1010", "name": "CMessag::run"},
-            ],
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["function", "list", "CMessag", "-c", "db:/tmp/demo.i64", "--json", "--out", str(out_path)])
-
-    assert exit_code == 0
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert f"wrote 2 functions to {out_path}" in captured.err
-    assert "inspect that file for the full result" in captured.err
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert len(payload) == 2
-
-
-def test_database_open_with_out_prints_generic_artifact_notice(tmp_path: Path, capsys, monkeypatch) -> None:
-    database_path = tmp_path / "tiny.i64"
-    out_path = tmp_path / "open.json"
-
-    def fake_send_request(request):
-        return {
-            "ok": True,
-            "result": {"database": str(database_path), "opened": True},
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["database", "open", str(database_path), "--out", str(out_path)])
-
-    assert exit_code == 0
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert f"wrote result to {out_path}" in captured.err
-    assert "inspect that file for the full result" in captured.err
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert payload["opened"] is True
-
-
-def test_decompile_with_out_prints_specific_artifact_notice(tmp_path: Path, capsys, monkeypatch) -> None:
-    out_path = tmp_path / "main.c"
-
-    def fake_send_request(request):
-        return {
-            "ok": True,
-            "result": {"text": "int main(void)\n{\n  return 0;\n}\n"},
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["decompile", "main", "-c", "db:/tmp/demo.i64", "--out", str(out_path)])
-
-    assert exit_code == 0
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert f"wrote decompile text to {out_path}" in captured.err
-    assert "inspect that file for the full result" in captured.err
-    assert out_path.read_text(encoding="utf-8").startswith("int main")
-
-
-def test_large_decompile_output_suggests_dash_o(capsys, monkeypatch) -> None:
-    def fake_send_request(request):
-        return {
-            "ok": True,
-            "result": {"text": "x" * 12050},
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["decompile", "main", "-c", "db:/tmp/demo.i64"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "rerun with `-o <path>` to write the full decompile to a file" in captured.err
-    assert captured.out.startswith("x")
-
-
-def test_large_locals_output_suggests_json_out(capsys, monkeypatch) -> None:
-    locals_rows = [
-        {
-            "index": i,
-            "local_id": f"stack({i * 8})@0x100000460",
-            "definition_address": "0x100000460",
-            "location": f"stack({i * 8})",
-            "name": f"local_{i}_{'x' * 80}",
-            "display_name": f"local_{i}_{'x' * 80}",
-            "type": "unsigned int",
-            "is_arg": False,
-            "is_stack": True,
-            "stack_offset": i * 8,
-            "size": 4,
-        }
-        for i in range(80)
-    ]
-
-    def fake_send_request(request):
-        return {
-            "ok": True,
-            "result": {
-                "function": "main",
-                "address": "0x100000460",
-                "locals": locals_rows,
-            },
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["function", "locals", "list", "main", "-c", "db:/tmp/demo.i64"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert "rerun with `--json --out <path>` to inspect the full locals table" in captured.err
-    assert "main @ 0x100000460" in captured.out
-
-
-def test_preview_success_with_out_prints_artifact_notice(tmp_path: Path, capsys, monkeypatch) -> None:
-    out_path = tmp_path / "preview.json"
-
-    def fake_send_request(request):
-        return {
-            "ok": True,
-            "result": {
-                "before": {"comment": None},
-                "after": {"comment": "entry point"},
-                "result": {"comment": "entry point"},
-                "preview_mode": "undo",
-                "persisted": False,
-            },
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(
-        ["preview", "-o", str(out_path), "-c", "db:/tmp/demo.i64", "comment", "set", "main", "entry point"]
-    )
-
-    assert exit_code == 0
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert f"wrote preview data to {out_path}" in captured.err
-    payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert payload["status"] == "ok"
-
-
-def test_database_open_uses_idalib_backend(monkeypatch, capsys, tmp_path: Path) -> None:
-    captured = {}
-
-    def fake_send_request(request):
-        captured["request"] = request
-        return {
-            "ok": True,
-            "result": {"database": str(tmp_path / "tiny.i64"), "opened": True},
-            "warnings": [],
-        }
-
-    monkeypatch.setattr("idac.cli2.commands.common.send_request", fake_send_request)
-
-    exit_code = main(["database", "open", str(tmp_path / "tiny.i64"), "--format", "json"])
-
-    assert exit_code == 0
-    assert captured["request"].backend == "idalib"
-    assert captured["request"].database is None
-    assert json.loads(capsys.readouterr().out)["opened"] is True
-
-
-def test_bookmark_show_invalid_slot_returns_user_error(capsys) -> None:
-    exit_code = main(["bookmark", "show", "-c", FIXTURE_DB, "abc"])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "bookmark slot" in captured.err
-    assert "Traceback" not in captured.err
-
-
-def test_type_declare_missing_decl_file_returns_user_error(tmp_path: Path, capsys) -> None:
-    missing = tmp_path / "missing.h"
-
-    exit_code = main(["type", "declare", "-c", FIXTURE_DB, "--decl-file", str(missing)])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert str(missing) in captured.err
-    assert "Traceback" not in captured.err
-
-
-def test_root_context_is_rejected_for_contextless_command(tmp_path: Path, capsys) -> None:
-    dest = tmp_path / "workspace"
-
-    exit_code = main(["-c", "db:/tmp/demo.i64", "workspace", "init", str(dest)])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "`idac workspace init` does not accept -c/--context" in captured.err
-
-
-def test_root_timeout_is_rejected_for_contextless_command(tmp_path: Path, capsys) -> None:
-    dest = tmp_path / "workspace"
-
-    exit_code = main(["--timeout", "5", "workspace", "init", str(dest)])
-
-    assert exit_code == 1
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "`idac workspace init` does not accept --timeout" in captured.err
+    payload = json.loads(captured.out)
+    assert payload["commands_succeeded"] == 0
+    assert payload["commands_failed"] == 1
+    assert "child commands cannot set --timeout" in payload["results"][0]["stderr"]
+
+
+def test_batch_without_selector_accepts_context_free_children(tmp_path: Path, fake_nexus, capsys) -> None:
+    batch_file = tmp_path / "docs.idac"
+    batch_file.write_text("docs --list\n", encoding="utf-8")
+
+    assert main(["batch", str(batch_file)]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["commands_succeeded"] == 1
+    assert payload["commands_failed"] == 0
+
+
+def test_python_exec_is_stateless_and_persist_option_is_removed(tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    database.touch()
+
+    assert main(["py", "exec", "-c", str(database), "--code", "result = 7", "--json"]) == 0
+    call = fake_nexus.instances[0].calls[0]
+    assert "result = 7" in call["source"]
+    assert json.loads(capsys.readouterr().out) == {
+        "result": 7,
+        "result_repr": "7",
+        "stderr": "",
+        "stdout": "hello\n",
+    }
+
+    with pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(["py", "exec", "--code", "pass", "--persist"])
+    assert exc.value.code == 2
+
+
+def test_targets_list_uses_public_discovery_seam(monkeypatch, capsys) -> None:
+    calls: list[float | None] = []
+
+    def list_targets(*, timeout: float | None = None) -> list[dict[str, Any]]:
+        calls.append(timeout)
+        return [
+            {
+                "record_id": "gui-1",
+                "state": "ready",
+                "detail": None,
+                "backend": "gui",
+                "pid": 123,
+                "idb_path": "/tmp/sample.i64",
+                "exe_path": None,
+                "managed": False,
+                "started_at": 1.0,
+            }
+        ]
+
+    monkeypatch.setattr("idac.nexus.list_targets", list_targets)
+
+    assert main(["targets", "list", "--timeout", "3", "--json"]) == 0
+    assert calls == [3.0]
+    assert json.loads(capsys.readouterr().out)[0]["record_id"] == "gui-1"
+
+
+def test_setup_and_doctor_commands_call_public_services(monkeypatch, capsys) -> None:
+    calls: list[tuple[str, Any]] = []
+
+    def setup_gui(*, timeout: float | None = None) -> dict[str, Any]:
+        calls.append(("setup", timeout))
+        return {"installed": True, "plugin": "ida-nexus", "version": "0.7.0"}
+
+    def run_doctor(*, timeout: float | None = None) -> dict[str, Any]:
+        calls.append(("doctor", timeout))
+        return {"healthy": True, "status": "ok", "checks": []}
+
+    monkeypatch.setattr("idac.cli.commands.setup.setup_gui", setup_gui)
+    monkeypatch.setattr("idac.cli.commands.doctor.run_doctor", run_doctor)
+
+    assert main(["setup", "gui", "--timeout", "9", "--json"]) == 0
+    setup_output = json.loads(capsys.readouterr().out)
+    assert main(["doctor", "--timeout", "4", "--json"]) == 0
+    doctor_output = json.loads(capsys.readouterr().out)
+    assert calls == [("setup", 9.0), ("doctor", 4.0)]
+    assert setup_output["plugin"] == "ida-nexus"
+    assert doctor_output["healthy"] is True
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["database", "open", "sample.i64"],
+        ["database", "close"],
+        ["targets", "cleanup"],
+        ["misc", "plugin", "install"],
+    ],
+)
+def test_removed_commands_are_not_registered(argv: list[str], capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(argv)
+
+    assert exc.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err

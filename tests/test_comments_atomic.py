@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import pytest
 
-from idac.ops.families import comments
-from idac.ops.runtime import IdaOperationError, IdaRuntime
+from idac import remote_ops
+
+IdaOperationError = remote_ops.IdaOperationError
+IdaRuntime = remote_ops.IdaRuntime
+
+
+def _run_op(name: str, runtime: IdaRuntime, params: dict[str, object]):
+    spec = remote_ops._OPERATIONS[name]
+    assert spec.parse is not None
+    return remote_ops.payload_from_model(spec.run(remote_ops.OperationContext(runtime=runtime), spec.parse(params)))
 
 
 class _FakeIdaLines:
@@ -46,7 +54,7 @@ class _FakeIdaLines:
 class _FakeRuntime(IdaRuntime):
     def __init__(self, ida_lines: _FakeIdaLines) -> None:
         super().__init__()
-        self._mods = {"ida_lines": ida_lines}
+        self._mods = {"ida_bytes": object(), "ida_lines": ida_lines}
 
     def mod(self, name: str):
         return self._mods[name]
@@ -61,15 +69,25 @@ def test_write_extra_comment_restores_previous_text_on_failure() -> None:
     runtime = _FakeRuntime(ida_lines)
 
     with pytest.raises(IdaOperationError, match="failed to set anterior comment"):
-        comments._write_extra_comment(runtime, 0x1000, scope="anterior", text="new one\nnew two")
+        _run_op(
+            "comment_set",
+            runtime,
+            {"address": "0x1000", "scope": "anterior", "text": "new one\nnew two"},
+        )
 
-    assert comments._read_extra_comment(runtime, 0x1000, scope="anterior") == "old one\nold two"
+    assert _run_op("comment_get", runtime, {"address": "0x1000", "scope": "anterior"})["comment"] == (
+        "old one\nold two"
+    )
 
 
-def test_write_extra_comment_replaces_multiline_text() -> None:
+def test_write_extra_comment_preserves_terminal_blank_lines() -> None:
     ida_lines = _FakeIdaLines(initial={(0x1000, 1): ["old one", "old two"]})
     runtime = _FakeRuntime(ida_lines)
 
-    comments._write_extra_comment(runtime, 0x1000, scope="anterior", text="new one\nnew two\nnew three")
+    result = _run_op(
+        "comment_set",
+        runtime,
+        {"address": "0x1000", "scope": "anterior", "text": "new one\nnew two\n"},
+    )
 
-    assert comments._read_extra_comment(runtime, 0x1000, scope="anterior") == "new one\nnew two\nnew three"
+    assert result["comment"] == "new one\nnew two\n"

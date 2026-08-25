@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from idac.cli2.renderers import (
+from idac.cli.renderers import (
     render_bookmarks,
     render_class_vtable,
     render_database_info,
@@ -10,26 +10,26 @@ from idac.cli2.renderers import (
     render_segment_list,
     render_target_list,
     render_type_declare,
-    render_vtable_dump,
     render_workspace_init,
     render_xrefs,
-    renderer_registry_drift,
 )
 
 
-def test_render_target_list_formats_active_targets() -> None:
+def test_render_target_list_formats_nexus_records() -> None:
     rendered = render_target_list(
         [
             {
-                "selector": "target:active",
-                "module": "tiny",
-                "instance_pid": 1234,
-                "active": True,
+                "record_id": "gui-1234",
+                "state": "ready",
+                "backend": "gui",
+                "idb_path": "/tmp/tiny.i64",
+                "pid": 1234,
+                "detail": None,
             }
         ]
     )
 
-    assert rendered == "target:active [active] (tiny, pid=1234)"
+    assert rendered == "gui-1234 [ready] (gui, /tmp/tiny.i64, pid=1234)"
 
 
 def test_render_function_frame_formats_member_suffixes() -> None:
@@ -209,7 +209,7 @@ def test_render_type_declare_formats_bisect_and_diagnostics() -> None:
     ]
 
 
-def test_render_class_vtable_and_vtable_dump_include_sections() -> None:
+def test_render_class_vtable_includes_runtime_section() -> None:
     class_rendered = render_class_vtable(
         {
             "name": "Foo",
@@ -223,18 +223,6 @@ def test_render_class_vtable_and_vtable_dump_include_sections() -> None:
             },
         }
     )
-    dump_rendered = render_vtable_dump(
-        {
-            "symbol": "__ZTV3Foo",
-            "abi": "itanium",
-            "table_address": "0x1000",
-            "slot_address": "0x1010",
-            "header": [{"index": 0, "name": "offset_to_top", "value": "0x0"}],
-            "members": [{"slot": 0, "target": "0x2000", "name": "sub_2000"}],
-            "stop_reason": "null_target",
-        }
-    )
-
     assert class_rendered.splitlines() == [
         "Foo  vtable=Foo_vtbl",
         "struct Foo_vtbl;",
@@ -243,16 +231,6 @@ def test_render_class_vtable_and_vtable_dump_include_sections() -> None:
         "runtime:",
         "  symbol: __ZTV3Foo @ 0x1000",
         "       0  sub_100",
-    ]
-    assert dump_rendered.splitlines() == [
-        "__ZTV3Foo  abi=itanium",
-        "table: 0x1000",
-        "slots: 0x1010",
-        "header:",
-        "  0: offset_to_top = 0x0",
-        "members:",
-        "       0  0x2000  sub_2000",
-        "stop_reason: null_target",
     ]
 
 
@@ -283,10 +261,3 @@ def test_render_workspace_init_lists_created_directories_and_files() -> None:
         "  .idac/tmp/",
         "Initialized git repository.",
     ]
-
-
-def test_renderer_registry_stays_in_sync_with_supported_operations() -> None:
-    missing, extra = renderer_registry_drift()
-
-    assert missing == []
-    assert extra == []

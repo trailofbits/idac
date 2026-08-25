@@ -1,15 +1,19 @@
 [project]
 name = "idac"
 version = "0.19.1"
-description = "Agent-friendly CLI for IDA with GUI and idalib backends"
+description = "Agent-friendly CLI for IDA powered by ida-nexus"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [
     { name = "Jay Little / Trail of Bits", email = "jay@trailofbits.com" }
 ]
-requires-python = ">=3.10"
-dependencies = []
+requires-python = ">=3.11"
+dependencies = [
+    "ida-domain==0.5.1",
+    "ida-hcli==0.19.2",
+    "ida-nexus==0.7.0",
+]
 
 [project.scripts]
 idac = "idac.cli:main"
@@ -35,10 +39,11 @@ build-backend = "uv_build"
 [tool.uv]
 default-groups = ["dev"]
 exclude-newer = "1 week"
+exclude-newer-package = { ida-nexus = "2026-08-21" }
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -46,7 +51,6 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"src/idac/ida_plugin/idac_bridge_plugin.py" = ["E402"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -60,8 +64,8 @@ addopts = [
     "--strict-markers",
 ]
 markers = [
-    "gui_live: optional Unix-socket GUI transport integration tests",
-    "requires_ida: needs a local IDA install with idalib; auto-skipped when unavailable",
+    "nexus_gui_live: optional live IDA GUI integration tests through ida-nexus",
+    "requires_ida: needs a local IDA installation usable by ida-nexus; auto-skipped when unavailable",
 ]
 
 [tool.coverage.run]

@@ -12,7 +12,20 @@ The command grammar for the `idac` CLI.
 - `function metadata` and JSON `function list` rows include `display_name` when available; JSON `function list` rows also include `section`
 - function-taking commands can resolve a unique demangled C++ name such as `ExampleClass::method_1`; if multiple functions match, use a mangled name, full signature, or address
 - `segment list` lists database segments
-- setup, maintenance, and utility commands live under `misc`
+- maintenance operations live under `misc`; installation commands live under `setup`
+
+## Context selection
+
+- `-c/--context PATH` opens or attaches to an `.i64` or input binary through Nexus.
+- `--instance RECORD_ID` attaches to one exact READY discovery record from
+  `targets list`.
+- The selectors are mutually exclusive. With neither, exactly one READY Nexus instance
+  must exist.
+- Context options may be placed before the command or on a context-aware subcommand.
+- Headless opens wait for analysis and use a five-minute idle keepalive. Successful
+  headless mutations save on release; live GUI saves are explicit.
+- Discovery, timeout, connection, and version failures have no fallback or automatic
+  retry.
 
 ## Common reads
 
@@ -67,6 +80,10 @@ idac preview -o "/tmp/preview.json" \
   function prototype set "sub_08042010" --decl "long long __cdecl sub_08042010(long long lhs, long long rhs)"
 ```
 
+The wrapper owns the preview artifact. Wrapped commands cannot set `--out`,
+`--out-file`, or `--out-dir`; put `--out` on `preview`. Output paths cannot
+alias the selected binary/database or a command input file.
+
 Read-only commands under `preview` are treated as no-op previews with identical `before` and `after` payloads.
 
 ## Batch
@@ -74,6 +91,7 @@ Read-only commands under `preview` are treated as no-op previews with identical 
 Batch accepts one command per line and writes structured JSON or JSONL.
 It allows `preview ...` lines, but commands that are not batch-safe are rejected.
 If a batch contains persistent mutating commands, `batch --out` is required so the ordered result log is preserved before any changes run.
+The wrapper writes an initial `pending` journal before dispatch, checkpoints after every line, and writes the terminal result only after the shared Nexus session closes. An interrupted batch records `interrupted` and exits 130. Mutating child commands cannot set `--out`; reserve child artifacts for read-only commands.
 
 ```bash
 idac batch "recovery.idac" --out "/tmp/recovery.json"
@@ -93,14 +111,19 @@ function locals rename "sub_08041337" --index 6 --new-name "entry_count"
 
 For a full recovery-pass example and the batch authoring rules, read [workflows.md](workflows.md#batch).
 
-## Misc commands
+## Setup and misc commands
 
-These setup, maintenance, and utility commands live under `misc`:
+Installation commands live under `setup` and are rejected from `batch`:
 
-- `misc rename` — rename a function or global symbol. Not available in `batch` or `preview`; commit symbol renames one-off.
+- `setup gui` — install ida-nexus v0.7.0 through pinned ida-hcli with
+  ida-domain 0.5.1.
+- `setup skill` — install the bundled skill for Claude Code, Codex, both, or a custom
+  destination.
+
+IDA maintenance commands live under `misc`:
+
+- `misc rename` — rename a function or global symbol. Preview-capable but not available in `batch`; commit symbol renames one-off.
 - `misc reanalyze` — re-run IDA analysis on a function or range. Batch-safe; place it between type/prototype mutations and local cleanup.
-- `misc plugin install` — install the GUI bridge plugin; `--force` replaces an existing install. Setup-only; rejected from `batch`.
-- `misc skill install` — install the bundled skill. Setup-only; rejected from `batch`.
 
 ## Bundled docs
 

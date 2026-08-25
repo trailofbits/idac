@@ -6,177 +6,146 @@ from typing import Any
 
 from .paths import skill_reference_source_dir, skill_source_dir, workspace_template_source_dir
 
-_DOCS_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    (
-        "Start here",
-        ("guide",),
-    ),
-    (
-        "CLI and operation help",
-        (
-            "cli",
-            "troubleshooting",
-            "targets",
-        ),
-    ),
-    (
-        "IDA reference",
-        (
-            "ida-cpp-type-details",
-            "ida-set-types",
-            "ida-advanced-type-annotations",
-        ),
-    ),
-    (
-        "Workflows",
-        (
-            "workflows",
-            "class-recovery",
-        ),
-    ),
-    (
-        "Workspace resources",
-        (
-            "workspace",
-            "templates",
-        ),
-    ),
-)
-
 
 @dataclass(frozen=True)
 class DocsTopic:
     name: str
     title: str
-    path: Path | None
+    path: Path
     description: str
     aliases: tuple[str, ...] = ()
     extra_paths: tuple[Path, ...] = ()
 
 
-def _topic_map() -> dict[str, DocsTopic]:
-    references = skill_reference_source_dir()
-    skill = skill_source_dir()
-    workspace = workspace_template_source_dir()
-    topics = [
-        DocsTopic(
-            "guide",
-            "Agent Guide",
-            skill / "SKILL.md",
-            "Start here: critical defaults, task routing, and reference index.",
-            aliases=("start", "agents-guide", "skill"),
-        ),
-        DocsTopic(
-            "cli",
-            "CLI Quick Reference",
-            references / "cli.md",
-            "Public command grammar, common reads, preview, batch, and output notes.",
-            aliases=("commands", "quick-reference"),
-        ),
-        DocsTopic(
-            "workflows",
-            "Workflows",
-            references / "workflows.md",
-            "Safe mutation loop, batch usage, selector calibration, and readback.",
-            aliases=("workflow", "mutation"),
-        ),
-        DocsTopic(
-            "targets",
-            "Targets And Backends",
-            references / "targets-and-backends.md",
-            "Choosing GUI vs idalib targets and resolving backend state.",
-            aliases=("backends", "targets-and-backends"),
-        ),
-        DocsTopic(
-            "troubleshooting",
-            "Troubleshooting",
-            references / "troubleshooting.md",
-            "Bridge, backend, mutation, and stale-result troubleshooting.",
-            aliases=("debug", "problems"),
-        ),
-        DocsTopic(
-            "class-recovery",
-            "Class Recovery",
-            references / "class-recovery.md",
-            "C++ class recovery workflow, naming rules, vtables, and verification.",
-            aliases=("classes", "vtables"),
-        ),
-        DocsTopic(
-            "ida-cpp-type-details",
-            "IDA C++ Type Details",
-            references / "ida-cpp-type-details.md",
-            "IDA parser and decompiler expectations for C++ classes and vtables.",
-            aliases=("cpp-types", "c++", "ida-cpp"),
-        ),
-        DocsTopic(
-            "ida-set-types",
-            "IDA Type Declaration Syntax",
-            references / "ida-set-types.md",
-            "IDA C declaration syntax: calling conventions, usercall locations, and attribute/type keywords.",
-            aliases=("set-types",),
-        ),
-        DocsTopic(
-            "ida-advanced-type-annotations",
-            "IDA Advanced Type Annotations",
-            references / "ida-advanced-type-annotations.md",
-            "IDA-specific type annotation syntax for recovered declarations.",
-            aliases=("advanced-types", "annotations"),
-        ),
-        DocsTopic(
-            "templates",
-            "Reusable Templates",
-            references / "templates" / "README.md",
-            "Reusable batch, audit, and jq template files, printed in full.",
-            aliases=("template",),
-            extra_paths=(
-                references / "templates" / "checkpoint-note.md",
-                references / "templates" / "prototype-pass.idac",
-                references / "templates" / "rename-pass.idac",
-                references / "templates" / "locals-jq-snippets.sh",
+_REFERENCES = skill_reference_source_dir()
+_SKILL = skill_source_dir()
+_WORKSPACE = workspace_template_source_dir()
+
+_DOCS_GROUPS: tuple[tuple[str, tuple[DocsTopic, ...]], ...] = (
+    (
+        "Start here",
+        (
+            DocsTopic(
+                "guide",
+                "Agent Guide",
+                _SKILL / "SKILL.md",
+                "Start here: critical defaults, task routing, and reference index.",
+                aliases=("start", "agents-guide", "skill"),
             ),
         ),
-        DocsTopic(
-            "workspace",
-            "Workspace Instructions",
-            workspace / "AGENTS.md",
-            "Default workspace structure and agent conventions.",
-            aliases=("agents", "agents-md"),
+    ),
+    (
+        "CLI and operation help",
+        (
+            DocsTopic(
+                "cli",
+                "CLI Quick Reference",
+                _REFERENCES / "cli.md",
+                "Public command grammar, common reads, preview, batch, and output notes.",
+                aliases=("commands", "quick-reference"),
+            ),
+            DocsTopic(
+                "troubleshooting",
+                "Troubleshooting",
+                _REFERENCES / "troubleshooting.md",
+                "Nexus selection, runtime compatibility, mutation, and timeout troubleshooting.",
+                aliases=("debug", "problems"),
+            ),
+            DocsTopic(
+                "targets",
+                "Targets And Backends",
+                _REFERENCES / "targets-and-backends.md",
+                "Choosing path or record-ID Nexus contexts and resolving discovery state.",
+                aliases=("backends", "targets-and-backends"),
+            ),
         ),
-    ]
-    by_name: dict[str, DocsTopic] = {}
-    for topic in topics:
-        by_name[topic.name] = topic
-        for alias in topic.aliases:
-            by_name[alias] = topic
-    return by_name
+    ),
+    (
+        "IDA reference",
+        (
+            DocsTopic(
+                "ida-cpp-type-details",
+                "IDA C++ Type Details",
+                _REFERENCES / "ida-cpp-type-details.md",
+                "IDA parser and decompiler expectations for C++ classes and vtables.",
+                aliases=("cpp-types", "c++", "ida-cpp"),
+            ),
+            DocsTopic(
+                "ida-set-types",
+                "IDA Type Declaration Syntax",
+                _REFERENCES / "ida-set-types.md",
+                "IDA C declaration syntax: calling conventions, usercall locations, and attribute/type keywords.",
+                aliases=("set-types",),
+            ),
+            DocsTopic(
+                "ida-advanced-type-annotations",
+                "IDA Advanced Type Annotations",
+                _REFERENCES / "ida-advanced-type-annotations.md",
+                "IDA-specific type annotation syntax for recovered declarations.",
+                aliases=("advanced-types", "annotations"),
+            ),
+        ),
+    ),
+    (
+        "Workflows",
+        (
+            DocsTopic(
+                "workflows",
+                "Workflows",
+                _REFERENCES / "workflows.md",
+                "Safe mutation loop, batch usage, selector calibration, and readback.",
+                aliases=("workflow", "mutation"),
+            ),
+            DocsTopic(
+                "class-recovery",
+                "Class Recovery",
+                _REFERENCES / "class-recovery.md",
+                "C++ class recovery workflow, naming rules, vtables, and verification.",
+                aliases=("classes", "vtables"),
+            ),
+        ),
+    ),
+    (
+        "Workspace resources",
+        (
+            DocsTopic(
+                "workspace",
+                "Workspace Instructions",
+                _WORKSPACE / "AGENTS.md",
+                "Default workspace structure and agent conventions.",
+                aliases=("agents", "agents-md"),
+            ),
+            DocsTopic(
+                "templates",
+                "Reusable Templates",
+                _REFERENCES / "templates" / "README.md",
+                "Reusable batch, audit, and jq template files, printed in full.",
+                aliases=("template",),
+                extra_paths=(
+                    _REFERENCES / "templates" / "checkpoint-note.md",
+                    _REFERENCES / "templates" / "prototype-pass.idac",
+                    _REFERENCES / "templates" / "rename-pass.idac",
+                    _REFERENCES / "templates" / "locals-jq-snippets.sh",
+                ),
+            ),
+        ),
+    ),
+)
+
+_TOPICS_BY_NAME = {
+    name: topic for _, topics in _DOCS_GROUPS for topic in topics for name in (topic.name, *topic.aliases)
+}
 
 
 def docs_topics() -> list[DocsTopic]:
-    seen: set[str] = set()
-    unique: list[DocsTopic] = []
-    topics = _topic_map()
-    for _, names in _DOCS_GROUPS:
-        for name in names:
-            topic = topics[name]
-            if topic.name in seen:
-                continue
-            seen.add(topic.name)
-            unique.append(topic)
-    for topic in topics.values():
-        if topic.name in seen:
-            continue
-        seen.add(topic.name)
-        unique.append(topic)
-    return unique
+    return [topic for _, topics in _DOCS_GROUPS for topic in topics]
 
 
 def _grouped_topic_rows() -> list[str]:
-    topics = _topic_map()
     lines: list[str] = []
-    for group_name, names in _DOCS_GROUPS:
+    for group_name, topics in _DOCS_GROUPS:
         lines.append(f"{group_name}:")
-        for name in names:
-            topic = topics[name]
+        for topic in topics:
             lines.append(f"  {topic.name:<30} {topic.description}")
         lines.append("")
     if lines and lines[-1] == "":
@@ -223,23 +192,17 @@ def _strip_frontmatter(text: str) -> str:
 
 
 def _topic_payload(topic: DocsTopic) -> dict[str, Any]:
-    if topic.path is None:
-        text = _index_text()
-        path = None
-    else:
-        text = topic.path.read_text(encoding="utf-8")
-        text = _strip_frontmatter(text)
-        path = str(topic.path)
-        for extra in topic.extra_paths:
-            body = extra.read_text(encoding="utf-8").rstrip()
-            if extra.suffix != ".md":
-                body = f"```\n{body}\n```"
-            text = f"{text.rstrip()}\n\n---\n\n`{extra.name}`:\n\n{body}\n"
+    text = _strip_frontmatter(topic.path.read_text(encoding="utf-8"))
+    for extra in topic.extra_paths:
+        body = extra.read_text(encoding="utf-8").rstrip()
+        if extra.suffix != ".md":
+            body = f"```\n{body}\n```"
+        text = f"{text.rstrip()}\n\n---\n\n`{extra.name}`:\n\n{body}\n"
     return {
         "topic": topic.name,
         "title": topic.title,
         "description": topic.description,
-        "path": path,
+        "path": str(topic.path),
         "text": text,
     }
 
@@ -252,7 +215,7 @@ def docs_payload(topic_name: str | None = None, *, list_only: bool = False, all_
                 "title": topic.title,
                 "description": topic.description,
                 "aliases": list(topic.aliases),
-                "path": None if topic.path is None else str(topic.path),
+                "path": str(topic.path),
             }
             for topic in docs_topics()
         ]
@@ -263,14 +226,13 @@ def docs_payload(topic_name: str | None = None, *, list_only: bool = False, all_
         }
 
     if all_topics:
+        topics = docs_topics()
         parts = [_index_text()]
-        for topic in docs_topics():
-            if topic.path is None:
-                continue
+        for topic in topics:
             parts.extend(["", "", f"# {topic.title}", "", _topic_payload(topic)["text"]])
         return {
             "topic": "all",
-            "topics": [topic.name for topic in docs_topics()],
+            "topics": [topic.name for topic in topics],
             "text": "\n".join(parts),
         }
 
@@ -280,7 +242,7 @@ def docs_payload(topic_name: str | None = None, *, list_only: bool = False, all_
             "text": _index_text(),
         }
 
-    topic = _topic_map().get(str(topic_name).strip())
+    topic = _TOPICS_BY_NAME.get(str(topic_name).strip())
     if topic is None:
         available = ", ".join(topic.name for topic in docs_topics())
         raise ValueError(f"unknown docs topic: {topic_name}. Available topics: {available}")
