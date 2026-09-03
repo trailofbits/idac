@@ -21,16 +21,16 @@ Prefer first-class `idac` commands, then `idac py exec`, then external or ad hoc
 - Preview supported persistent mutations first, then commit only after the preview confirms the intended change. Outside batch mode, `preview` requires `-o/--out`.
 - Before `function prototype set`, run `function prototype show`. Run `function prototype check` first when the declaration uses a custom calling convention (`__usercall`, `__userpurge`, `__spoils`) or references newly imported types; declare missing support types before dependent prototypes.
 - Before importing large headers, validate with `type check --decl-file ...`.
-- After type or prototype mutations, run `misc reanalyze`, then reread pseudocode or locals before rename-heavy cleanup. Calibrate local renames from fresh `function locals list --json` output using `--local-id` or `--index`; see `idac docs workflows` for selector calibration.
+- After type or prototype mutations, run `misc reanalyze`, then reread pseudocode or locals before rename-heavy cleanup. Calibrate local renames from fresh `function locals list --json` output using `--local-id` or `--index`; see [the mutation workflows](references/workflows.md#selector-calibration) for selector calibration.
 - Before executing a mutation batch, run `batch <batch.idac> --lint --out <lint.json>` and fix reported issues.
 - Run dependency-ordered mutation batches with `--fail-fast`, especially when a check or preview guards a later commit and for local rename/retype passes.
 - Context selection: use `-c/--context PATH` for an `.i64` or binary, use
   `--instance RECORD_ID` for one exact READY row from `targets list`, and omit both
   only when exactly one READY Nexus instance exists.
 - When a `type declare` import fails and the error does not name the culprit, rerun it once with `--bisect` before hand-editing the header.
-- When working in an idac workspace, keep audit notes append-only and factual. Distinguish proven facts from inferred names, types, and semantics. Create one with `idac workspace init` for multi-pass work; read `idac docs workspace` for its conventions.
+- When working in an idac workspace, keep audit notes append-only and factual. Distinguish proven facts from inferred names, types, and semantics. Create one with `idac workspace init` for multi-pass work and follow the conventions installed in the workspace.
 
-When this guide is installed as a skill, the reference files sit alongside it; otherwise use `idac docs TOPIC` for the same material. For CLI syntax, prefer targeted help such as `idac type class --help`; use `idac --full-help` only when the command surface itself is unclear.
+Read the bundled reference files linked below when their guidance applies. For CLI syntax, prefer targeted help such as `idac type class --help`; use `idac --full-help` only when the command surface itself is unclear.
 
 ## When not to use
 
@@ -40,27 +40,12 @@ When this guide is installed as a skill, the reference files sit alongside it; o
 
 ## Choose the path
 
-```
-What is the task?
-│
-├─ Read-only inspection (decompile, list, xrefs, strings, ctree, microcode)
-│   └─ Run `idac docs cli`
-│
-├─ Mutation (rename, retype, prototype, type/struct/enum edits, comment, bookmark)
-│   └─ Run `idac docs workflows`
-│
-├─ C++ class or vtable recovery
-│   └─ Run `idac docs class-recovery` and `idac docs ida-cpp-type-details`
-│
-├─ Multi-pass recovery that needs durable notes and headers
-│   └─ Run `idac workspace init` and `idac docs workspace`
-│
-├─ Context/target selection or Nexus state trouble
-│   └─ Run `idac docs targets` or `idac docs troubleshooting`
-│
-└─ No first-class command covers the task
-    └─ Use `idac py exec` with a small explicit script
-```
+- For read-only inspection such as decompilation, listings, xrefs, strings, ctree, or microcode, read the [CLI quick reference](references/cli.md).
+- For mutations such as renames, retypes, prototypes, type edits, comments, or bookmarks, read the [mutation workflows](references/workflows.md).
+- For C++ class or vtable recovery, read the [class recovery workflow](references/class-recovery.md) and [IDA C++ type details](references/ida-cpp-type-details.md).
+- For multi-pass recovery that needs durable notes and headers, run `idac workspace init` and follow the conventions installed in the workspace.
+- For context or target selection, read [targets and backends](references/targets-and-backends.md); for Nexus state trouble, read [troubleshooting](references/troubleshooting.md).
+- When no first-class command covers the task, use `idac py exec` with a small explicit script.
 
 ## First commands
 
@@ -84,7 +69,7 @@ idac disasm --start "0x100000460" --end "0x1000004a0"
 
 ## Mutation outline
 
-Use `idac docs workflows` (`workflows.md`) for exact syntax.
+Read [the mutation workflows](references/workflows.md) for exact syntax.
 
 1. Discovery and read-only audit.
 2. Preview each preview-capable persistent mutation.
@@ -101,7 +86,7 @@ auto-analysis; live GUI commands do not force it.
 
 ## Class recovery outline
 
-Use `idac docs class-recovery` (`class-recovery.md`) for the full workflow and `idac docs ida-cpp-type-details` (`ida-cpp-type-details.md`) before importing C++ class or vtable declarations.
+Read [the class recovery workflow](references/class-recovery.md) for the full process and [IDA C++ type details](references/ida-cpp-type-details.md) before importing C++ class or vtable declarations.
 
 ## Python escape hatch
 
@@ -118,17 +103,14 @@ The execution scope includes the core `ida*` modules that `idac` imports itself,
 
 ## Reference index
 
-| File | `idac docs` topic | When to read |
-|------|-------------------|--------------|
-| `references/cli.md` | `cli` | Command grammar, common reads, preview, batch, output notes |
-| `references/targets-and-backends.md` | `targets` | Nexus context selection, opening binaries, target discovery |
-| `references/workflows.md` | `workflows` | Safe mutation loop, batch, selector calibration, post-mutation readback |
-| `references/class-recovery.md` | `class-recovery` | C++ class recovery workflow, naming rules, vtable guidance, verification |
-| `references/ida-cpp-type-details.md` | `ida-cpp-type-details` | IDA C++ parser expectations, `__vftable`, `*_vtbl`, multiple inheritance |
-| `references/ida-set-types.md` | `ida-set-types` | IDA C declaration syntax: calling conventions, usercall locations, attribute and type keywords |
-| `references/ida-advanced-type-annotations.md` | `ida-advanced-type-annotations` | Scattered argument locations and other advanced IDA declaration annotations |
-| `references/troubleshooting.md` | `troubleshooting` | Nexus selection, runtime, mutation, or stale-result problems |
-| `references/templates/README.md` | `templates` | Reusable prototype and rename preview/commit passes, locals-plan, checkpoint-note, and locals-jq templates (printed in full) |
-
-`idac docs workspace` has no matching reference file; it prints the conventions that
-`idac workspace init` installs into a recovery workspace.
+| File | When to read |
+|------|--------------|
+| [CLI quick reference](references/cli.md) | Command grammar, common reads, preview, batch, output notes |
+| [Targets and backends](references/targets-and-backends.md) | Nexus context selection, opening binaries, target discovery |
+| [Mutation workflows](references/workflows.md) | Safe mutation loop, batch, selector calibration, post-mutation readback |
+| [Class recovery](references/class-recovery.md) | C++ class recovery workflow, naming rules, vtable guidance, verification |
+| [IDA C++ type details](references/ida-cpp-type-details.md) | IDA C++ parser expectations, `__vftable`, `*_vtbl`, multiple inheritance |
+| [IDA type syntax](references/ida-set-types.md) | IDA C declaration syntax: calling conventions, usercall locations, attribute and type keywords |
+| [Advanced type annotations](references/ida-advanced-type-annotations.md) | Scattered argument locations and other advanced IDA declaration annotations |
+| [Troubleshooting](references/troubleshooting.md) | Nexus selection, runtime, mutation, or stale-result problems |
+| [Reusable templates](references/templates/README.md) | Prototype and rename preview/commit passes, locals-plan, checkpoint-note, and locals-jq templates |

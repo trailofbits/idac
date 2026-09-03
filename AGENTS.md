@@ -15,7 +15,7 @@ Most implementation lives under `src/idac`:
 - `src/idac/doctor.py` and `src/idac/setup.py`: exact-stack diagnostics and installation
 - `tests/`: CLI and backend coverage
 - `fixtures/`: committed binaries, databases, logs, and source used by tests
-- `docs/` and `src/idac/skills/idac/`: user-facing command docs and agent-oriented usage guidance
+- `docs/` and `plugins/idac/skills/idac/`: user-facing command docs and agent-oriented usage guidance
 
 ## Working Style
 
@@ -71,7 +71,7 @@ When changing commands or request/response shapes:
 - update CLI wiring in `src/idac/cli/`
 - update the operation implementation and registry in `src/idac/remote_ops.py`
 - update `src/idac/operations.py` and renderers if the operation/output surface changed
-- update tests and any affected docs under `README.md`, `docs/`, or `src/idac/skills/idac/`
+- update tests and any affected docs under `README.md`, `docs/`, or `plugins/idac/skills/idac/`
 
 When changing the operation layer, keep these boundaries in mind:
 
@@ -195,20 +195,21 @@ skipped unless `IDAC_RUN_NEXUS_GUI_TESTS=1` and an exact
 `IDAC_NEXUS_GUI_RECORD_ID` are set. Use only a disposable GUI database: the test
 explicitly saves, verifies an on-disk snapshot, and then restores a temporary comment.
 
-## Skill Distribution
+## Agent Plugin Distribution
 
-`src/idac/skills/idac` is plugin source, not package data. It is excluded from the wheel
-(`[tool.uv.build-backend] wheel-exclude` in `pyproject.toml`) and installed through the
-Claude Code marketplace declared in `.claude-plugin/marketplace.json`. The CLI has no
-command that installs or prints it, so do not add code under `src/idac/` that reads from
-`skills/`.
+`plugins/idac` is the canonical Agent Plugins v1 package, separate from the Python
+package. Its manifest is `plugins/idac/plugin.json`, and its skill is
+`plugins/idac/skills/idac`. The repository catalog at
+`.agents/plugins/marketplace.json` must point directly to `./plugins/idac`. Do not add
+client-specific manifests or fallback copies. The CLI has no command that installs or
+prints plugin content, so do not add runtime package code that reads these assets.
 
 For fixture-driven class tests, prefer updating and validating:
 
 - `tests/conftest.py`
 - `tests/test_nexus_classes.py`
 - `README.md`
-- `src/idac/skills/idac/`
+- `plugins/idac/skills/idac/`
 
 ## Release Process
 

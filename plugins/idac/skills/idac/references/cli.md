@@ -31,9 +31,6 @@ The command grammar for the `idac` CLI.
 ## Common reads
 
 ```bash
-idac docs
-idac docs guide
-idac docs workflows
 idac database show --json
 idac function list
 idac function list --demangle
@@ -183,9 +180,6 @@ Installation commands live under `setup` and are rejected from `batch`:
 
 - `setup gui` — install ida-nexus v0.7.0 through pinned ida-hcli with
   ida-domain 0.5.1.
-- `setup skill` — install the bundled skill for Claude Code, Codex, both, or a custom
-  destination. `--host {claude,codex,both}`, `--dest PATH`, and `--mode {copy,symlink}`
-  control where and how it lands.
 
 IDA maintenance commands live under `misc`:
 
@@ -195,15 +189,9 @@ IDA maintenance commands live under `misc`:
 Workspace scaffolding lives under `workspace`:
 
 - `workspace init [DEST]` — create a recovery workspace with `audit/`, `headers/`,
-  `references/`, `scripts/`, `prompts/`, and `.idac/tmp/`. Add `--force` to overwrite
-  user-tunable config in an existing workspace. Read `idac docs workspace` for the
-  conventions it installs.
-
-## Bundled docs
-
-`idac docs` prints an agent-oriented index of bundled reference material without needing a live IDA target.
-Use `idac docs TOPIC` for focused guidance, such as `guide`, `cli`, `workflows`, `targets`, `troubleshooting`, `class-recovery`, `ida-cpp-type-details`, `ida-set-types`, `ida-advanced-type-annotations`, `templates`, or `workspace`.
-Use `idac docs --list` to list every topic and `idac docs --all --out docs.md` to write all bundled docs to a file.
+  `scripts/`, `prompts/`, and `.idac/tmp/`. Add `--force` to overwrite
+  user-tunable config in an existing workspace. Follow the conventions installed in
+  the generated workspace.
 
 ## Output notes
 

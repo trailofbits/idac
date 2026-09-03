@@ -2,12 +2,19 @@
 
 ## Unreleased
 
+- Migrated the agent guidance to the vendor-neutral Agent Plugins v1 layout. The
+  repository catalog at `.agents/plugins/marketplace.json` points to the canonical
+  `plugins/idac` package, whose manifest is `plugins/idac/plugin.json` and whose skill
+  is `plugins/idac/skills/idac`; client-specific packaging and manual skill-link
+  fallbacks have been removed.
 - Removed the `idac docs` command. The command, workflow, and IDA reference material it
-  printed now ships only with the `idac` skill, installed as a Claude Code plugin
-  (`/plugin marketplace add trailofbits/idac` then `/plugin install idac@idac`).
-- Removed `idac setup skill`. Install the skill as a plugin instead.
-- Stopped shipping the skill inside the `idac` package, so `src/idac/skills/` no longer
-  lands in site-packages.
+  printed now ships only with the Agent Plugin's `idac` skill. Codex users install it
+  with `codex plugin marketplace add trailofbits/idac` followed by
+  `codex plugin add idac@idac`.
+- Removed `idac setup skill`. Install the Agent Plugin through a compatible client's
+  marketplace instead.
+- Stopped shipping the skill inside the `idac` Python package; the canonical skill now
+  lives at `plugins/idac/skills/idac` and does not land in site-packages.
 - `idac workspace init` no longer copies the skill docs into the workspace; the
   generated `AGENTS.md` and `prompts/recovery-pass.md` point at the installed skill.
 

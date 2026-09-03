@@ -1,8 +1,8 @@
 # Workspace
 
 This is an idac reverse-engineering workspace.
-Install the `idac` skill (`/plugin install idac@idac` in Claude Code) before starting a
-pass; it carries the guide and the detailed command, workflow, and IDA type references.
+Install the `idac` Agent Plugin through a compatible client before starting a pass; its
+skill carries the guide and the detailed command, workflow, and IDA type references.
 
 ## Structure
 

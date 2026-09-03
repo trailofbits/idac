@@ -1,7 +1,6 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "idac",
-  "displayName": "idac",
   "version": "0.19.1",
   "description": "Drive IDA Pro through the idac CLI for decompilation, inspection, type recovery, and database mutation workflows",
   "author": {

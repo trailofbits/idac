@@ -21,14 +21,16 @@ session or a headless database.
 - [Agent sandbox setup](#agent-sandbox-setup)
 - [Usage](#usage)
 - [Highlights](#highlights)
-- [Skill](#skill)
+- [Agent plugin](#agent-plugin)
 - [Development](#development)
 - [Credits](#credits)
 
 ## Why idac
 
 - **Not an MCP server** — compose with the shell you already have: pipes, `xargs`, `jq`, and your agent's existing tool-use loop. No server to run, no protocol to babysit.
-- **Agent-native by default** — every command can emit structured JSON (`-j`), and a bundled skill teaches Claude Code and Codex to drive `idac` instead of guessing at raw IDAPython.
+- **Agent-native by default** — every command can emit structured JSON (`-j`), and the
+  `idac` Agent Plugin teaches compatible agents to drive `idac` instead of guessing at
+  raw IDAPython.
 - **Safe mutations** — supported mutations offer `preview`, which applies the change,
   captures the before/after, and restores it with IDA undo or an operation-specific rollback. Dry-run retypes,
   prototype changes, and other preview-capable edits before committing them.
@@ -108,7 +110,7 @@ idac setup gui               # ida-nexus 0.7.0 via ida-hcli
 idac doctor                  # verify the exact local and in-IDA stack
 ```
 
-For the agent guidance, install the skill as a Claude Code plugin (see [Skill](#skill)).
+For the agent guidance, install the Agent Plugin (see [Agent plugin](#agent-plugin)).
 
 `ida-hcli==0.20.1` is an exact `idac` runtime dependency. Setup and diagnostics
 run it through `idac`'s Python environment; they do not require `uvx` or a
@@ -171,7 +173,7 @@ request retires that exact headless worker with `save=False`; the operation is n
 retried. Live GUI commands do not force analysis or save; checkpoint GUI changes
 explicitly with `idac database save`.
 
-For selection and Nexus diagnostics, install the skill (see [Skill](#skill)).
+For selection and Nexus diagnostics, install the plugin (see [Agent plugin](#agent-plugin)).
 
 ## Agent sandbox setup
 
@@ -190,7 +192,7 @@ To customize the generated files, see the templates under [src/idac/workspace_te
 
 ## Usage
 
-Use `idac <command> --help` for one subcommand and `idac --full-help` for the complete CLI surface. Command grammar, workflow, and IDA reference material ships with the skill and is loaded by agents that have it installed.
+Use `idac <command> --help` for one subcommand and `idac --full-help` for the complete CLI surface. Command grammar, workflow, and IDA reference material ships with the plugin's skill and is loaded by agents that have it installed.
 
 ### Command families
 
@@ -214,7 +216,7 @@ Most read commands default to `--format text`. Use `--format json` (or `-j`) or 
 
 ## Highlights
 
-A few of the commands that make `idac` worth reaching for. Install the skill for the full command and workflow reference.
+A few of the commands that make `idac` worth reaching for. Install the plugin for the full command and workflow reference.
 
 ### Preview a mutation before committing
 
@@ -300,16 +302,26 @@ When no first-class command fits, drop to IDAPython against the same target:
 idac py exec --code "result = {'entry': hex(idc.get_inf_attr(idc.INF_START_EA))}"
 ```
 
-## Skill
+## Agent plugin
 
-A skill in [src/idac/skills/idac](src/idac/skills/idac) teaches Claude Code and Codex to prefer `idac` commands over ad hoc shell or raw IDAPython for RE work. It is distributed as a Claude Code plugin, not with the `idac` package:
+The [Agent Plugins v1](https://agent-plugins.org/) package in
+[plugins/idac](plugins/idac) teaches compatible agents to prefer `idac` commands over
+ad hoc shell or raw IDAPython for RE work. The repository catalog at
+[.agents/plugins/marketplace.json](.agents/plugins/marketplace.json) points directly to
+that package; [plugins/idac/plugin.json](plugins/idac/plugin.json) is its manifest and
+[plugins/idac/skills/idac](plugins/idac/skills/idac) contains its `idac` skill. The
+plugin is not included in the `idac` Python package.
 
-```text
-/plugin marketplace add trailofbits/idac
-/plugin install idac@idac
+Install it through an Agent Plugins-compatible client. With Codex:
+
+```bash
+codex plugin marketplace add trailofbits/idac
+codex plugin add idac@idac
 ```
 
-Once installed, the skill loads automatically when relevant. Codex users can point `~/.codex/skills/idac` at a checkout of [src/idac/skills/idac](src/idac/skills/idac).
+Once installed, the skill loads automatically when relevant. The repository contains
+one canonical plugin package, with no client-specific compatibility package or manual
+skill-link fallback.
 
 For a ready-to-fill task prompt covering anything from a light analysis pass to class-family recovery, run `idac workspace init <dir>` to scaffold a workspace containing `prompts/recovery-pass.md`.
 

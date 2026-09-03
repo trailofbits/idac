@@ -270,8 +270,8 @@ Each step remains a separate operation within that session.
 The wrapper artifact starts as `pending`, is checkpointed after every completed line, and becomes terminal only after the Nexus session closes. Ctrl-C writes an `interrupted` terminal record and exits 130.
 For larger prototype and local-rename passes, prefer `batch` so the mutation order is explicit and the run leaves behind a stable ordered log.
 Keep type/prototype mutation and post-reanalysis local cleanup in separate batches. Build the local cleanup plan from the fresh locals artifact produced after reanalysis, run its preview batch with `--fail-fast`, inspect the completed journal, and only then run its commit batch with `--fail-fast`.
-Setup commands such as `setup gui` and `setup skill` are intentionally rejected from
-`batch`, and so is `misc rename` — preview and commit symbol renames one-off. `misc reanalyze` is
+`setup gui` is intentionally rejected from `batch`, and so is `misc rename` — preview
+and commit symbol renames one-off. `misc reanalyze` is
 batch-safe and belongs between type/prototype mutations and local cleanup in full
 recovery batches.
 

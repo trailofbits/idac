@@ -64,7 +64,9 @@ otherwise be ambiguous.
 
 ## `function prototype set` reports unknown type(s)
 
-Declare the missing support or placeholder types first, then retry the prototype. See `idac docs workflows` for the safe mutation loop and `idac docs class-recovery` for support-type ordering.
+Declare the missing support or placeholder types first, then retry the prototype. See
+[the mutation workflows](workflows.md#safe-mutation-loop) for the safe loop and
+[class recovery](class-recovery.md) for support-type ordering.
 
 Before retrying, use:
 
