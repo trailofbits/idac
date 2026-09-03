@@ -5,17 +5,15 @@ from types import SimpleNamespace
 import pytest
 
 from idac import remote_ops
+from tests.remote_ops_harness import dispatch_with_runtime
 
-OperationContext = remote_ops.OperationContext
 IdaOperationError = remote_ops.IdaOperationError
 IdaRuntime = remote_ops.IdaRuntime
 SegmentRange = remote_ops.SegmentRange
 
 
 def _run_search(runtime: IdaRuntime, params: dict[str, object]):
-    spec = remote_ops._OPERATIONS["search_bytes"]
-    assert spec.parse is not None
-    return remote_ops.payload_from_model(spec.run(OperationContext(runtime=runtime), spec.parse(params)))
+    return dispatch_with_runtime(runtime, "search_bytes", params)
 
 
 class _CompiledPattern:

@@ -100,16 +100,17 @@ READY Nexus instance.
 ## Quick start
 
 Install the CLI from [PyPI](https://pypi.org/project/idac/), then install the pinned
-GUI integration and agent skill:
+GUI integration:
 
 ```bash
 uv tool install idac         # installs the `idac` command on your PATH
 idac setup gui               # ida-nexus 0.7.0 via ida-hcli
-idac setup skill             # Claude Code + Codex skill
 idac doctor                  # verify the exact local and in-IDA stack
 ```
 
-`ida-hcli==0.19.2` is an exact `idac` runtime dependency. Setup and diagnostics
+For the agent guidance, install the skill as a Claude Code plugin (see [Skill](#skill)).
+
+`ida-hcli==0.20.1` is an exact `idac` runtime dependency. Setup and diagnostics
 run it through `idac`'s Python environment; they do not require `uvx` or a
 separately installed HCLI executable.
 
@@ -170,8 +171,7 @@ request retires that exact headless worker with `save=False`; the operation is n
 retried. Live GUI commands do not force analysis or save; checkpoint GUI changes
 explicitly with `idac database save`.
 
-For selection and Nexus diagnostics, run `idac docs targets` and
-`idac docs troubleshooting`.
+For selection and Nexus diagnostics, install the skill (see [Skill](#skill)).
 
 ## Agent sandbox setup
 
@@ -182,21 +182,21 @@ idac workspace init reversing-workspace
 ```
 
 That creates workspace-local `.claude/` and `.codex/` config, agent guidance files,
-prompt templates, a `references/` copy of the bundled skill docs, and a git-backed
-directory layout for RE work. Nexus discovery and execution are local to the host;
-the generated workspace allows the local access needed by `idac`.
+prompt templates, and a git-backed directory layout for RE work. Nexus discovery and
+execution are local to the host; the generated workspace allows the local access
+needed by `idac`.
 
 To customize the generated files, see the templates under [src/idac/workspace_template/default](src/idac/workspace_template/default).
 
 ## Usage
 
-Use `idac <command> --help` for one subcommand, `idac --full-help` for the complete CLI surface, and `idac docs` for an index of bundled command, workflow, and IDA reference material (`idac docs guide`, `idac docs cli`, `idac docs workflows`, `idac docs class-recovery`, ...).
+Use `idac <command> --help` for one subcommand and `idac --full-help` for the complete CLI surface. Command grammar, workflow, and IDA reference material ships with the skill and is loaded by agents that have it installed.
 
 ### Command families
 
 | Family | Commands |
 |--------|----------|
-| Discovery | `doctor`, `docs`, `targets list`, `database show`, `segment list`, `bookmark list/show`, `comment show` |
+| Discovery | `doctor`, `targets list`, `database show`, `segment list`, `bookmark list/show`, `comment show` |
 | Functions | `function list`, `metadata`, `frame`, `stackvars`, `callees`, `callers`, `prototype`, `locals` |
 | Decompilation | `decompile`, `decompilemany`, `disasm`, `disasm --start/--end`, `ctree` |
 | Search | `search bytes`, `search strings`, `xrefs`, `imports` |
@@ -206,7 +206,7 @@ Use `idac <command> --help` for one subcommand, `idac --full-help` for the compl
 | Batch | `batch`, `batch --lint`, `preview` |
 | IDAPython | `py exec` |
 | Workspace | `workspace init` |
-| Maintenance | `misc reanalyze`, `database save`, `setup gui`, `setup skill` |
+| Maintenance | `misc reanalyze`, `database save`, `setup gui` |
 
 ### Output
 
@@ -214,7 +214,7 @@ Most read commands default to `--format text`. Use `--format json` (or `-j`) or 
 
 ## Highlights
 
-A few of the commands that make `idac` worth reaching for. See `idac docs cli` and `idac docs workflows` for the full reference.
+A few of the commands that make `idac` worth reaching for. Install the skill for the full command and workflow reference.
 
 ### Preview a mutation before committing
 
@@ -302,21 +302,16 @@ idac py exec --code "result = {'entry': hex(idc.get_inf_attr(idc.INF_START_EA))}
 
 ## Skill
 
-A bundled skill in [src/idac/skills/idac](src/idac/skills/idac) teaches Claude Code and Codex to prefer `idac` commands over ad hoc shell or raw IDAPython for RE work.
-
-```bash
-idac setup skill
-```
-
-This installs into both `~/.claude/skills/idac` and `~/.codex/skills/idac`; both agents auto-discover skills from their `skills/` directories. Once installed, the skill loads automatically when relevant. For a ready-to-fill task prompt covering anything from a light analysis pass to class-family recovery, run `idac workspace init <dir>` to scaffold a workspace containing `prompts/recovery-pass.md`.
-
-Claude Code users can alternatively install the skill as a namespaced plugin from
-this repository:
+A skill in [src/idac/skills/idac](src/idac/skills/idac) teaches Claude Code and Codex to prefer `idac` commands over ad hoc shell or raw IDAPython for RE work. It is distributed as a Claude Code plugin, not with the `idac` package:
 
 ```text
 /plugin marketplace add trailofbits/idac
 /plugin install idac@idac
 ```
+
+Once installed, the skill loads automatically when relevant. Codex users can point `~/.codex/skills/idac` at a checkout of [src/idac/skills/idac](src/idac/skills/idac).
+
+For a ready-to-fill task prompt covering anything from a light analysis pass to class-family recovery, run `idac workspace init <dir>` to scaffold a workspace containing `prompts/recovery-pass.md`.
 
 ## Development
 

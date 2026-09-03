@@ -1,6 +1,6 @@
 ---
 name: idac
-description: Use for reverse-engineering work through the local `idac` CLI against a live IDA GUI session, an existing `.i64` database, or a binary that IDA can open. Trigger this skill when the task involves decompilation, disassembly, ctree or microcode inspection, functions, locals, types, xrefs, strings, imports, C++ class or vtable recovery, Nexus target selection, prototype or local/type mutations, reanalysis, or IDAPython execution through IDA.
+description: Use for reverse-engineering work through the local `idac` CLI against a live IDA GUI session, an existing `.i64` database, or a binary that IDA can open. Trigger this skill when the task involves decompilation, disassembly, ctree or microcode inspection, functions, locals, types, xrefs, strings, imports, C++ class or vtable recovery, Nexus target selection, prototype or local/type mutations, struct fields, enum members, comments, bookmarks, reanalysis, or IDAPython execution through IDA.
 ---
 
 # idac
@@ -23,10 +23,12 @@ Prefer first-class `idac` commands, then `idac py exec`, then external or ad hoc
 - Before importing large headers, validate with `type check --decl-file ...`.
 - After type or prototype mutations, run `misc reanalyze`, then reread pseudocode or locals before rename-heavy cleanup. Calibrate local renames from fresh `function locals list --json` output using `--local-id` or `--index`; see `idac docs workflows` for selector calibration.
 - Before executing a mutation batch, run `batch <batch.idac> --lint --out <lint.json>` and fix reported issues.
+- Run dependency-ordered mutation batches with `--fail-fast`, especially when a check or preview guards a later commit and for local rename/retype passes.
 - Context selection: use `-c/--context PATH` for an `.i64` or binary, use
   `--instance RECORD_ID` for one exact READY row from `targets list`, and omit both
   only when exactly one READY Nexus instance exists.
-- When working in an idac workspace, keep audit notes append-only and factual. Distinguish proven facts from inferred names, types, and semantics.
+- When a `type declare` import fails and the error does not name the culprit, rerun it once with `--bisect` before hand-editing the header.
+- When working in an idac workspace, keep audit notes append-only and factual. Distinguish proven facts from inferred names, types, and semantics. Create one with `idac workspace init` for multi-pass work; read `idac docs workspace` for its conventions.
 
 When this guide is installed as a skill, the reference files sit alongside it; otherwise use `idac docs TOPIC` for the same material. For CLI syntax, prefer targeted help such as `idac type class --help`; use `idac --full-help` only when the command surface itself is unclear.
 
@@ -34,7 +36,6 @@ When this guide is installed as a skill, the reference files sit alongside it; o
 
 - The task is not IDA-backed and the user wants standalone RE tooling.
 - The task is source-level debugging or runtime inspection; use a debugger directly.
-- A first-class `idac` command already covers the task; do not start with raw IDAPython.
 - The task is static analysis, linting, or vulnerability scanning outside IDA-driven reverse-engineering work.
 
 ## Choose the path
@@ -45,11 +46,14 @@ What is the task?
 ├─ Read-only inspection (decompile, list, xrefs, strings, ctree, microcode)
 │   └─ Run `idac docs cli`
 │
-├─ Mutation (rename, retype, prototype, type declare)
+├─ Mutation (rename, retype, prototype, type/struct/enum edits, comment, bookmark)
 │   └─ Run `idac docs workflows`
 │
 ├─ C++ class or vtable recovery
 │   └─ Run `idac docs class-recovery` and `idac docs ida-cpp-type-details`
+│
+├─ Multi-pass recovery that needs durable notes and headers
+│   └─ Run `idac workspace init` and `idac docs workspace`
 │
 ├─ Context/target selection or Nexus state trouble
 │   └─ Run `idac docs targets` or `idac docs troubleshooting`
@@ -83,9 +87,9 @@ idac disasm --start "0x100000460" --end "0x1000004a0"
 Use `idac docs workflows` (`workflows.md`) for exact syntax.
 
 1. Discovery and read-only audit.
-2. Preview each persistent mutation.
+2. Preview each preview-capable persistent mutation.
 3. Lint mutation batches before running them.
-4. Commit the mutation.
+4. For preview-capable commands, commit only the mutation confirmed by an inspected preview artifact.
 5. Run `misc reanalyze` after type or prototype changes.
 6. Reread pseudocode or locals; calibrate local selectors from fresh JSON.
 7. Verify final readback and, when working in a workspace, record the pass in the workspace audit log (`audit/<target>-recovery.md`) if one exists.
@@ -124,4 +128,7 @@ The execution scope includes the core `ida*` modules that `idac` imports itself,
 | `references/ida-set-types.md` | `ida-set-types` | IDA C declaration syntax: calling conventions, usercall locations, attribute and type keywords |
 | `references/ida-advanced-type-annotations.md` | `ida-advanced-type-annotations` | Scattered argument locations and other advanced IDA declaration annotations |
 | `references/troubleshooting.md` | `troubleshooting` | Nexus selection, runtime, mutation, or stale-result problems |
-| `references/templates/README.md` | `templates` | Reusable prototype-pass, rename-pass, checkpoint-note, and locals-jq templates (printed in full) |
+| `references/templates/README.md` | `templates` | Reusable prototype and rename preview/commit passes, locals-plan, checkpoint-note, and locals-jq templates (printed in full) |
+
+`idac docs workspace` has no matching reference file; it prints the conventions that
+`idac workspace init` installs into a recovery workspace.

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from .compatibility import IDA_DOMAIN_VERSION, IDA_HCLI_VERSION, IDA_NEXUS_VERSION
-from .paths import skill_install_dirs, skill_source_dir
 
 IDA_NEXUS_RELEASE = f"https://github.com/HexRaysSA/ida-nexus@v{IDA_NEXUS_VERSION}"
 
@@ -63,47 +61,4 @@ def setup_gui(
         "ida_domain_version": IDA_DOMAIN_VERSION,
         "installer": f"ida-hcli=={IDA_HCLI_VERSION}",
         "source": IDA_NEXUS_RELEASE,
-    }
-
-
-def _install_skill_path(source: Path, destination: Path, *, mode: str, force: bool) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists() or destination.is_symlink():
-        if not force:
-            raise OSError(f"destination already exists: {destination}")
-        if destination.is_symlink() or destination.is_file():
-            destination.unlink()
-        else:
-            shutil.rmtree(destination)
-    if mode == "copy":
-        shutil.copytree(source, destination)
-    else:
-        os.symlink(source, destination, target_is_directory=True)
-
-
-def setup_skill(
-    *,
-    mode: str = "symlink",
-    force: bool = False,
-    host: str = "both",
-    dest: str | Path | None = None,
-) -> dict[str, Any]:
-    """Install the bundled idac skill for Claude Code, Codex, or a custom path."""
-
-    if mode not in {"copy", "symlink"}:
-        raise ValueError("mode must be 'copy' or 'symlink'")
-    if host not in {"claude", "codex", "both"}:
-        raise ValueError("host must be 'claude', 'codex', or 'both'")
-
-    source = skill_source_dir()
-    if not source.exists():
-        raise OSError(f"source path is missing: {source}")
-    destinations = [Path(dest).expanduser()] if dest is not None else skill_install_dirs(host=host)
-    for destination in destinations:
-        _install_skill_path(source, destination, mode=mode, force=force)
-    return {
-        "installed": True,
-        "mode": mode,
-        "source": str(source),
-        "destinations": [str(destination) for destination in destinations],
     }

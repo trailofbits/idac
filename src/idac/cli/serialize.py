@@ -139,8 +139,6 @@ def _inline_limit_hint(result: CommandResult, *, out_flag: str) -> str | None:
         return "rerun with `-o <path>` to write the full ctree output to a file"
     if result.render_op in {"local_list", "local_rename", "local_retype", "local_update", "local_apply_plan"}:
         return "rerun with `--json --out <path>` to inspect the full locals table"
-    if result.render_op == "docs":
-        return "rerun with `--out <path>` to write the full docs output to a file"
 
     count_summary = _result_count_summary(result)
     if count_summary is not None:

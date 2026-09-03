@@ -171,8 +171,8 @@ def test_doctor_reports_missing_or_malformed_hcli_status() -> None:
             "not installed",
         ),
         (
-            subprocess.CompletedProcess([], 0, "not json", ""),
-            "invalid",
+            subprocess.CompletedProcess([], 1, "", "configured hcli default IDA installation does not exist"),
+            "configured hcli default ida installation does not exist",
         ),
     ]
 

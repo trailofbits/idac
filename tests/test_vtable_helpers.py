@@ -3,14 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from idac import remote_ops
+from tests.remote_ops_harness import dispatch_with_runtime
 
 
 def _run_class_vtable(runtime, *, include_runtime: bool = False):
-    spec = remote_ops._OPERATIONS["class_vtable"]
-    assert spec.parse is not None
-    request = spec.parse({"name": "Foo", "runtime": include_runtime})
-    return remote_ops.payload_from_model(spec.run(remote_ops.OperationContext(runtime=runtime), request))
+    return dispatch_with_runtime(runtime, "class_vtable", {"name": "Foo", "runtime": include_runtime})
 
 
 class FakeIdaIda:

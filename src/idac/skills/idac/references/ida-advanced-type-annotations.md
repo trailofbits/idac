@@ -74,8 +74,8 @@ Since compilers can use such complex calling conventions, IDA needs some mechani
 It reads:
 
 - **1 byte** at offset **0** of the argument is passed in **byte 0 of RDI**
-- **2 bytes** at offset **2** of the argument are passed in **bytes 1–2 of RDI**
-- **1 byte** at offset **4** of the argument is passed in **byte 3 of RDI**
+- **2 bytes** at offset **2** of the argument are passed in **bytes 2–3 of RDI**
+- **1 byte** at offset **4** of the argument is passed in **byte 4 of RDI**
 - **4 bytes** at offset **8** of the argument are passed starting from **byte 0 of RSI**
 
 In other words, the following syntax is used:

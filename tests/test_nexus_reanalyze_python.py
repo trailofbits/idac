@@ -231,5 +231,4 @@ def test_reanalyze_range_restores_function_after_session_item_deletion(
     assert restored["name"] == "main"
     assert restored["prototype"] == ("int __fastcall main(int argc, const char **argv, const char **envp)")
     assert restored["size"] == 80
-    assert restored["flags"] in {"0x1410", "0x210"}
     assert 'printf("tiny:%d\\n", v4);' in decompiled

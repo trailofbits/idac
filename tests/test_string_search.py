@@ -3,9 +3,8 @@ from __future__ import annotations
 import pytest
 
 from idac import remote_ops
+from tests.remote_ops_harness import dispatch_with_runtime
 
-OperationContext = remote_ops.OperationContext
-payload_from_model = remote_ops.payload_from_model
 IdaOperationError = remote_ops.IdaOperationError
 IdaRuntime = remote_ops.IdaRuntime
 SegmentRange = remote_ops.SegmentRange
@@ -13,9 +12,7 @@ SegmentRange = remote_ops.SegmentRange
 
 def _op_strings(runtime: IdaRuntime, params: dict[str, object]):
     """Parse and run the `strings` operation the way production dispatch does."""
-    spec = remote_ops._OPERATIONS["strings"]
-    assert spec.parse is not None
-    return payload_from_model(spec.run(OperationContext(runtime=runtime), spec.parse(params)))
+    return dispatch_with_runtime(runtime, "strings", params)
 
 
 class _FakeIdaBytes:

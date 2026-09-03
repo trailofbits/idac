@@ -65,9 +65,10 @@ with `--instance` or select a database/input with `-c`.
 
 `-c` and `--instance` are mutually exclusive. Either can appear before the command or
 on a context-aware subcommand; a command-local option overrides an inherited root
-option. `--timeout` controls Nexus startup, analysis, and operation timeouts. Without
-it, startup and operation execution use the pinned Nexus defaults, while idac bounds
-the headless analysis wait at 120 seconds. No phase requests an infinite wait.
+option. `--timeout` supplies an explicit deadline for Nexus startup, headless analysis,
+compatibility checks, and remote operation execution. It does not bound database save
+or session finalization. Without it, remote execution receives no explicit idac
+deadline; headless analysis alone falls back to 120 seconds.
 
 ## Saves and worker lifetime
 
@@ -117,7 +118,7 @@ idac doctor
 idac targets list --json
 ```
 
-`setup gui` uses pinned `ida-hcli==0.19.2` to install ida-nexus v0.7.0 with
+`setup gui` uses pinned `ida-hcli==0.20.1` to install ida-nexus v0.7.0 with
 ida-domain 0.5.1. Restart IDA or load the installed Nexus component as required by IDA,
 then rerun discovery. `doctor` is read-only and reports local package versions, the
 installed GUI component, discovery records, and versions inside READY instances.

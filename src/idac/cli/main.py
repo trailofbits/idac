@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Any
 
 from ..nexus import NexusSessionError
 from ..output import OutputTooLargeError
@@ -14,7 +13,6 @@ from .commands import (
     bookmark,
     comment,
     database,
-    docs,
     doctor,
     function,
     misc,
@@ -31,8 +29,6 @@ from .errors import CliUserError
 from .execute import execute_parsed
 from .serialize import artifact_notice, emit_result, json_or_jsonl_from_path
 
-DOCS_INLINE_CHAR_LIMIT = 50_000
-
 
 def build_parser(*, prog: str = "idac") -> argparse.ArgumentParser:
     parser = create_parser(prog=prog, description="Agent-friendly CLI for IDA")
@@ -41,7 +37,6 @@ def build_parser(*, prog: str = "idac") -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     doctor.register(parser, subparsers)
-    docs.register(parser, subparsers)
     database.register(parser, subparsers)
     function.register(parser, subparsers)
     segment.register(parser, subparsers)
@@ -91,21 +86,13 @@ def main(argv: list[str] | None = None, *, prog: str = "idac") -> int:
                 return result.exit_code
             artifacts = result.artifacts
         else:
-            emit_kwargs: dict[str, Any] = {}
             if args.command == "preview":
                 fmt = json_or_jsonl_from_path(arg_map["out"])
                 out_path = arg_map["out"]
             else:
                 fmt = arg_map.get("format", "text")
                 out_path = arg_map.get("out")
-                if args.command == "docs" and not arg_map.get("all", False):
-                    emit_kwargs["inline_limit"] = DOCS_INLINE_CHAR_LIMIT
-            artifacts = emit_result(
-                result,
-                fmt=fmt,
-                out_path=out_path,
-                **emit_kwargs,
-            )
+            artifacts = emit_result(result, fmt=fmt, out_path=out_path)
             result.artifacts.extend(artifacts)
         if result.exit_code == 0:
             for artifact in artifacts:

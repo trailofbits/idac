@@ -1,0 +1,13 @@
+# Generic local rename preview pass
+#
+# Run only after prototype fixes and reanalysis. Copy this file, rename-pass.idac, and
+# locals-plan.json into the recovery workspace, then refresh locals:
+#   idac function locals list <function> --json --out /tmp/locals.json
+# Replace the sample selectors in locals-plan.json with exact index or local_id values
+# from that fresh output. Then run:
+#   idac batch rename-preview.idac --lint --out /tmp/rename-preview.lint.json
+#   idac batch rename-preview.idac --fail-fast --out /tmp/rename-preview.json
+# Inspect the preview's full before/after local lists. Only then run rename-pass.idac
+# against the same target; refresh and recalibrate if anything changed.
+
+preview function locals apply 0x100000000 --json-file "locals-plan.json"

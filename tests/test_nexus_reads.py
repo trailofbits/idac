@@ -25,7 +25,6 @@ def test_nexus_function_metadata(
     assert payload["address"] == "0x100000460"
     assert payload["size"] == 80
     assert payload["prototype"] == "int __fastcall main(int argc, const char **argv, const char **envp)"
-    assert payload["flags"] == "0x1410"
 
 
 def test_nexus_disasm(

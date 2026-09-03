@@ -75,6 +75,18 @@ idac function prototype check "sub_08041337" --decl-file "sub_08041337_proto.h"
 
 If a local type exists but its dependencies are unclear, use `type deps <name>` to ask IDA to print the type with dependencies when possible.
 
+## `type declare` rejects a header and the error does not say which declaration
+
+Rerun the same import once with `--bisect`:
+
+```bash
+idac type declare --replace --bisect --decl-file "recovered_classes.h"
+```
+
+It reports the first declaration IDA rejects by line range, says whether that declaration imports on its own, and names by-value members whose types are still opaque. If it imports alone, the problem is ordering: move or add the missing support type earlier in the file. If it fails alone too, simplify that one declaration — plain `struct`, blob padding for unknown regions — and retry. `--bisect` needs IDA undo support and is rejected by `type check`.
+
+For template-heavy or newer C++ syntax, retry the import with `--clang`. For namespace-qualified names that the local-type parser will not take, use `--alias old=new`.
+
 ## Preview did not persist
 
 That is expected. `preview` applies the mutation, captures the result, and restores the prior state before returning.

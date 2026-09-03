@@ -87,23 +87,6 @@ def fake_nexus(monkeypatch):
     return FakeNexusSession
 
 
-def test_help_describes_nexus_surface(capsys) -> None:
-    parser = build_parser()
-
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["--full-help"])
-
-    assert exc.value.code == 0
-    help_text = capsys.readouterr().out
-    assert "-c PATH" in help_text
-    assert "--instance RECORD_ID" in help_text
-    assert "ida-nexus" in help_text
-    assert "# idac setup gui" in help_text
-    assert "# idac setup skill" in help_text
-    assert "# idac database show" in help_text
-    assert "# idac database save" in help_text
-
-
 @pytest.mark.parametrize("value", ["0", "nan"])
 def test_timeout_rejects_nonpositive_or_nonfinite_values(
     value: str,
@@ -569,8 +552,8 @@ def test_batch_child_cannot_override_wrapper_timeout(tmp_path: Path, fake_nexus,
 
 
 def test_batch_without_selector_accepts_context_free_children(tmp_path: Path, fake_nexus, capsys) -> None:
-    batch_file = tmp_path / "docs.idac"
-    batch_file.write_text("docs --list\n", encoding="utf-8")
+    batch_file = tmp_path / "workspace.idac"
+    batch_file.write_text(f"workspace init {tmp_path / 'scaffold'}\n", encoding="utf-8")
 
     assert main(["batch", str(batch_file)]) == 0
 
@@ -624,41 +607,29 @@ def test_targets_list_uses_public_discovery_seam(monkeypatch, capsys) -> None:
     assert json.loads(capsys.readouterr().out)[0]["record_id"] == "gui-1"
 
 
-def test_setup_and_doctor_commands_call_public_services(monkeypatch, capsys) -> None:
-    calls: list[tuple[str, Any]] = []
+def test_setup_gui_command_forwards_timeout_and_renders_result(monkeypatch, capsys) -> None:
+    timeouts: list[float | None] = []
 
     def setup_gui(*, timeout: float | None = None) -> dict[str, Any]:
-        calls.append(("setup", timeout))
+        timeouts.append(timeout)
         return {"installed": True, "plugin": "ida-nexus", "version": "0.7.0"}
 
-    def run_doctor(*, timeout: float | None = None) -> dict[str, Any]:
-        calls.append(("doctor", timeout))
-        return {"healthy": True, "status": "ok", "checks": []}
-
     monkeypatch.setattr("idac.cli.commands.setup.setup_gui", setup_gui)
-    monkeypatch.setattr("idac.cli.commands.doctor.run_doctor", run_doctor)
 
     assert main(["setup", "gui", "--timeout", "9", "--json"]) == 0
-    setup_output = json.loads(capsys.readouterr().out)
+    assert timeouts == [9.0]
+    assert json.loads(capsys.readouterr().out)["plugin"] == "ida-nexus"
+
+
+def test_doctor_command_forwards_timeout_and_renders_result(monkeypatch, capsys) -> None:
+    timeouts: list[float | None] = []
+
+    def run_doctor(*, timeout: float | None = None) -> dict[str, Any]:
+        timeouts.append(timeout)
+        return {"healthy": True, "status": "ok", "checks": []}
+
+    monkeypatch.setattr("idac.cli.commands.doctor.run_doctor", run_doctor)
+
     assert main(["doctor", "--timeout", "4", "--json"]) == 0
-    doctor_output = json.loads(capsys.readouterr().out)
-    assert calls == [("setup", 9.0), ("doctor", 4.0)]
-    assert setup_output["plugin"] == "ida-nexus"
-    assert doctor_output["healthy"] is True
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["database", "open", "sample.i64"],
-        ["database", "close"],
-        ["targets", "cleanup"],
-        ["misc", "plugin", "install"],
-    ],
-)
-def test_removed_commands_are_not_registered(argv: list[str], capsys) -> None:
-    with pytest.raises(SystemExit) as exc:
-        build_parser().parse_args(argv)
-
-    assert exc.value.code == 2
-    assert "invalid choice" in capsys.readouterr().err
+    assert timeouts == [4.0]
+    assert json.loads(capsys.readouterr().out)["healthy"] is True

@@ -112,6 +112,14 @@ def _package_check(distribution: str, expected: str, version_getter: VersionGett
     )
 
 
+def _first_line(text: str | None) -> str:
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:200]
+    return ""
+
+
 def _run_hcli_status(
     *,
     timeout: float | None,
@@ -148,11 +156,15 @@ def _run_hcli_status(
     try:
         payload = json.loads(process.stdout)
     except (TypeError, json.JSONDecodeError):
+        reason = _first_line(process.stderr) or _first_line(process.stdout)
+        summary = "ida-hcli could not report plugin status"
+        if reason:
+            summary = f"{summary}: {reason}"
         return _check(
             "error",
             "gui",
             "plugin",
-            "ida-hcli returned invalid plugin status JSON",
+            summary,
             expected=IDA_NEXUS_VERSION,
             returncode=process.returncode,
             stdout=(process.stdout or "")[:4000],

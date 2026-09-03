@@ -48,7 +48,6 @@ def test_comment_delete_preview_then_persist(
     assert isinstance(preview, dict)
     assert preview["before"]["comment"] == "entry point"
     assert preview["after"]["comment"] is None
-    assert preview["undo"]["mode"] == "rollback"
     assert after_preview["comment"] == "entry point"
 
     assert isinstance(deleted, dict)

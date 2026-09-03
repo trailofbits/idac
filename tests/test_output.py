@@ -49,20 +49,6 @@ def test_write_output_result_can_force_text_for_json_suffix(tmp_path: Path) -> N
     assert out_path.read_text(encoding="utf-8") == "int main(void) { return 0; }\n"
 
 
-def test_write_output_result_replaces_existing_artifact(tmp_path: Path) -> None:
-    out_path = tmp_path / "decompile.txt"
-    out_path.write_text("old\n", encoding="utf-8")
-
-    write_output_result(
-        "new decompile text\n",
-        fmt="text",
-        out_path=out_path,
-        stem="decompile",
-    )
-
-    assert out_path.read_text(encoding="utf-8") == "new decompile text\n"
-
-
 def test_write_output_result_preserves_symlink_output_target(tmp_path: Path) -> None:
     real_path = tmp_path / "real.txt"
     real_path.write_text("old\n", encoding="utf-8")

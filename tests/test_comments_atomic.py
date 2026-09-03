@@ -3,15 +3,14 @@ from __future__ import annotations
 import pytest
 
 from idac import remote_ops
+from tests.remote_ops_harness import dispatch_with_runtime
 
 IdaOperationError = remote_ops.IdaOperationError
 IdaRuntime = remote_ops.IdaRuntime
 
 
 def _run_op(name: str, runtime: IdaRuntime, params: dict[str, object]):
-    spec = remote_ops._OPERATIONS[name]
-    assert spec.parse is not None
-    return remote_ops.payload_from_model(spec.run(remote_ops.OperationContext(runtime=runtime), spec.parse(params)))
+    return dispatch_with_runtime(runtime, name, params)
 
 
 class _FakeIdaLines:

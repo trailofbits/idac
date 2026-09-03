@@ -1,6 +1,6 @@
 # C++ Type Details
 
-IDA can parse and handle simple C++ class declarations. It cannot parse templates and other complex constructs but simple standard cases can be parsed.
+IDA's default type parser can handle simple C++ class declarations but not templates and some other complex constructs. For `idac type declare`, use `--clang` when the default parser rejects template-heavy or newer C++ syntax.
 
 For `idac type declare`, treat the forms in this file as IDA-specific details, not as the mandatory first pass. In practice, a minimal plain-`struct` import with `ClassName_vtbl` and `__vftable` is often the safest starting point; add `__cppobj` and other refinements only after the minimal form imports cleanly.
 

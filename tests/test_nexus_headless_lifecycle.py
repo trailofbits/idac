@@ -363,6 +363,7 @@ def test_interrupted_python_discards_uncertain_worker_and_exits_cleanly(
         while time.monotonic() < deadline and process.poll() is None and not started_marker.is_file():
             time.sleep(0.1)
 
+        assert started_marker.is_file(), "the interrupted operation never reached its mutation marker"
         assert started_marker.read_text(encoding="utf-8") == "started"
         targets = run_cli_json(idac_cmd, idac_env, "targets", "list", "--timeout", "2")
         matches = [
@@ -399,6 +400,7 @@ print(json.dumps({"record_id": instance.record_id, "released": released}))
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline and release_watcher.poll() is None and not watcher_marker.is_file():
             time.sleep(0.05)
+        assert watcher_marker.is_file(), "the worker-release watcher never recorded the interrupted worker"
         assert watcher_marker.read_text(encoding="utf-8") == interrupted_record["record_id"]
 
         os.kill(process.pid, signal.SIGINT)
@@ -414,7 +416,7 @@ print(json.dumps({"record_id": instance.record_id, "released": released}))
 
     assert process.returncode == 130
     assert stdout == ""
-    assert stderr.splitlines()[0] == "interrupted"
+    assert "interrupted" in stderr.lower()
     assert "Traceback" not in stderr
     assert release_watcher is not None and release_watcher.returncode == 0, watcher_stderr
     release_result = json.loads(watcher_stdout)

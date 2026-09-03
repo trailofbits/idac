@@ -1,17 +1,9 @@
-# Generic local rename pass
+# Generic local rename commit pass
 #
-# Run only after prototype fixes and reanalysis.
-# Refresh locals first:
-#   idac function locals list <function> --json --out /tmp/locals.json
-# Prefer --index or --local-id after any prototype or reanalysis change.
-# Stop on the first miss, refresh locals, and recalibrate selectors.
-# For many edits in one function, create a JSON plan from the fresh locals dump and use:
-#   function locals apply <function> --json-file locals-plan.json
+# Run only after rename-preview.idac has completed against the same target and you have
+# inspected its full before/after local lists. Then run:
+#   idac batch rename-pass.idac --lint --out /tmp/rename-pass.lint.json
+#   idac batch rename-pass.idac --fail-fast --out /tmp/rename-pass.json
+# Stop on the first miss, refresh locals, and recalibrate before retrying.
 
-function locals rename 0x100000000 --index 5 --new-name header_size
-function locals rename 0x100000000 --index 6 --new-name record_type
-function locals rename 0x100000000 --index 7 --new-name entry_count
-function locals rename 0x100000000 --index 12 --new-name parse_status
-function locals rename 0x100000100 --index 4 --new-name result_ptr
-function locals rename 0x100000100 --index 9 --new-name output_size
-function locals rename 0x100000100 --index 11 --new-name error_code
+function locals apply 0x100000000 --json-file "locals-plan.json"

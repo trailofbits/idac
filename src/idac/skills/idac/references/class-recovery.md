@@ -21,11 +21,23 @@ If the local type system is still opaque, start with `type list`, then use `type
 ```bash
 idac type list "Example"
 idac function list "Example_" --json --out "/tmp/class_family_functions.json"
-idac decompilemany "Example_" --out-dir "/tmp/class_family_decompile_discovery"
+idac decompilemany "Example_" --f5 --out-dir "/tmp/class_family_decompile_discovery"
 idac type class candidates "Example" --json --out "/tmp/class_candidates.json"
 idac type check --decl-file "support_types.h"
+idac preview -o "/tmp/support_types_preview.json" type declare --replace --decl-file "support_types.h"
+```
+
+Inspect `/tmp/support_types_preview.json`. Only if its before/after data confirms the intended import, continue:
+
+```bash
 idac type declare --replace --decl-file "support_types.h"
 idac type check --decl-file "recovered_classes.h"
+idac preview -o "/tmp/recovered_classes_preview.json" type declare --replace --decl-file "recovered_classes.h"
+```
+
+Inspect `/tmp/recovered_classes_preview.json` before continuing:
+
+```bash
 idac type declare --replace --decl-file "recovered_classes.h"
 idac type deps "ExampleDerived"
 idac type class list "Example"
@@ -36,8 +48,13 @@ idac type class vtable "ExampleDerived" --runtime
 idac function prototype show "0x100012340"
 idac function prototype check "0x100012340" --decl "bool __fastcall ExampleDerived__method_1(ExampleDerived *__hidden this, const unsigned char *buf, u64 len, const char *arg3, u32 flags)"
 idac preview -o "/tmp/proto_preview.json" function prototype set "0x100012340" --decl "bool __fastcall ExampleDerived__method_1(ExampleDerived *__hidden this, const unsigned char *buf, u64 len, const char *arg3, u32 flags)"
+```
+
+Inspect `/tmp/proto_preview.json`, including the pseudocode before/after data, before committing:
+
+```bash
+idac function prototype set "0x100012340" --decl "bool __fastcall ExampleDerived__method_1(ExampleDerived *__hidden this, const unsigned char *buf, u64 len, const char *arg3, u32 flags)"
 idac misc reanalyze "ExampleDerived__method_1"
-idac decompilemany "Example_" --f5 --out-dir "/tmp/class_family_decompile_verify"
 idac decompile "CreateExampleDerived" --f5
 idac decompile "ExampleDerived__method_1" --f5
 ```
@@ -149,8 +166,10 @@ Practical rules:
 - treat `__cppobj` as optional refinement, not a requirement for the first successful import
 - for secondary-base virtual tables, use the IDA-specific `ClassName_XXXX_vtbl` pattern
 - use `--alias old=new` during import when namespace-qualified names need flattening for local-type parsing
+- if the import fails and the error does not name the culprit, rerun it once with `--bisect` before hand-editing the header; it isolates the first rejected declaration and names opaque by-value members
 - if import errors suggest parser trouble, simplify the declaration and retry with preview first
 - run `type check --decl-file ...` before importing the simplified declaration
+- once the layout is close, correct single members with `type struct field set/rename` and `type enum member set/rename` instead of re-importing the whole header; see [workflows.md](workflows.md#narrow-type-edits)
 
 ## Stop conditions
 

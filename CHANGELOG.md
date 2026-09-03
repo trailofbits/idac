@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Removed the `idac docs` command. The command, workflow, and IDA reference material it
+  printed now ships only with the `idac` skill, installed as a Claude Code plugin
+  (`/plugin marketplace add trailofbits/idac` then `/plugin install idac@idac`).
+- Removed `idac setup skill`. Install the skill as a plugin instead.
+- Stopped shipping the skill inside the `idac` package, so `src/idac/skills/` no longer
+  lands in site-packages.
+- `idac workspace init` no longer copies the skill docs into the workspace; the
+  generated `AGENTS.md` and `prompts/recovery-pass.md` point at the installed skill.
+
 ## 0.19.1
 
 This patch release fixes the version that `idac` reports about itself.

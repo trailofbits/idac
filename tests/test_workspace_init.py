@@ -30,7 +30,6 @@ def test_workspace_init_creates_expected_tree(idac_cmd: list[str], idac_env: dic
     assert (dest / ".idac" / "tmp").is_dir()
     assert (dest / "audit").is_dir()
     assert (dest / "headers" / "recovered").is_dir()
-    assert (dest / "references" / "cli.md").is_file()
     assert (dest / ".git").is_dir()
     assert _git_repo_root(dest) == dest.resolve()
     assert "Initialized git repository." in proc.stdout
@@ -47,7 +46,6 @@ def test_workspace_init_into_existing_empty_directory_succeeds(
     assert proc.returncode == 0, proc.stderr or proc.stdout
     assert (dest / ".idac" / "tmp").is_dir()
     assert (dest / "CLAUDE.md").is_file()
-    assert (dest / "references" / "cli.md").is_file()
 
 
 def test_workspace_init_refuses_existing_workspace_without_force(

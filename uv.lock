@@ -8,6 +8,7 @@ exclude-newer-span = "P1W"
 
 [options.exclude-newer-package]
 ida-nexus = "2026-08-22T04:00:00Z"
+ida-hcli = "2026-08-28T04:00:00Z"
 
 [[package]]
 name = "annotated-types"
@@ -218,7 +219,7 @@ wheels = [
 
 [[package]]
 name = "ida-hcli"
-version = "0.19.2"
+version = "0.20.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -234,9 +235,9 @@ dependencies = [
     { name = "semantic-version" },
     { name = "tenacity" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/91/cd/e26950c38a77f23dfcc50549ee3dc4e530ade4d297597c516a6d4c02798f/ida_hcli-0.19.2.tar.gz", hash = "sha256:c884f0568cf4b76ff52465b8dcc1e847e25b3c3f2883a93999371ca8a9ca258f", size = 189519, upload-time = "2026-08-11T11:58:05.296Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/ad/1396580e5508c77a5ac2188def0b6984c81836790df5f50764943e4735b0/ida_hcli-0.20.1.tar.gz", hash = "sha256:1d7b89436ec59eefeabd16309fc70eaa3157a75dde6338203a7dacdfc3e9b517", size = 190915, upload-time = "2026-08-26T13:44:18.61Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4e/66/a0bd4fdf4907499b3227caa853f7f07c85d85bc3a99c7a75fa8eaf5671c0/ida_hcli-0.19.2-py3-none-any.whl", hash = "sha256:bc343694da5946a07a80004cc6da9cbb82c1301464ced379b6061b12748997ec", size = 237487, upload-time = "2026-08-11T11:58:06.433Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/3f/e3b02bca81afaec5dc0d8fb7ce9ebd86f1f377564da3754559336e021c28/ida_hcli-0.20.1-py3-none-any.whl", hash = "sha256:a539b8a2af7b06ba2c12b8fd9d131c5f2042e3b3d2731dc28ac0da560e984baa", size = 238673, upload-time = "2026-08-26T13:44:19.808Z" },
 ]
 
 [[package]]
@@ -282,7 +283,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "ida-domain", specifier = "==0.5.1" },
-    { name = "ida-hcli", specifier = "==0.19.2" },
+    { name = "ida-hcli", specifier = "==0.20.1" },
     { name = "ida-nexus", specifier = "==0.7.0" },
 ]
 

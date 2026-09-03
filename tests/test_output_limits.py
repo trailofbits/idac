@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+OVERSIZED_RESULT_CHARS = 1_000_000
+
 
 @pytest.mark.parametrize("output_format", ["json", "jsonl"])
 def test_large_json_output_requires_out_flag(
@@ -22,7 +24,7 @@ def test_large_json_output_requires_out_flag(
             "py",
             "exec",
             "--code",
-            "result = 'x' * 10050",
+            f"result = 'x' * {OVERSIZED_RESULT_CHARS}",
             "-c",
             str(database),
             "--format",
@@ -37,13 +39,14 @@ def test_large_json_output_requires_out_flag(
     payload = json.loads(proc.stderr)
     assert payload["code"] == "output_too_large"
     assert payload["rerun_with_out"] is True
+    assert payload["chars"] > payload["limit"]
     if output_format == "jsonl":
         assert proc.stderr.count("\n") == 1
     else:
         assert proc.stderr.count("\n") > 1
 
 
-def test_large_json_output_succeeds_with_out_flag(
+def test_json_output_succeeds_with_out_flag(
     idac_cmd: list[str],
     idac_env: dict[str, str],
     copy_database,
@@ -51,14 +54,14 @@ def test_large_json_output_succeeds_with_out_flag(
     tmp_path: Path,
 ) -> None:
     database = copy_database(tiny_database)
-    out_path = tmp_path / "large.json"
+    out_path = tmp_path / "result.json"
     proc = subprocess.run(
         [
             *idac_cmd,
             "py",
             "exec",
             "--code",
-            "result = 'x' * 10050",
+            "result = 'written'",
             "-c",
             str(database),
             "--format",
@@ -75,7 +78,7 @@ def test_large_json_output_succeeds_with_out_flag(
     assert proc.stdout == ""
     assert out_path.exists()
     written = json.loads(out_path.read_text(encoding="utf-8"))
-    assert written["result"] == "x" * 10050
+    assert written["result"] == "written"
 
 
 def test_out_json_suffix_forces_json_output(
@@ -86,14 +89,14 @@ def test_out_json_suffix_forces_json_output(
     tmp_path: Path,
 ) -> None:
     database = copy_database(tiny_database)
-    out_path = tmp_path / "large.json"
+    out_path = tmp_path / "result.json"
     proc = subprocess.run(
         [
             *idac_cmd,
             "py",
             "exec",
             "--code",
-            "result = 'x' * 10050",
+            "result = 'json by suffix'",
             "-c",
             str(database),
             "--out",
@@ -107,7 +110,7 @@ def test_out_json_suffix_forces_json_output(
     assert proc.returncode == 0, proc.stderr or proc.stdout
     assert proc.stdout == ""
     written = json.loads(out_path.read_text(encoding="utf-8"))
-    assert written["result"] == "x" * 10050
+    assert written["result"] == "json by suffix"
 
 
 def test_type_list_requires_pattern_or_out(

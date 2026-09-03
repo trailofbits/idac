@@ -195,15 +195,13 @@ skipped unless `IDAC_RUN_NEXUS_GUI_TESTS=1` and an exact
 `IDAC_NEXUS_GUI_RECORD_ID` are set. Use only a disposable GUI database: the test
 explicitly saves, verifies an on-disk snapshot, and then restores a temporary comment.
 
-## Skill Install Targets
+## Skill Distribution
 
-The bundled `idac` skill supports both Claude Code and Codex equally.
-
-- default install targets:
-  - `~/.claude/skills/idac`
-  - `~/.codex/skills/idac`
-- custom install destination:
-  - `idac setup skill --dest /custom/path/idac`
+`src/idac/skills/idac` is plugin source, not package data. It is excluded from the wheel
+(`[tool.uv.build-backend] wheel-exclude` in `pyproject.toml`) and installed through the
+Claude Code marketplace declared in `.claude-plugin/marketplace.json`. The CLI has no
+command that installs or prints it, so do not add code under `src/idac/` that reads from
+`skills/`.
 
 For fixture-driven class tests, prefer updating and validating:
 

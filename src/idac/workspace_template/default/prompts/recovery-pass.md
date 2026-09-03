@@ -17,13 +17,9 @@ AGENTS.md sets a default target; Prior work defaults to "none".
 
 ## References
 
-If the idac guide is not already in context, run `idac docs guide` first. Load focused
-topics on demand:
-
-- `idac docs cli` — command grammar and output behavior
-- `idac docs workflows` — safe mutation loop, batch, selector calibration, readback
-- `idac docs targets` — Nexus context selection and opening binaries
-- `idac docs troubleshooting` — Nexus runtime, selection, or stale-result issues
+Install the `idac` skill first; it carries the guide and loads focused references on
+demand for command grammar, the safe mutation loop, Nexus context selection, and
+runtime troubleshooting.
 
 ## Pass contract
 
@@ -31,7 +27,7 @@ topics on demand:
   and `headers/recovered/`. Extend prior work instead of rediscovering it; if the latest
   audit entry no longer matches the database, note the mismatch and re-verify before
   building on it.
-- Follow the mutation rules in `idac docs workflows` for every database or header
+- Follow the skill's mutation rules for every database or header
   change: preview before commit, lint batches, reanalyze and reread after type or
   prototype changes.
 - Work from the binary/database only. Do external correlation only if the user
@@ -55,16 +51,16 @@ topics on demand:
 
 ## If the target is a C++ class, vtable, or hierarchy
 
-Run `idac docs class-recovery` and follow it; it owns the family-scoping, vtable-loop,
-naming, and verification rules. Read `idac docs ida-cpp-type-details` before writing or
-importing class or vtable declarations.
+Read the skill's class-recovery reference and follow it; it owns the family-scoping,
+vtable-loop, naming, and verification rules. Read its C++ type-details reference before
+writing or importing class or vtable declarations.
 
 ## Done when
 
 - The stated objective is met, verified by redecompiling (with `--f5`) every mutated
   function and at least one caller of each changed prototype.
-- Class work passes the verification checklist in `idac docs class-recovery`.
-- An audit entry appended to `audit/<target>-recovery.md` — using the skeleton in
-  `references/templates/checkpoint-note.md` (also printed by `idac docs templates`) —
-  records the changes, the evidence, failed commands, remaining uncertainty, and next
-  steps concrete enough for another agent to continue without repeating discovery.
+- Class work passes the skill's class-recovery verification checklist.
+- An audit entry appended to `audit/<target>-recovery.md` — using the skill's
+  checkpoint-note skeleton — records the changes, the evidence, failed commands,
+  remaining uncertainty, and next steps concrete enough for another agent to continue
+  without repeating discovery.

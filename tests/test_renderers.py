@@ -10,7 +10,6 @@ from idac.cli.renderers import (
     render_segment_list,
     render_target_list,
     render_type_declare,
-    render_workspace_init,
     render_xrefs,
 )
 
@@ -231,33 +230,4 @@ def test_render_class_vtable_includes_runtime_section() -> None:
         "runtime:",
         "  symbol: __ZTV3Foo @ 0x1000",
         "       0  sub_100",
-    ]
-
-
-def test_render_workspace_init_lists_created_directories_and_files() -> None:
-    rendered = render_workspace_init(
-        {
-            "display_destination": "workspace",
-            "created": [
-                ".claude/",
-                ".claude/settings.json",
-                "references/",
-                "references/cli.md",
-                ".idac/",
-                ".idac/tmp/",
-            ],
-            "git": {"initialized": True},
-            "next_steps": [],
-        }
-    )
-
-    assert rendered.splitlines() == [
-        "Created workspace/",
-        "  .claude/",
-        "  .claude/settings.json",
-        "  references/",
-        "  references/cli.md",
-        "  .idac/",
-        "  .idac/tmp/",
-        "Initialized git repository.",
     ]

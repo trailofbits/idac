@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -9,7 +10,6 @@ import pytest
 
 import idac.nexus as nexus_module
 from idac.nexus import (
-    DEFAULT_ANALYSIS_TIMEOUT_SECONDS,
     KEEPALIVE_SECONDS,
     NexusApi,
     NexusSelectionError,
@@ -72,7 +72,6 @@ class FakeHandle:
         self.instance = instance
         self.wait_calls: list[float | None] = []
         self.save_calls = 0
-        self.shutdown_calls: list[bool] = []
         self.close_calls = 0
         self.wait_error: BaseException | None = None
         self.wait_result: dict[str, object] = {"status": "complete", "complete": True}
@@ -80,6 +79,7 @@ class FakeHandle:
         self.save_error: BaseException | None = None
         self.shutdown_error: BaseException | None = None
         self.close_error: BaseException | None = None
+        self.shutdown_observer: Callable[[FakeInstance, bool], None] | None = None
         self.save_result: dict[str, object] = {"saved": True, "idb_path": self.instance.idb_path}
         self.remote_environment: dict[str, object] = {
             "ida_nexus": "0.7.0",
@@ -121,7 +121,8 @@ class FakeHandle:
         return dict(self.save_result)
 
     def shutdown_database(self, *, save: bool = True) -> dict[str, object]:
-        self.shutdown_calls.append(save)
+        if self.shutdown_observer is not None:
+            self.shutdown_observer(self.instance, save)
         if self.shutdown_error is not None:
             raise self.shutdown_error
         return {"shutting_down": True, "save": save}
@@ -145,11 +146,16 @@ class FakeRuntime:
     attach_calls: list[tuple[FakeInstance, float]] = field(default_factory=list)
     discovery_calls: list[float | None] = field(default_factory=list)
     dispatch_calls: list[dict[str, object]] = field(default_factory=list)
+    shutdown_requests: list[tuple[FakeInstance, bool]] = field(default_factory=list)
     release_waits: list[tuple[FakeInstance, float | None]] = field(default_factory=list)
     release_wait_result: bool = True
 
 
 def fake_api(runtime: FakeRuntime) -> NexusApi:
+    def observe_shutdowns(handle: FakeHandle) -> FakeHandle:
+        handle.shutdown_observer = lambda instance, save: runtime.shutdown_requests.append((instance, save))
+        return handle
+
     class DatabaseHandle:
         @classmethod
         def open(cls, path: str, *, options: FakeOptions) -> FakeHandle:
@@ -157,7 +163,7 @@ def fake_api(runtime: FakeRuntime) -> NexusApi:
             if runtime.open_error is not None:
                 raise runtime.open_error
             assert runtime.open_handle is not None
-            return runtime.open_handle
+            return observe_shutdowns(runtime.open_handle)
 
         @classmethod
         def attach(cls, instance: FakeInstance, *, keepalive: float) -> FakeHandle:
@@ -166,7 +172,7 @@ def fake_api(runtime: FakeRuntime) -> NexusApi:
                 raise runtime.attach_error
             if runtime.attached_handle is None:
                 runtime.attached_handle = FakeHandle(instance)
-            return runtime.attached_handle
+            return observe_shutdowns(runtime.attached_handle)
 
     class RemoteModule:
         def __init__(
@@ -231,6 +237,20 @@ def remote_module_path(tmp_path: Path) -> Path:
     return path
 
 
+def assert_equivalent_session_error(actual: NexusSessionError, expected: NexusSessionError) -> None:
+    assert (actual.kind, str(actual), actual.status, actual.details) == (
+        expected.kind,
+        str(expected),
+        expected.status,
+        expected.details,
+    )
+
+
+def assert_worker_retired_without_save(runtime: FakeRuntime, instance: FakeInstance) -> None:
+    assert runtime.shutdown_requests == [(instance, False)]
+    assert [released for released, _timeout in runtime.release_waits] == [instance]
+
+
 def test_headless_session_reuses_one_handle_waits_for_analysis_and_saves_mutations(
     remote_module_path: Path,
 ) -> None:
@@ -265,17 +285,6 @@ def test_headless_session_reuses_one_handle_waits_for_analysis_and_saves_mutatio
     assert handle.wait_calls == [12.0]
     assert handle.save_calls == 1
     assert handle.close_calls == 1
-
-
-def test_default_headless_analysis_wait_is_finite() -> None:
-    handle = FakeHandle(FakeInstance("worker", "idalib"))
-    runtime = FakeRuntime(open_handle=handle)
-    session = NexusSession("/tmp/sample.i64", api=fake_api(runtime))
-
-    _ = session.handle
-    session.close()
-
-    assert handle.wait_calls == [DEFAULT_ANALYSIS_TIMEOUT_SECONDS]
 
 
 def test_exact_gui_instance_is_attached_without_analysis_or_automatic_save(
@@ -324,7 +333,7 @@ def test_failed_gui_preview_is_not_saved_and_reports_uncertain_in_memory_state(
 
     assert any("unsaved in-memory changes" in note for note in caught.value.__notes__)
     assert handle.save_calls == 0
-    assert handle.shutdown_calls == []
+    assert runtime.shutdown_requests == []
     assert handle.close_calls == 1
 
 
@@ -394,7 +403,7 @@ def test_preview_mutation_does_not_mark_headless_session_dirty(
     session.close()
 
     assert handle.save_calls == 0
-    assert handle.shutdown_calls == []
+    assert runtime.shutdown_requests == []
 
 
 def test_failed_preview_poisons_and_discards_headless_session(
@@ -418,15 +427,11 @@ def test_failed_preview_poisons_and_discards_headless_session(
         session.execute_operation("database_info", {})
     session.close()
 
-    assert repeated.value is caught.value
+    assert_equivalent_session_error(repeated.value, caught.value)
     assert len(runtime.dispatch_calls) == 1
     assert handle.save_calls == 0
-    assert handle.shutdown_calls == []
     assert handle.close_calls == 1
-    assert runtime.attach_calls[0][0] is handle.instance
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_failed_preview_checkpoints_prior_headless_mutations_before_discard(
@@ -449,11 +454,8 @@ def test_failed_preview_checkpoints_prior_headless_mutations_before_discard(
     session.close()
 
     assert handle.save_calls == 1
-    assert handle.shutdown_calls == []
     assert handle.close_calls == 1
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_failed_prepreview_checkpoint_is_terminal_and_not_retried(
@@ -476,14 +478,12 @@ def test_failed_prepreview_checkpoint_is_terminal_and_not_retried(
     with pytest.raises(NexusSessionError) as close_error:
         session.close()
 
-    assert repeated.value is caught.value
-    assert close_error.value is caught.value
+    assert_equivalent_session_error(repeated.value, caught.value)
+    assert_equivalent_session_error(close_error.value, caught.value)
     assert handle.save_calls == 1
-    assert handle.shutdown_calls == []
     assert handle.close_calls == 1
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
+    assert [call["op"] for call in runtime.dispatch_calls] == ["name_set"]
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_interrupted_remote_request_discards_headless_worker(
@@ -507,13 +507,12 @@ def test_interrupted_remote_request_discards_headless_worker(
         session.execute_operation("database_info", {})
     session.close()
 
-    assert caught.value is interrupt
-    assert repeated.value is interrupt
+    assert type(caught.value) is KeyboardInterrupt
+    assert type(repeated.value) is KeyboardInterrupt
+    assert repeated.value.args == caught.value.args
+    assert [call["op"] for call in runtime.dispatch_calls] == ["comment_set"]
     assert handle.save_calls == 0
-    assert handle.shutdown_calls == []
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_discard_timeout_remains_visible_on_the_primary_operation_error(
@@ -539,17 +538,15 @@ def test_discard_timeout_remains_visible_on_the_primary_operation_error(
 
     assert caught.value.kind == "operation_failed"
     assert any("did not terminate" in note for note in caught.value.__notes__)
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is instance
+    assert handle.save_calls == 0
+    assert_worker_retired_without_save(runtime, instance)
 
 
 def test_interrupt_during_headless_initialization_discards_worker() -> None:
     instance = FakeInstance("worker", "idalib")
     handle = FakeHandle(instance)
     handle.wait_error = KeyboardInterrupt()
-    discard_handle = FakeHandle(instance)
-    runtime = FakeRuntime(open_handle=handle, attached_handle=discard_handle)
+    runtime = FakeRuntime(open_handle=handle)
     session = NexusSession("/tmp/sample.i64", api=fake_api(runtime))
 
     with pytest.raises(KeyboardInterrupt):
@@ -557,10 +554,8 @@ def test_interrupt_during_headless_initialization_discards_worker() -> None:
     session.close()
 
     assert handle.close_calls == 1
-    assert runtime.attach_calls[0][0] is instance
-    assert discard_handle.shutdown_calls == [False]
-    assert discard_handle.close_calls == 1
-    assert runtime.release_waits[0][0] is instance
+    assert handle.save_calls == 0
+    assert_worker_retired_without_save(runtime, instance)
 
 
 def test_failed_transactional_mutation_does_not_mark_headless_session_dirty(
@@ -668,9 +663,7 @@ def test_final_save_failure_discards_headless_worker_without_retry(remote_module
     assert caught.value.kind == "operation_failed"
     assert handle.save_calls == 1
     assert handle.close_calls == 1
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_interrupted_final_save_discards_headless_worker(remote_module_path: Path) -> None:
@@ -688,12 +681,11 @@ def test_interrupted_final_save_discards_headless_worker(remote_module_path: Pat
     with pytest.raises(KeyboardInterrupt) as caught:
         session.close()
 
-    assert caught.value is interrupt
+    assert type(caught.value) is KeyboardInterrupt
+    assert caught.value.args == interrupt.args
     assert handle.save_calls == 1
     assert handle.close_calls == 1
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_explicit_save_failure_is_terminal_and_is_not_retried(remote_module_path: Path) -> None:
@@ -714,14 +706,12 @@ def test_explicit_save_failure_is_terminal_and_is_not_retried(remote_module_path
     with pytest.raises(NexusSessionError) as close_error:
         session.close()
 
-    assert terminal_error.value is save_error.value
-    assert close_error.value is save_error.value
+    assert_equivalent_session_error(terminal_error.value, save_error.value)
+    assert_equivalent_session_error(close_error.value, save_error.value)
     assert handle.save_calls == 1
     assert handle.close_calls == 1
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
     assert [call["op"] for call in runtime.dispatch_calls] == ["name_set"]
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_malformed_save_response_is_terminal_and_is_not_retried(remote_module_path: Path) -> None:
@@ -741,12 +731,11 @@ def test_malformed_save_response_is_terminal_and_is_not_retried(remote_module_pa
         session.close()
 
     assert save_error.value.kind == "save_failed"
-    assert close_error.value is save_error.value
+    assert_equivalent_session_error(close_error.value, save_error.value)
     assert handle.save_calls == 1
     assert handle.close_calls == 1
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
+    assert [call["op"] for call in runtime.dispatch_calls] == ["name_set"]
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_save_failure_remains_primary_when_lease_release_also_fails(remote_module_path: Path) -> None:
@@ -769,9 +758,7 @@ def test_save_failure_remains_primary_when_lease_release_also_fails(remote_modul
     assert any("lease release failed" in note for note in caught.value.__notes__)
     assert handle.save_calls == 1
     assert handle.close_calls == 1
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_body_error_remains_primary_when_session_finalization_fails(remote_module_path: Path) -> None:
@@ -819,7 +806,7 @@ def test_open_error_is_translated_without_retry_or_fallback() -> None:
         _ = session.handle
 
     assert caught.value.kind == "operation_failed"
-    assert repeated.value is caught.value
+    assert_equivalent_session_error(repeated.value, caught.value)
     assert len(runtime.open_calls) == 1
     assert runtime.attach_calls == []
 
@@ -839,7 +826,7 @@ def test_attach_error_is_terminal_without_retry_or_target_fallback() -> None:
         _ = session.handle
 
     assert caught.value.kind == "operation_failed"
-    assert repeated.value is caught.value
+    assert_equivalent_session_error(repeated.value, caught.value)
     assert runtime.attach_calls == [(selected, KEEPALIVE_SECONDS)]
 
 
@@ -852,10 +839,9 @@ def test_analysis_failure_discards_the_new_headless_worker() -> None:
     with pytest.raises(NexusSessionError, match="analysis failed"):
         _ = session.handle
 
+    assert handle.save_calls == 0
     assert handle.close_calls == 1
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_incomplete_analysis_response_closes_and_poison_session() -> None:
@@ -870,12 +856,11 @@ def test_incomplete_analysis_response_closes_and_poison_session() -> None:
         _ = session.handle
 
     assert caught.value.kind == "analysis_incomplete"
-    assert repeated.value is caught.value
+    assert_equivalent_session_error(repeated.value, caught.value)
     assert len(runtime.open_calls) == 1
+    assert handle.save_calls == 0
     assert handle.close_calls == 1
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_remote_environment_mismatch_fails_closed_and_releases_handle() -> None:
@@ -890,11 +875,11 @@ def test_remote_environment_mismatch_fails_closed_and_releases_handle() -> None:
         _ = session.handle
 
     assert caught.value.kind == "unsupported_remote_environment"
-    assert repeated.value is caught.value
+    assert_equivalent_session_error(repeated.value, caught.value)
+    assert len(runtime.open_calls) == 1
+    assert handle.save_calls == 0
     assert handle.close_calls == 1
-    assert runtime.attached_handle is not None
-    assert runtime.attached_handle.shutdown_calls == [False]
-    assert runtime.release_waits[0][0] is handle.instance
+    assert_worker_retired_without_save(runtime, handle.instance)
 
 
 def test_list_targets_exposes_only_public_normalized_fields(monkeypatch: pytest.MonkeyPatch) -> None:

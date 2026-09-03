@@ -1,21 +1,16 @@
-# Generic prototype cleanup pass
+# Generic prototype commit pass
 #
-# Use this after support types already exist locally.
+# Run only after prototype-preview.idac has completed against the same target and you
+# have inspected every preview's before/after data.
 # Prefer addresses or mangled names for overloaded functions.
-# Keep declarations parser-friendly and verify each one with:
-#   idac function prototype show <function>
-#   idac function prototype check <function> --decl "..."
 # Then run:
 #   idac batch prototype-pass.idac --lint --out /tmp/prototype-pass.lint.json
-#   idac batch prototype-pass.idac --out /tmp/prototype-pass.json
+#   idac batch prototype-pass.idac --fail-fast --out /tmp/prototype-pass.json
 #   idac decompile <function> --f5
 
-function prototype check 0x100000000 --decl "int __fastcall ExampleClass__parseHeader(ExampleClass *__hidden this, const unsigned __int8 *buf, unsigned int len)"
 function prototype set 0x100000000 --decl "int __fastcall ExampleClass__parseHeader(ExampleClass *__hidden this, const unsigned __int8 *buf, unsigned int len)"
 misc reanalyze 0x100000000
-function prototype check 0x100000100 --decl "void *__fastcall ExampleClass__buildResult(ExampleClass *__hidden this, InputContext *ctx, const ExampleOptions *options)"
 function prototype set 0x100000100 --decl "void *__fastcall ExampleClass__buildResult(ExampleClass *__hidden this, InputContext *ctx, const ExampleOptions *options)"
 misc reanalyze 0x100000100
-function prototype check 0x100000200 --decl "unsigned int __fastcall ExampleClass__getCount(const ExampleClass *__hidden this)"
 function prototype set 0x100000200 --decl "unsigned int __fastcall ExampleClass__getCount(const ExampleClass *__hidden this)"
 misc reanalyze 0x100000200

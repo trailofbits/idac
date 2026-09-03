@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from .paths import skill_reference_source_dir, workspace_template_source_dir
+from .paths import workspace_template_source_dir
 
 _WORKSPACE_MARKER = ".idac"
 _WORKSPACE_TMP = ".idac/tmp"
@@ -159,16 +159,6 @@ def initialize_workspace(dest: Path, *, force: bool = False) -> dict[str, Any]:
     created.extend(template_created)
     overwritten.extend(template_overwritten)
 
-    reference_created, reference_overwritten = _copy_tree(
-        skill_reference_source_dir(),
-        destination / "references",
-        tracking_root=destination,
-        force=force,
-        workspace_exists=workspace_exists,
-    )
-    created.extend(reference_created)
-    overwritten.extend(reference_overwritten)
-
     tmp_dir = destination / _WORKSPACE_TMP
     created.extend(_ensure_directory(tmp_dir, root=destination))
 
@@ -189,7 +179,7 @@ def initialize_workspace(dest: Path, *, force: bool = False) -> dict[str, Any]:
             "repo_root": str(repo_root),
         },
         "next_steps": [
-            "Run `idac setup skill` if you haven't already",
+            "Install the idac plugin in Claude Code if you haven't already",
             "Edit AGENTS.md to set your default target",
             "Commit when the workspace looks right",
         ],

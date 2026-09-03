@@ -195,7 +195,12 @@ def test_local_selector_conflicts_fail_before_dispatch(
     assert all(not session.calls for session in capture_nexus.instances)
 
 
-def test_decompilemany_modes_reach_operations(database: Path, capture_nexus, tmp_path: Path, capsys) -> None:
+def test_decompilemany_writes_requested_artifacts_and_manifest(
+    database: Path,
+    capture_nexus,
+    tmp_path: Path,
+    capsys,
+) -> None:
     out_dir = tmp_path / "out"
 
     assert (
@@ -216,15 +221,25 @@ def test_decompilemany_modes_reach_operations(database: Path, capture_nexus, tmp
         == 0
     )
 
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["pattern"] == "demo"
+    assert manifest["functions_total"] == 1
+    assert manifest["functions_succeeded"] == 1
+    assert manifest["functions_failed"] == 0
+
+    [function] = manifest["functions"]
+    assert function["identifier"] == "demo"
+    assert function["ok"] is True
+    assert set(function["artifacts"]) == {"decompile", "disasm", "ctree"}
+    for kind, path in function["artifacts"].items():
+        assert Path(path).read_text(encoding="utf-8") == f"{kind} output\n"
+
     calls = capture_nexus.instances[0].calls
-    assert calls[0] == {
+    assert {
         "op": "function_list",
         "params": {"pattern": "demo", "regex": True, "ignore_case": False},
-    }
-    assert calls[1]["op"] == "decompile"
-    assert calls[1]["params"] == {"identifier": "demo", "no_cache": True}
-    assert [call["op"] for call in calls[2:]] == ["disasm", "ctree"]
-    assert (out_dir / "manifest.json").is_file()
+    } in calls
+    assert {"op": "decompile", "params": {"identifier": "demo", "no_cache": True}} in calls
     capsys.readouterr()
 
 

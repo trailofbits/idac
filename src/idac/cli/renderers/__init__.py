@@ -693,7 +693,6 @@ def render_workspace_init(value: Any) -> str:
 
 TEXT_RENDERERS: dict[str, Callable[[Any], str]] = {
     "doctor": render_doctor,
-    "docs": render_lines,
     "list_targets": render_target_list,
     "database_info": render_database_info,
     "db_save": _fallback,
@@ -754,7 +753,6 @@ TEXT_RENDERERS: dict[str, Callable[[Any], str]] = {
     "decompile_bulk": render_decompile_bulk,
     "workspace_init": render_workspace_init,
     "setup_gui": _fallback,
-    "skill_install": _fallback,
 }
 
 

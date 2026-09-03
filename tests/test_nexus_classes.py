@@ -90,9 +90,13 @@ def test_nexus_type_declare_replace_with_fixture_class_header(
 ) -> None:
     database = copy_database(handler_hierarchy_stripped_database)
     _declare_handler_types(idac_cmd, idac_env, database, handler_hierarchy_types)
-    replace_decl = handler_hierarchy_types.read_text(encoding="utf-8").replace(
-        "bool has_result;",
-        "bool has_result;\n  unsigned debug_cookie;",
+    original_decl = handler_hierarchy_types.read_text(encoding="utf-8")
+    fixture_member = "bool has_result;"
+    assert fixture_member in original_decl, "class fixture no longer contains the member used by this replacement test"
+    replace_decl = original_decl.replace(
+        fixture_member,
+        f"{fixture_member}\n  unsigned debug_cookie;",
+        1,
     )
 
     payload = run_nexus_json(

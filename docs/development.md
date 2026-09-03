@@ -27,7 +27,7 @@ uv run idac setup gui
 uv run idac doctor
 ```
 
-`setup gui` delegates installation to pinned `ida-hcli==0.19.2` and installs the
+`setup gui` delegates installation to pinned `ida-hcli==0.20.1` and installs the
 `ida-nexus` v0.7.0 release with ida-domain 0.5.1. Do not copy integration files into
 IDA by hand.
 

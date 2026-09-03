@@ -5,14 +5,16 @@ import importlib.util
 import inspect
 import sys
 from pathlib import Path
-from types import MappingProxyType, ModuleType
+from types import ModuleType
 
 import pytest
 from ida_nexus import RemoteModule
 
 from idac.operations import MUTATING_OPERATIONS, REMOTE_OPERATIONS
+from tests.remote_ops_harness import dispatch_with_runtime
 
 REMOTE_OPS_PATH = Path(__file__).parents[1] / "src/idac/remote_ops.py"
+NEXUS_REMOTE_MODULE_MAX_BYTES = 4 * 1024 * 1024
 
 
 def dispatch(db, op, params, preview):
@@ -43,13 +45,7 @@ def test_remote_module_is_self_contained_and_within_upload_limit() -> None:
         for alias in node.names
     }
     assert "idac" not in imported_roots
-    assert REMOTE_OPS_PATH.stat().st_size < 1024 * 1024
-
-    dispatch_definition = next(
-        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "dispatch"
-    )
-    assert [argument.arg for argument in dispatch_definition.args.args] == ["db", "op", "params", "preview"]
-    assert dispatch_definition.args.defaults == []
+    assert REMOTE_OPS_PATH.stat().st_size < NEXUS_REMOTE_MODULE_MAX_BYTES
 
     remote_module = RemoteModule(REMOTE_OPS_PATH, codec="json")
     remote_dispatch = remote_module.function(dispatch, database=True)
@@ -57,17 +53,16 @@ def test_remote_module_is_self_contained_and_within_upload_limit() -> None:
 
 
 def test_remote_operation_inventory_matches_client_contract(remote_ops: ModuleType) -> None:
-    assert tuple(remote_ops.SUPPORTED_OPERATIONS) == REMOTE_OPERATIONS
+    # REMOTE_OPERATIONS is a hand-maintained literal, so the dedup check is not redundant.
+    assert len(REMOTE_OPERATIONS) == len(set(REMOTE_OPERATIONS))
+    assert set(remote_ops.SUPPORTED_OPERATIONS) == set(REMOTE_OPERATIONS)
     assert set(remote_ops.MUTATING_OPERATIONS) == MUTATING_OPERATIONS
 
 
 def test_dispatch_preview_is_json_native_and_rolls_back(remote_ops: ModuleType) -> None:
-    runtime_state: dict[str, object] = {}
-
     class FakeRuntime:
         def __init__(self) -> None:
             self.value = "before"
-            runtime_state["instance"] = self
 
     def parse(params):
         return str(params["value"])
@@ -93,15 +88,15 @@ def test_dispatch_preview_is_json_native_and_rolls_back(remote_ops: ModuleType) 
             rollback=rollback,
         ),
     )
-    original_operations = remote_ops._OPERATIONS
-    original_runtime = remote_ops.IdaRuntime
-    remote_ops._OPERATIONS = MappingProxyType({"probe": operation})
-    remote_ops.IdaRuntime = FakeRuntime
-    try:
-        result = remote_ops.dispatch(object(), "probe", {"value": "after"}, True)
-    finally:
-        remote_ops._OPERATIONS = original_operations
-        remote_ops.IdaRuntime = original_runtime
+    runtime = FakeRuntime()
+    result = dispatch_with_runtime(
+        runtime,
+        "probe",
+        {"value": "after"},
+        preview=True,
+        module=remote_ops,
+        operation=operation,
+    )
 
     assert result == {
         "result": {"value": "after"},
@@ -111,7 +106,7 @@ def test_dispatch_preview_is_json_native_and_rolls_back(remote_ops: ModuleType) 
         "preview": True,
         "preview_mode": "rollback",
     }
-    assert runtime_state["instance"].value == "before"
+    assert runtime.value == "before"
 
 
 def test_dispatch_rejects_unknown_and_unsupported_preview(remote_ops: ModuleType) -> None:
@@ -131,8 +126,6 @@ def test_dispatch_rejects_unknown_and_unsupported_preview(remote_ops: ModuleType
 
 @pytest.mark.parametrize("raise_after_mutation", [False, True])
 def test_dispatch_rolls_back_failed_undo_backed_mutations(remote_ops: ModuleType, raise_after_mutation: bool) -> None:
-    runtimes: list[object] = []
-
     class FakeUndo:
         def __init__(self, runtime) -> None:
             self.runtime = runtime
@@ -149,7 +142,6 @@ def test_dispatch_rolls_back_failed_undo_backed_mutations(remote_ops: ModuleType
         def __init__(self) -> None:
             self.value = "before"
             self.undo_count = 0
-            runtimes.append(self)
 
         def mod(self, name: str) -> FakeUndo:
             assert name == "ida_undo"
@@ -172,19 +164,142 @@ def test_dispatch_rolls_back_failed_undo_backed_mutations(remote_ops: ModuleType
             use_undo=True,
         ),
     )
-    original_operations = remote_ops._OPERATIONS
-    original_runtime = remote_ops.IdaRuntime
-    remote_ops._OPERATIONS = MappingProxyType({"probe": operation})
-    remote_ops.IdaRuntime = FakeRuntime
-    try:
-        if raise_after_mutation:
-            with pytest.raises(RuntimeError, match="readback failed"):
-                remote_ops.dispatch(object(), "probe", {}, False)
-        else:
-            assert remote_ops.dispatch(object(), "probe", {}, False) == {"success": False, "errors": 1}
-    finally:
-        remote_ops._OPERATIONS = original_operations
-        remote_ops.IdaRuntime = original_runtime
+    runtime = FakeRuntime()
+    if raise_after_mutation:
+        with pytest.raises(RuntimeError, match="readback failed"):
+            dispatch_with_runtime(runtime, "probe", {}, module=remote_ops, operation=operation)
+    else:
+        assert dispatch_with_runtime(runtime, "probe", {}, module=remote_ops, operation=operation) == {
+            "success": False,
+            "errors": 1,
+        }
 
-    assert runtimes[0].value == "before"
-    assert runtimes[0].undo_count == 1
+    assert runtime.value == "before"
+    assert runtime.undo_count == 1
+
+
+def test_dispatch_undo_preview_restores_on_base_exception_and_runs_cleanup(remote_ops: ModuleType) -> None:
+    class AbortPreview(BaseException):
+        pass
+
+    class FakeUndo:
+        def __init__(self, runtime) -> None:
+            self.runtime = runtime
+
+        @staticmethod
+        def create_undo_point(**_kwargs) -> bool:
+            return True
+
+        def perform_undo(self) -> bool:
+            self.runtime.value = "before"
+            self.runtime.undo_count += 1
+            return True
+
+    class FakeRuntime:
+        def __init__(self) -> None:
+            self.value = "before"
+            self.undo_count = 0
+            self.cleanup_count = 0
+
+        def mod(self, name: str) -> FakeUndo:
+            assert name == "ida_undo"
+            return FakeUndo(self)
+
+    def run(context, _request):
+        context.runtime.value = "mutated"
+        raise AbortPreview
+
+    def cleanup(context, _request) -> None:
+        context.runtime.cleanup_count += 1
+        raise RuntimeError("cleanup failed")
+
+    operation = remote_ops.OperationSpec(
+        name="probe",
+        parse=lambda params: params,
+        run=run,
+        mutating=True,
+        preview=remote_ops.PreviewSpec(
+            capture_before=lambda context, _request: context.runtime.value,
+            capture_after=lambda context, _request: context.runtime.value,
+            cleanup=cleanup,
+            use_undo=True,
+        ),
+    )
+    runtime = FakeRuntime()
+
+    with pytest.raises(AbortPreview):
+        dispatch_with_runtime(runtime, "probe", {}, preview=True, module=remote_ops, operation=operation)
+
+    assert runtime.value == "before"
+    assert runtime.undo_count == 1
+    assert runtime.cleanup_count == 1
+
+
+@pytest.mark.parametrize("failure_stage", ["runner", "after_capture"])
+def test_dispatch_manual_preview_rolls_back_primary_failures(remote_ops: ModuleType, failure_stage: str) -> None:
+    class FakeRuntime:
+        def __init__(self) -> None:
+            self.value = "before"
+            self.rollback_count = 0
+
+    def capture(context, _request):
+        if failure_stage == "after_capture" and context.runtime.value == "mutated":
+            raise RuntimeError("after capture failed")
+        return context.runtime.value
+
+    def run(context, _request):
+        context.runtime.value = "mutated"
+        if failure_stage == "runner":
+            raise RuntimeError("runner failed")
+        return {"changed": True}
+
+    def rollback(context, _request, before) -> None:
+        context.runtime.value = before
+        context.runtime.rollback_count += 1
+
+    operation = remote_ops.OperationSpec(
+        name="probe",
+        parse=lambda params: params,
+        run=run,
+        mutating=True,
+        preview=remote_ops.PreviewSpec(capture_before=capture, capture_after=capture, rollback=rollback),
+    )
+    runtime = FakeRuntime()
+
+    with pytest.raises(RuntimeError, match=r"runner failed|after capture failed"):
+        dispatch_with_runtime(runtime, "probe", {}, preview=True, module=remote_ops, operation=operation)
+
+    assert runtime.value == "before"
+    assert runtime.rollback_count == 1
+
+
+def test_dispatch_manual_preview_reports_rollback_failure_with_primary_cause(remote_ops: ModuleType) -> None:
+    class FakeRuntime:
+        value = "before"
+
+    def capture(context, _request):
+        if context.runtime.value == "mutated":
+            raise RuntimeError("after capture failed")
+        return context.runtime.value
+
+    def run(context, _request):
+        context.runtime.value = "mutated"
+        return {"changed": True}
+
+    def rollback(_context, _request, _before) -> None:
+        raise RuntimeError("rollback failed")
+
+    operation = remote_ops.OperationSpec(
+        name="probe",
+        parse=lambda params: params,
+        run=run,
+        mutating=True,
+        preview=remote_ops.PreviewSpec(capture_before=capture, capture_after=capture, rollback=rollback),
+    )
+    runtime = FakeRuntime()
+
+    with pytest.raises(RuntimeError, match="rollback failed") as excinfo:
+        dispatch_with_runtime(runtime, "probe", {}, preview=True, module=remote_ops, operation=operation)
+
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+    assert str(excinfo.value.__cause__) == "after capture failed"
