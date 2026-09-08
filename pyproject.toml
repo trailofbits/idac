@@ -11,7 +11,7 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "ida-domain==0.5.1",
-    "ida-hcli==0.20.1",
+    "ida-hcli==0.21.0",
     "ida-nexus==0.7.0",
 ]
 
@@ -38,8 +38,6 @@ build-backend = "uv_build"
 
 [tool.uv]
 default-groups = ["dev"]
-exclude-newer = "1 week"
-exclude-newer-package = { ida-nexus = "2026-08-21", ida-hcli = "2026-08-27" }
 
 [tool.ruff]
 line-length = 120
