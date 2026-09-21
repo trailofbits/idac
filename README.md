@@ -101,20 +101,23 @@ READY Nexus instance.
 
 ## Quick start
 
-Install the CLI from [PyPI](https://pypi.org/project/idac/), then install the pinned
+Install the CLI from [PyPI](https://pypi.org/project/idac/), then install the matching
 GUI integration:
 
 ```bash
 uv tool install idac         # installs the `idac` command on your PATH
-idac setup gui               # ida-nexus 0.7.0 via ida-hcli
-idac doctor                  # verify the exact local and in-IDA stack
+idac setup gui               # GUI plugin matching the installed ida-nexus client
+idac doctor                  # report local versions and check the IDA environment
 ```
 
 For the agent guidance, install the Agent Plugin (see [Agent plugin](#agent-plugin)).
 
-`ida-hcli==0.20.1` is an exact `idac` runtime dependency. Setup and diagnostics
+`ida-hcli>=0.24.0` is an `idac` runtime dependency. Setup and diagnostics
 run it through `idac`'s Python environment; they do not require `uvx` or a
-separately installed HCLI executable.
+separately installed HCLI executable. Runtime dependencies use minimum versions;
+`uv.lock` records the resolved versions for reproducible development installs.
+`setup gui` selects the release matching the installed Nexus client and lets the
+installer resolve ida-domain within the declared requirement.
 
 To install the latest development version straight from git instead:
 
@@ -146,14 +149,14 @@ To run from a checkout without installing globally, use `uv run idac --help`.
 - **IDA Pro 9.4+** with the **Hex-Rays decompiler** for `decompile`, `ctree`,
   and class recovery.
 - A valid IDA license and an IDA Python environment on Python 3.11 or newer.
-- The exact supported runtime: `ida-nexus==0.7.0` (protocol 6) and
-  `ida-domain==0.5.1`.
-  They are pinned by the `idac` package; install the matching GUI component with
+- `ida-nexus>=0.7.0` and `ida-domain>=0.5.1`, installed as dependencies of `idac`.
+  Install the matching GUI component with
   `idac setup gui`.
 
-Run `idac doctor` to validate the CLI packages, installed GUI component, Nexus
-discovery, and the runtime versions inside every ready IDA instance. Version or
-protocol mismatches are hard errors; `idac` does not fall back to another backend.
+Run `idac doctor` to report CLI package versions and check the installed GUI
+component, Nexus discovery, and the runtime inside every ready IDA instance.
+Remote runtimes must satisfy the package requirements, and Nexus enforces protocol
+compatibility. `idac` does not fall back to another backend.
 
 ## How it works
 

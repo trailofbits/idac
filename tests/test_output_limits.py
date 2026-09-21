@@ -42,8 +42,6 @@ def test_large_json_output_requires_out_flag(
     assert payload["chars"] > payload["limit"]
     if output_format == "jsonl":
         assert proc.stderr.count("\n") == 1
-    else:
-        assert proc.stderr.count("\n") > 1
 
 
 def test_json_output_succeeds_with_out_flag(

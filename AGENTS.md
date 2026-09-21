@@ -12,7 +12,7 @@ Most implementation lives under `src/idac`:
 - `src/idac/nexus.py`: public ida-nexus discovery, selection, lifecycle, compatibility, and execution boundary
 - `src/idac/remote_ops.py`: the self-contained operation module uploaded through `ida_nexus.RemoteModule`
 - `src/idac/operations.py`: the retained public operation inventory
-- `src/idac/doctor.py` and `src/idac/setup.py`: exact-stack diagnostics and installation
+- `src/idac/doctor.py` and `src/idac/setup.py`: environment diagnostics and GUI installation
 - `tests/`: CLI and backend coverage
 - `fixtures/`: committed binaries, databases, logs, and source used by tests
 - `docs/` and `plugins/idac/skills/idac/`: user-facing command docs and agent-oriented usage guidance
@@ -86,7 +86,7 @@ When changing Nexus behavior:
 
 - use only supported public `ida_nexus` Python exports; do not read its private registry, issue raw HTTP requests, or add MCP/legacy fallbacks
 - preserve exact READY-record selection, one session per top-level command, a 300-second lease keepalive, headless autoanalysis, and headless save-on-successful-mutation semantics
-- validate the pinned remote stack before dispatch and fail closed on any mismatch
+- validate the remote environment against declared dependency requirements before dispatch; let the package installer enforce local dependencies
 - add or update `tests/test_nexus_session.py` and the optional `nexus_gui_live` coverage when lifecycle behavior changes
 
 ## Fixtures

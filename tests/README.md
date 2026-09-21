@@ -9,7 +9,7 @@ Test layout:
   result-shape, and operation semantics
 - fixture-backed integration tests: real Nexus-managed IDA workers, including raw
   binary import, mutation, type, local, class, and vtable behavior
-- `test_doctor.py` and `test_setup.py`: exact-stack diagnosis and pinned setup commands
+- `test_doctor.py` and `test_setup.py`: stack diagnosis and GUI installation behavior
 
 Running tests:
 
@@ -26,8 +26,8 @@ Fixture notes:
   and vtable flows.
 - Tests open copied databases or temporary fixture binaries so each case can mutate
   safely.
-- Headless integration requires Python 3.11+, IDA 9.4+, `ida-nexus==0.7.0`
-  (protocol 6), and `ida-domain==0.5.1`.
+- Headless integration requires Python 3.11+, IDA 9.4+, `ida-nexus>=0.7.0`,
+  and `ida-domain>=0.5.1`.
 
 Optional live Nexus GUI tests are skipped by default. Start a matching IDA session and
 select its exact record ID from `idac targets list --json`, and enable them with:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+from importlib import metadata
 from typing import Any
 
-IDA_NEXUS_VERSION = "0.7.0"
-IDA_DOMAIN_VERSION = "0.5.1"
-IDA_HCLI_VERSION = "0.20.1"
+from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
+from packaging.version import InvalidVersion
+
 MINIMUM_PYTHON_VERSION = (3, 11)
 MINIMUM_IDA_VERSION = (9, 4)
 
@@ -23,14 +25,28 @@ result = {
 """.strip()
 
 
+def runtime_requirements() -> dict[str, SpecifierSet]:
+    """Read supported runtime versions from idac's installed package metadata."""
+    return {
+        requirement.name: requirement.specifier
+        for dependency in metadata.requires("idac") or ()
+        if (requirement := Requirement(dependency)).name in {"ida-nexus", "ida-domain"}
+    }
+
+
 def compatibility_mismatches(environment: dict[str, Any]) -> list[str]:
     """Describe every way a remote IDA runtime violates idac's supported stack."""
 
     mismatches: list[str] = []
-    if environment.get("ida_nexus") != IDA_NEXUS_VERSION:
-        mismatches.append(f"ida-nexus must be exactly {IDA_NEXUS_VERSION}")
-    if environment.get("ida_domain") != IDA_DOMAIN_VERSION:
-        mismatches.append(f"ida-domain must be exactly {IDA_DOMAIN_VERSION}")
+    requirements = runtime_requirements()
+    for distribution in ("ida-nexus", "ida-domain"):
+        expected = requirements[distribution]
+        try:
+            supported = str(environment.get(distribution.replace("-", "_")) or "") in expected
+        except InvalidVersion:
+            supported = False
+        if not supported:
+            mismatches.append(f"{distribution} must satisfy {expected}")
 
     for label, value, minimum in (
         ("IDA", environment.get("ida"), MINIMUM_IDA_VERSION),
@@ -45,11 +61,9 @@ def compatibility_mismatches(environment: dict[str, Any]) -> list[str]:
 
 
 __all__ = [
-    "IDA_DOMAIN_VERSION",
-    "IDA_HCLI_VERSION",
-    "IDA_NEXUS_VERSION",
     "MINIMUM_IDA_VERSION",
     "MINIMUM_PYTHON_VERSION",
     "REMOTE_ENVIRONMENT_CODE",
     "compatibility_mismatches",
+    "runtime_requirements",
 ]

@@ -223,7 +223,7 @@ wheels = [
 
 [[package]]
 name = "ida-hcli"
-version = "0.21.0"
+version = "0.24.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -239,9 +239,9 @@ dependencies = [
     { name = "semantic-version" },
     { name = "tenacity" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/43/1f/8c27486ed06a2651f3209031b72bd8e1960d36bee1d68352525a85904998/ida_hcli-0.21.0.tar.gz", hash = "sha256:3896bdd17f4ff42dc0b3dd11ce88bc57d30a7254cbb0fd51c60f00afbb00ed33", size = 194362, upload-time = "2026-09-03T16:21:37.296Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e1/e5/d96aefc8a156fe9a6a683abc4e2575b0664e9230c6547212d59c32d1646f/ida_hcli-0.24.0.tar.gz", hash = "sha256:c2ccc7bf37505d59199c89c8d5d3b211f1c29832d5dd699b5ad9996d65024dd4", size = 224355, upload-time = "2026-09-14T07:21:38.583Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/05/a7/c7956acb376c3e7c8ce30c0d2df036822df09bbde295ae26c5344e68bb08/ida_hcli-0.21.0-py3-none-any.whl", hash = "sha256:e0a791069aec731af8d08f04223cfc9e8792b3f8f0977e12c6f6cfc4575e8826", size = 242522, upload-time = "2026-09-03T16:21:38.434Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/fb/9d67be1c2091e8ee44ed80e870b56e6723f6e11f2b15c5d2b69fe657e681/ida_hcli-0.24.0-py3-none-any.whl", hash = "sha256:327ae77d92bb50eb06e4912e5c5b0f24be9dbafe2c7614e1abcb61cb93fad05d", size = 276847, upload-time = "2026-09-14T07:21:37.011Z" },
 ]
 
 [[package]]
@@ -266,6 +266,7 @@ dependencies = [
     { name = "ida-domain" },
     { name = "ida-hcli" },
     { name = "ida-nexus" },
+    { name = "packaging" },
 ]
 
 [package.dev-dependencies]
@@ -286,9 +287,10 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ida-domain", specifier = "==0.5.1" },
-    { name = "ida-hcli", specifier = "==0.21.0" },
-    { name = "ida-nexus", specifier = "==0.7.0" },
+    { name = "ida-domain", specifier = ">=0.5.1" },
+    { name = "ida-hcli", specifier = ">=0.24.0" },
+    { name = "ida-nexus", specifier = ">=0.7.0" },
+    { name = "packaging" },
 ]
 
 [package.metadata.requires-dev]

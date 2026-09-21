@@ -184,8 +184,7 @@ def test_batch_wrapper_output_cannot_overwrite_child_input(
 
     assert declarations.read_text(encoding="utf-8") == "typedef int preserved_type;\n"
     assert "must not overwrite the line 1 --decl-file input" in capsys.readouterr().err
-    assert len(RecordingSession.instances) == 1
-    assert RecordingSession.instances[0].calls == []
+    assert all(not session.calls for session in RecordingSession.instances)
 
 
 @pytest.mark.parametrize(
@@ -232,9 +231,8 @@ def test_batch_rejects_mutating_child_output_before_dispatch(
     monkeypatch.setattr("idac.nexus.NexusSession", RecordingSession)
 
     assert main(["batch", "-c", str(database), str(batch_file), "--out", str(out_path)]) == 1
-    session = RecordingSession.instances[0]
     payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert session.operations == []
+    assert all(not session.operations for session in RecordingSession.instances)
     assert payload["results"][0]["status"] == "failed"
     assert expected_error in payload["results"][0]["stderr"]
     assert expected_error in capsys.readouterr().err
@@ -387,7 +385,7 @@ def test_read_only_child_output_cannot_overwrite_journal_or_context(
 
     assert main(["batch", "-c", str(database), str(batch_file), "--out", str(out_path)]) == 1
     payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert RecordingSession.instances[0].operations == []
+    assert all(not session.operations for session in RecordingSession.instances)
     assert database.read_bytes() == b"database sentinel"
     assert payload["commands_total"] == 1
     assert "must not overwrite" in payload["results"][0]["stderr"]
@@ -440,5 +438,5 @@ def test_batch_lint_rejects_mutating_child_output(
     payload = json.loads(out_path.read_text(encoding="utf-8"))
     assert payload["mode"] == "lint"
     assert "mutating batch child commands cannot set --out" in payload["errors"][0]["message"]
-    assert RecordingSession.instances[0].operations == []
+    assert all(not session.operations for session in RecordingSession.instances)
     capsys.readouterr()

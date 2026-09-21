@@ -2,8 +2,8 @@
 
 ## Local setup
 
-`idac` requires Python 3.11 or newer and pins its IDA integration stack to
-`ida-nexus==0.7.0` (protocol 6) and `ida-domain==0.5.1`.
+`idac` requires Python 3.11 or newer, `ida-nexus>=0.7.0`, and
+`ida-domain>=0.5.1`. `uv.lock` records the resolved development dependencies.
 
 ```bash
 uv sync
@@ -27,9 +27,12 @@ uv run idac setup gui
 uv run idac doctor
 ```
 
-`setup gui` delegates installation to pinned `ida-hcli==0.20.1` and installs the
-`ida-nexus` v0.7.0 release with ida-domain 0.5.1. Do not copy integration files into
-IDA by hand.
+`setup gui` delegates installation to HCLI and selects the GUI release matching
+the installed Nexus client. It passes the declared ida-domain requirement to the
+installer. Its JSON result reports `ida_domain_requirement` rather than claiming
+a particular ida-domain version was installed. Do not copy integration files into
+IDA by hand. `doctor` reports local package versions; remote IDA environments must
+satisfy the runtime requirements declared in package metadata.
 
 ## Testing
 
@@ -163,5 +166,6 @@ desktop session.
 ## Continuous integration
 
 Pull requests run lint and the no-IDA unit suite. Merge-queue runs additionally install
-IDA 9.4 and execute the complete Nexus integration suite. Keep the pinned client,
-in-IDA component, and ida-domain version synchronized whenever this baseline changes.
+IDA 9.4 and execute the complete Nexus integration suite. Refresh the GUI component
+with `idac setup gui` when updating Nexus, and validate changes to the resolved stack
+with the integration suite.

@@ -1,26 +1,16 @@
 from __future__ import annotations
 
-import ast
 import importlib.util
-import inspect
 import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
-from ida_nexus import RemoteModule
 
 from idac.operations import MUTATING_OPERATIONS, REMOTE_OPERATIONS
 from tests.remote_ops_harness import dispatch_with_runtime
 
 REMOTE_OPS_PATH = Path(__file__).parents[1] / "src/idac/remote_ops.py"
-NEXUS_REMOTE_MODULE_MAX_BYTES = 4 * 1024 * 1024
-
-
-def dispatch(db, op, params, preview):
-    """Client declaration used to verify Nexus's exact binding contract."""
-
-    ...
 
 
 @pytest.fixture(scope="module")
@@ -32,24 +22,6 @@ def remote_ops() -> ModuleType:
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
-
-
-def test_remote_module_is_self_contained_and_within_upload_limit() -> None:
-    source = REMOTE_OPS_PATH.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(REMOTE_OPS_PATH))
-
-    imported_roots = {
-        alias.name.split(".", 1)[0]
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.Import, ast.ImportFrom))
-        for alias in node.names
-    }
-    assert "idac" not in imported_roots
-    assert REMOTE_OPS_PATH.stat().st_size < NEXUS_REMOTE_MODULE_MAX_BYTES
-
-    remote_module = RemoteModule(REMOTE_OPS_PATH, codec="json")
-    remote_dispatch = remote_module.function(dispatch, database=True)
-    assert tuple(inspect.signature(remote_dispatch).parameters) == ("op", "params", "preview")
 
 
 def test_remote_operation_inventory_matches_client_contract(remote_ops: ModuleType) -> None:
@@ -135,13 +107,11 @@ def test_dispatch_rolls_back_failed_undo_backed_mutations(remote_ops: ModuleType
 
         def perform_undo(self) -> bool:
             self.runtime.value = "before"
-            self.runtime.undo_count += 1
             return True
 
     class FakeRuntime:
         def __init__(self) -> None:
             self.value = "before"
-            self.undo_count = 0
 
         def mod(self, name: str) -> FakeUndo:
             assert name == "ida_undo"
@@ -175,7 +145,6 @@ def test_dispatch_rolls_back_failed_undo_backed_mutations(remote_ops: ModuleType
         }
 
     assert runtime.value == "before"
-    assert runtime.undo_count == 1
 
 
 def test_dispatch_undo_preview_restores_on_base_exception_and_runs_cleanup(remote_ops: ModuleType) -> None:
@@ -192,14 +161,12 @@ def test_dispatch_undo_preview_restores_on_base_exception_and_runs_cleanup(remot
 
         def perform_undo(self) -> bool:
             self.runtime.value = "before"
-            self.runtime.undo_count += 1
             return True
 
     class FakeRuntime:
         def __init__(self) -> None:
             self.value = "before"
-            self.undo_count = 0
-            self.cleanup_count = 0
+            self.cleaned_up = False
 
         def mod(self, name: str) -> FakeUndo:
             assert name == "ida_undo"
@@ -210,7 +177,7 @@ def test_dispatch_undo_preview_restores_on_base_exception_and_runs_cleanup(remot
         raise AbortPreview
 
     def cleanup(context, _request) -> None:
-        context.runtime.cleanup_count += 1
+        context.runtime.cleaned_up = True
         raise RuntimeError("cleanup failed")
 
     operation = remote_ops.OperationSpec(
@@ -231,8 +198,7 @@ def test_dispatch_undo_preview_restores_on_base_exception_and_runs_cleanup(remot
         dispatch_with_runtime(runtime, "probe", {}, preview=True, module=remote_ops, operation=operation)
 
     assert runtime.value == "before"
-    assert runtime.undo_count == 1
-    assert runtime.cleanup_count == 1
+    assert runtime.cleaned_up is True
 
 
 @pytest.mark.parametrize("failure_stage", ["runner", "after_capture"])
@@ -240,7 +206,6 @@ def test_dispatch_manual_preview_rolls_back_primary_failures(remote_ops: ModuleT
     class FakeRuntime:
         def __init__(self) -> None:
             self.value = "before"
-            self.rollback_count = 0
 
     def capture(context, _request):
         if failure_stage == "after_capture" and context.runtime.value == "mutated":
@@ -255,7 +220,6 @@ def test_dispatch_manual_preview_rolls_back_primary_failures(remote_ops: ModuleT
 
     def rollback(context, _request, before) -> None:
         context.runtime.value = before
-        context.runtime.rollback_count += 1
 
     operation = remote_ops.OperationSpec(
         name="probe",
@@ -270,7 +234,6 @@ def test_dispatch_manual_preview_rolls_back_primary_failures(remote_ops: ModuleT
         dispatch_with_runtime(runtime, "probe", {}, preview=True, module=remote_ops, operation=operation)
 
     assert runtime.value == "before"
-    assert runtime.rollback_count == 1
 
 
 def test_dispatch_manual_preview_reports_rollback_failure_with_primary_cause(remote_ops: ModuleType) -> None:

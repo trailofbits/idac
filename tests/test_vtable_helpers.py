@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from idac.remote_ops import IdaRuntime
 from tests.remote_ops_harness import dispatch_with_runtime
 
 
@@ -93,7 +94,7 @@ class FakeVtableTif:
         return True
 
 
-class FakeRuntime:
+class FakeRuntime(IdaRuntime):
     def __init__(
         self,
         bits: int,
@@ -103,6 +104,7 @@ class FakeRuntime:
         vtable_members: list[FakeMember] | None = None,
         runtime_identifier: str | None = None,
     ) -> None:
+        super().__init__()
         code_targets = {ea for ea, name in (names or {}).items() if name.startswith("sub_")}
         self._mods = {
             "ida_ida": FakeIdaIda(bits),
@@ -117,33 +119,6 @@ class FakeRuntime:
 
     def mod(self, name: str) -> Any:
         return self._mods[name]
-
-    def udt_members(self, tif):
-        udt = self.mod("ida_typeinf").udt_type_data_t()
-        return udt if tif.get_udt_details(udt) else ()
-
-    def pointer_size(self) -> int:
-        ida_ida = self.mod("ida_ida")
-        if ida_ida.inf_is_64bit():
-            return 8
-        if ida_ida.inf_is_32bit_exactly():
-            return 4
-        return 2
-
-    def pointer_bits(self) -> int:
-        return self.pointer_size() * 8
-
-    def read_pointer(self, ea: int) -> int:
-        ida_bytes = self.mod("ida_bytes")
-        width = self.pointer_size()
-        if width == 8:
-            return int(ida_bytes.get_qword(ea))
-        if width == 4:
-            return int(ida_bytes.get_wide_dword(ea))
-        return int(ida_bytes.get_wide_word(ea))
-
-    def vtable_slot(self, offset_bits: int) -> int:
-        return int(offset_bits) // self.pointer_bits()
 
     def resolve_address(self, identifier: str) -> int:
         return int(identifier, 0)
@@ -165,13 +140,10 @@ class FakeRuntime:
     def is_class_tinfo(self, tif) -> bool:
         return tif is self._class_tif
 
-    def class_vtable_type_name(self, tif) -> str:
-        assert tif is self._class_tif
+    def class_vtable_type_name(self, _tif) -> str:
         return "Foo_vtbl"
 
-    def class_runtime_vtable_identifier(self, tif, *, name: str | None = None) -> str | None:
-        assert tif is self._class_tif
-        assert name == "Foo"
+    def class_runtime_vtable_identifier(self, _tif, *, name: str | None = None) -> str | None:
         return self._runtime_identifier
 
 

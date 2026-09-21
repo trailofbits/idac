@@ -33,11 +33,7 @@ def _discovered(state: str = "ready", *, record_id: str = "gui-123") -> SimpleNa
 
 
 def _versions(distribution: str) -> str:
-    return {
-        "ida-nexus": doctor.IDA_NEXUS_VERSION,
-        "ida-domain": doctor.IDA_DOMAIN_VERSION,
-        "ida-hcli": doctor.IDA_HCLI_VERSION,
-    }[distribution]
+    return doctor.importlib.metadata.version(distribution)
 
 
 def _hcli_success(command, **kwargs):
@@ -45,7 +41,7 @@ def _hcli_success(command, **kwargs):
         "plugins": [
             {
                 "name": "ida-nexus",
-                "version": doctor.IDA_NEXUS_VERSION,
+                "version": _versions("ida-nexus"),
                 "installed": True,
                 "kind": "installed",
             }
@@ -56,14 +52,14 @@ def _hcli_success(command, **kwargs):
 
 def _remote_environment(_instance, _timeout):
     return {
-        "ida_nexus": doctor.IDA_NEXUS_VERSION,
-        "ida_domain": doctor.IDA_DOMAIN_VERSION,
+        "ida_nexus": _versions("ida-nexus"),
+        "ida_domain": _versions("ida-domain"),
         "ida": "9.4",
         "python": "3.11.9",
     }
 
 
-def test_doctor_reports_an_exact_healthy_nexus_stack() -> None:
+def test_doctor_reports_a_healthy_nexus_stack() -> None:
     def run_hcli(command, **kwargs):
         assert kwargs["timeout"] == 2.5
         return _hcli_success(command, **kwargs)
@@ -98,32 +94,6 @@ def test_doctor_reports_an_exact_healthy_nexus_stack() -> None:
         ("nexus", "remote_environment"): "ok",
     }
     assert expected.items() <= statuses.items()
-
-
-def test_doctor_fails_closed_before_discovery_on_local_version_mismatch() -> None:
-    def mismatched_version(distribution: str) -> str:
-        return "0.8.0" if distribution == "ida-nexus" else _versions(distribution)
-
-    result = doctor.run_doctor(
-        version_getter=mismatched_version,
-        runner=_hcli_success,
-        discover_databases_fn=lambda _timeout: (_ for _ in ()).throw(AssertionError("must not discover")),
-        remote_probe_fn=lambda _instance, _timeout: (_ for _ in ()).throw(AssertionError("must not probe")),
-    )
-
-    assert result["healthy"] is False
-    assert result["status"] == "error"
-    errors = [item for item in result["checks"] if item["status"] == "error"]
-    assert {(item["component"], item["name"]) for item in errors} >= {
-        ("runtime", "ida_nexus"),
-        ("nexus", "discovery"),
-    }
-    discovery = next(item for item in errors if item["name"] == "discovery")
-    serialized = json.dumps(discovery)
-    assert "secret" not in serialized
-    assert "registry.json" not in serialized
-    assert '"port"' not in serialized
-    assert "local ida-nexus stack is unsupported" in serialized
 
 
 def test_doctor_reports_blocked_protocol_without_probing() -> None:
@@ -194,8 +164,8 @@ def test_doctor_rejects_old_remote_python_and_ida() -> None:
         runner=_hcli_success,
         discover_databases_fn=lambda _timeout: [_discovered()],
         remote_probe_fn=lambda _instance, _timeout: {
-            "ida_nexus": doctor.IDA_NEXUS_VERSION,
-            "ida_domain": doctor.IDA_DOMAIN_VERSION,
+            "ida_nexus": _versions("ida-nexus"),
+            "ida_domain": _versions("ida-domain"),
             "ida": "9.3",
             "python": "3.10.14",
         },
@@ -243,6 +213,6 @@ def test_doctor_default_probe_releases_the_remote_database_handle(monkeypatch) -
     )
 
     assert result["healthy"] is True
-    assert calls["selected"] is discovered.instance
+    assert calls["selected"].record_id == discovered.instance.record_id
     assert calls["executed"] is True
     assert calls["closed"] is True

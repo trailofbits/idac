@@ -40,7 +40,9 @@ def _doctor_failure_lines(result: dict[str, Any]) -> list[str]:
 def register(
     root_parser: argparse.ArgumentParser, subparsers: argparse._SubParsersAction[argparse.ArgumentParser]
 ) -> None:
-    parser = add_command(root_parser, subparsers, "doctor", help_text="Inspect the pinned ida-nexus stack")
+    parser = add_command(
+        root_parser, subparsers, "doctor", help_text="Inspect the local and remote ida-nexus environment"
+    )
     parser.add_argument(
         "--timeout",
         type=positive_timeout,

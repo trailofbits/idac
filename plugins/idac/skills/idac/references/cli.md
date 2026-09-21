@@ -178,8 +178,8 @@ For a full recovery-pass example and the batch authoring rules, read [workflows.
 
 Installation commands live under `setup` and are rejected from `batch`:
 
-- `setup gui` — install ida-nexus v0.7.0 through pinned ida-hcli with
-  ida-domain 0.5.1.
+- `setup gui` — use HCLI to install the GUI plugin matching the installed Nexus
+  client, with ida-domain resolved from the declared dependency requirement.
 
 IDA maintenance commands live under `misc`:
 

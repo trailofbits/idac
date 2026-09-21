@@ -10,10 +10,12 @@ from .common import LocalCommandBinding, run_bound_local_command
 def register(
     root_parser: argparse.ArgumentParser, subparsers: argparse._SubParsersAction[argparse.ArgumentParser]
 ) -> None:
-    parser = add_command(root_parser, subparsers, "setup", help_text="Install pinned idac integrations")
+    parser = add_command(root_parser, subparsers, "setup", help_text="Install idac integrations")
     setup_subparsers = parser.add_subparsers(dest="setup_command")
 
-    child = add_command(parser, setup_subparsers, "gui", help_text="Install ida-nexus v0.7.0 through ida-hcli")
+    child = add_command(
+        parser, setup_subparsers, "gui", help_text="Install the matching ida-nexus plugin through ida-hcli"
+    )
     add_output_options(child, default_format="json")
     child.add_argument("--timeout", type=positive_timeout, help="Installer timeout in seconds")
     child.set_defaults(

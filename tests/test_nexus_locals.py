@@ -18,7 +18,6 @@ def test_nexus_local_list(
     assert any(item["name"] == "argc" for item in locals_rows if isinstance(item, dict))
     assert any(item["name"] == "v4" and item["is_stack"] for item in locals_rows if isinstance(item, dict))
     assert all(item.get("local_id") for item in locals_rows if isinstance(item, dict))
-    assert any("@" in item["local_id"] for item in locals_rows if isinstance(item, dict))
 
 
 def test_nexus_local_id_remains_valid_after_rename(

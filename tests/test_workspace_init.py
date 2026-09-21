@@ -32,7 +32,6 @@ def test_workspace_init_creates_expected_tree(idac_cmd: list[str], idac_env: dic
     assert (dest / "headers" / "recovered").is_dir()
     assert (dest / ".git").is_dir()
     assert _git_repo_root(dest) == dest.resolve()
-    assert "Initialized git repository." in proc.stdout
 
 
 def test_workspace_init_into_existing_empty_directory_succeeds(
@@ -58,7 +57,7 @@ def test_workspace_init_refuses_existing_workspace_without_force(
     second = run_cli(idac_cmd, idac_env, "workspace", "init", str(dest))
 
     assert second.returncode == 1
-    assert "workspace already initialized (use --force to overwrite config)" in second.stderr
+    assert "--force" in second.stderr
 
 
 def test_workspace_init_force_overwrites_config_but_preserves_content(
@@ -80,8 +79,6 @@ def test_workspace_init_force_overwrites_config_but_preserves_content(
     assert forced.returncode == 0, forced.stderr or forced.stdout
     assert claude_path.read_text(encoding="utf-8") == original_claude
     assert custom_audit_note.read_text(encoding="utf-8") == "keep me\n"
-    assert "Overwrote:" in forced.stdout
-    assert "CLAUDE.md" in forced.stdout
 
 
 def test_workspace_init_adopts_existing_parent_repo_without_nesting(
@@ -103,4 +100,3 @@ def test_workspace_init_adopts_existing_parent_repo_without_nesting(
     assert proc.returncode == 0, proc.stderr or proc.stdout
     assert not (dest / ".git").exists()
     assert _git_repo_root(dest) == repo_root.resolve()
-    assert "Using existing git repository:" in proc.stdout

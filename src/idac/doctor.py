@@ -7,13 +7,12 @@ import sys
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from packaging.version import InvalidVersion
+
 from .compatibility import (
-    IDA_DOMAIN_VERSION,
-    IDA_HCLI_VERSION,
-    IDA_NEXUS_VERSION,
-    MINIMUM_PYTHON_VERSION,
     REMOTE_ENVIRONMENT_CODE,
     compatibility_mismatches,
+    runtime_requirements,
 )
 from .nexus import KEEPALIVE_SECONDS, _target_row
 
@@ -44,74 +43,6 @@ def _check(status: str, component: str, name: str, summary: str, **details: Any)
     }
 
 
-def _python_check() -> dict[str, Any]:
-    current = sys.version_info
-    current_tuple = (int(current.major), int(current.minor))
-    required = ".".join(str(part) for part in MINIMUM_PYTHON_VERSION)
-    version = ".".join(str(part) for part in (current.major, current.minor, current.micro))
-    if current_tuple < MINIMUM_PYTHON_VERSION:
-        return _check(
-            "error",
-            "runtime",
-            "python",
-            f"Python {required} or newer is required",
-            version=version,
-            required=f">={required}",
-            executable=sys.executable,
-        )
-    return _check(
-        "ok",
-        "runtime",
-        "python",
-        "Python version is supported",
-        version=version,
-        required=f">={required}",
-        executable=sys.executable,
-    )
-
-
-def _package_check(distribution: str, expected: str, version_getter: VersionGetter) -> dict[str, Any]:
-    name = distribution.replace("-", "_")
-    try:
-        installed = version_getter(distribution)
-    except importlib.metadata.PackageNotFoundError:
-        return _check(
-            "error",
-            "runtime",
-            name,
-            f"{distribution} is not installed",
-            expected=expected,
-            installed=None,
-        )
-    except Exception as exc:
-        return _check(
-            "error",
-            "runtime",
-            name,
-            f"failed to inspect {distribution}: {exc}",
-            expected=expected,
-            installed=None,
-        )
-
-    if installed != expected:
-        return _check(
-            "error",
-            "runtime",
-            name,
-            f"{distribution} version does not match the supported stack",
-            expected=expected,
-            installed=installed,
-        )
-    return _check(
-        "ok",
-        "runtime",
-        name,
-        f"{distribution} version matches the supported stack",
-        expected=expected,
-        installed=installed,
-    )
-
-
 def _first_line(text: str | None) -> str:
     for line in (text or "").splitlines():
         stripped = line.strip()
@@ -125,6 +56,7 @@ def _run_hcli_status(
     timeout: float | None,
     runner: CommandRunner,
 ) -> dict[str, Any]:
+    expected = runtime_requirements()["ida-nexus"]
     try:
         process = runner(
             list(HCLI_STATUS_COMMAND),
@@ -139,7 +71,7 @@ def _run_hcli_status(
             "gui",
             "plugin",
             "timed out while checking the ida-nexus plugin with ida-hcli",
-            expected=IDA_NEXUS_VERSION,
+            expected=str(expected),
             command=list(HCLI_STATUS_COMMAND),
             timeout=timeout,
         )
@@ -148,8 +80,8 @@ def _run_hcli_status(
             "error",
             "gui",
             "plugin",
-            f"failed to run the pinned ida-hcli status command: {exc}",
-            expected=IDA_NEXUS_VERSION,
+            f"failed to run the ida-hcli status command: {exc}",
+            expected=str(expected),
             command=list(HCLI_STATUS_COMMAND),
         )
 
@@ -165,7 +97,7 @@ def _run_hcli_status(
             "gui",
             "plugin",
             summary,
-            expected=IDA_NEXUS_VERSION,
+            expected=str(expected),
             returncode=process.returncode,
             stdout=(process.stdout or "")[:4000],
             stderr=(process.stderr or "")[:4000],
@@ -183,18 +115,22 @@ def _run_hcli_status(
             "gui",
             "plugin",
             "ida-nexus is not installed through ida-hcli",
-            expected=IDA_NEXUS_VERSION,
+            expected=str(expected),
             installed=installed,
             returncode=process.returncode,
             stderr=(process.stderr or "")[:4000],
         )
-    if installed != IDA_NEXUS_VERSION:
+    try:
+        supported = str(installed) in expected
+    except InvalidVersion:
+        supported = False
+    if not supported:
         return _check(
             "error",
             "gui",
             "plugin",
             "installed ida-nexus plugin version does not match the supported stack",
-            expected=IDA_NEXUS_VERSION,
+            expected=str(expected),
             installed=installed,
         )
     return _check(
@@ -202,7 +138,7 @@ def _run_hcli_status(
         "gui",
         "plugin",
         "installed ida-nexus plugin version matches the supported stack",
-        expected=IDA_NEXUS_VERSION,
+        expected=str(expected),
         installed=installed,
     )
 
@@ -358,50 +294,33 @@ def run_doctor(
     discover_databases_fn: DiscoverDatabases | None = None,
     remote_probe_fn: RemoteProbe | None = None,
 ) -> dict[str, Any]:
-    """Inspect the exact local Nexus stack without changing any installation."""
+    """Inspect the local and remote Nexus stack without changing any installation."""
 
     discovery_timeout = 1.0 if timeout is None else timeout
-    nexus_package = _package_check("ida-nexus", IDA_NEXUS_VERSION, version_getter)
-    domain_package = _package_check("ida-domain", IDA_DOMAIN_VERSION, version_getter)
-    hcli_package = _package_check("ida-hcli", IDA_HCLI_VERSION, version_getter)
     checks = [
-        _python_check(),
-        nexus_package,
-        domain_package,
-        hcli_package,
+        _check(
+            "ok", "runtime", "python", "Local Python version", version=sys.version.split()[0], executable=sys.executable
+        ),
+        *(
+            _check(
+                "ok",
+                "runtime",
+                distribution.replace("-", "_"),
+                f"Installed {distribution} version",
+                installed=version_getter(distribution),
+            )
+            for distribution in ("ida-nexus", "ida-domain", "ida-hcli")
+        ),
         _run_hcli_status(timeout=timeout, runner=runner),
     ]
-    local_stack_supported = nexus_package["status"] == "ok" and domain_package["status"] == "ok"
+    if discover_databases_fn is None:
+        from ida_nexus import discover_databases
 
-    if not local_stack_supported:
-        discovery = _check(
-            "error",
-            "nexus",
-            "discovery",
-            "skipped Nexus discovery because the local ida-nexus stack is unsupported",
-            timeout=discovery_timeout,
-        )
-        ready: list[Any] = []
-    else:
-        if discover_databases_fn is None:
-            try:
-                from ida_nexus import discover_databases
-            except Exception as exc:
-                discovery = _check(
-                    "error",
-                    "nexus",
-                    "discovery",
-                    f"failed to import the public ida-nexus discovery API: {exc}",
-                    timeout=discovery_timeout,
-                )
-                ready = []
-            else:
-                discover_databases_fn = discover_databases
-        if discover_databases_fn is not None:
-            discovery, ready = _discover_check(
-                timeout=discovery_timeout,
-                discover_databases_fn=discover_databases_fn,
-            )
+        discover_databases_fn = discover_databases
+    discovery, ready = _discover_check(
+        timeout=discovery_timeout,
+        discover_databases_fn=discover_databases_fn,
+    )
     checks.append(discovery)
     checks.extend(
         _remote_checks(

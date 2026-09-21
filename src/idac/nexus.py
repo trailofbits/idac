@@ -4,13 +4,10 @@ import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from importlib import metadata
 from pathlib import Path
 from typing import Any
 
 from .compatibility import (
-    IDA_DOMAIN_VERSION,
-    IDA_NEXUS_VERSION,
     REMOTE_ENVIRONMENT_CODE,
     compatibility_mismatches,
 )
@@ -39,10 +36,6 @@ class NexusSessionError(RuntimeError):
         self.details = dict(details or {})
 
 
-class NexusUnavailableError(NexusSessionError):
-    """The pinned ida-nexus client is not importable."""
-
-
 class NexusSelectionError(NexusSessionError):
     """A context could not be resolved to exactly one READY Nexus instance."""
 
@@ -63,32 +56,15 @@ class NexusApi:
 def load_nexus_api() -> NexusApi:
     """Load only ida-nexus's supported public Python exports."""
 
-    for distribution, expected in (("ida-nexus", IDA_NEXUS_VERSION), ("ida-domain", IDA_DOMAIN_VERSION)):
-        try:
-            installed = metadata.version(distribution)
-        except metadata.PackageNotFoundError as exc:  # pragma: no cover - packaging normally guarantees it
-            raise NexusUnavailableError(
-                f"{distribution} is unavailable; install idac's pinned runtime dependencies"
-            ) from exc
-        if installed != expected:
-            raise NexusUnavailableError(
-                f"unsupported local {distribution} version {installed}; idac requires exactly {expected}",
-                kind="unsupported_local_environment",
-                details={"distribution": distribution, "installed": installed, "expected": expected},
-            )
-
-    try:
-        from ida_nexus import (
-            DatabaseHandle,
-            DatabaseOpenOptions,
-            InstanceState,
-            NexusError,
-            RemoteModule,
-            discover_databases,
-            wait_database_released,
-        )
-    except ImportError as exc:  # pragma: no cover - packaging normally guarantees it
-        raise NexusUnavailableError("ida-nexus is unavailable; install idac's pinned runtime dependencies") from exc
+    from ida_nexus import (
+        DatabaseHandle,
+        DatabaseOpenOptions,
+        InstanceState,
+        NexusError,
+        RemoteModule,
+        discover_databases,
+        wait_database_released,
+    )
 
     return NexusApi(
         DatabaseHandle=DatabaseHandle,
@@ -681,7 +657,6 @@ __all__ = [
     "NexusSelectionError",
     "NexusSession",
     "NexusSessionError",
-    "NexusUnavailableError",
     "list_targets",
     "load_nexus_api",
     "translate_nexus_error",
