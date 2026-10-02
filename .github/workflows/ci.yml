@@ -87,22 +87,26 @@ jobs:
             echo "code=false" >>"$GITHUB_OUTPUT"
           fi
 
-      - name: Install IDA Pro
-        if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true'
-        id: ida
-        uses: HexRaysSA/ida-hcli-actions/install-ida@2ff7f4e7c466809cfae6ea20c81264bdb6a33d49 # v1.1.0
-        with:
-          installer-id: ${{ matrix.installer-id }}
-          license-id: ${{ secrets.IDA_LICENSE_ID }}
-          api-key: ${{ secrets.HCLI_API_KEY }}
-          python-version: "3.12"
-
       - name: Install uv
         if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true'
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.12"
 
+      - name: Install IDA Pro
+        if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true'
+        env:
+          IDA_INSTALLER_ID: ${{ matrix.installer-id }}
+          IDA_LICENSE_ID: ${{ secrets.IDA_LICENSE_ID }}
+          HCLI_API_KEY: ${{ secrets.HCLI_API_KEY }}
+        run: |
+          export IDADIR="$RUNNER_TEMP/opt/ida"
+          echo "IDADIR=$IDADIR" >>"$GITHUB_ENV"
+          uv run --locked hcli ida install --yes --download-id "$IDA_INSTALLER_ID" \
+            --license-id "$IDA_LICENSE_ID" --install-dir "$IDADIR"
+
       - name: Test through ida-nexus
         if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true'
-        run: make test-integration
+        run: |
+          uv run --locked ida-nexus worker --probe
+          make test-integration
