@@ -1,10 +1,13 @@
 # idac
 
 [![version](https://img.shields.io/pypi/v/idac?color=blue)](https://pypi.org/project/idac/)
-![python](https://img.shields.io/badge/python-3.10%2B-blue)
+![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![status](https://img.shields.io/badge/status-alpha-orange)
 
-The IDA Pro CLI built for agents and humans. One Unix socket — no JSON-RPC framing, no sidecar daemon, no MCP server. Just `idac decompile "sub_08041337"` from any shell or agent.
+The IDA Pro CLI built for agents and humans, powered by
+[`ida-nexus`](https://github.com/HexRaysSA/ida-nexus). Run
+`idac decompile "sub_08041337"` from any shell or agent against either a live IDA
+session or a headless database.
 
 > `idac` is in early alpha and actively developed. It is already useful day to day, but the CLI surface may still change between releases.
 
@@ -14,28 +17,36 @@ The IDA Pro CLI built for agents and humans. One Unix socket — no JSON-RPC fra
 - [Demo](#demo)
 - [Quick start](#quick-start)
 - [Requirements](#requirements)
+- [Upgrading from 0.19](#upgrading-from-019)
 - [How it works](#how-it-works)
 - [Agent sandbox setup](#agent-sandbox-setup)
 - [Usage](#usage)
 - [Highlights](#highlights)
-- [Skill](#skill)
+- [Agent plugin](#agent-plugin)
 - [Development](#development)
 - [Credits](#credits)
 
 ## Why idac
 
 - **Not an MCP server** — compose with the shell you already have: pipes, `xargs`, `jq`, and your agent's existing tool-use loop. No server to run, no protocol to babysit.
-- **Agent-native by default** — every command can emit structured JSON (`-j`), and a bundled skill teaches Claude Code and Codex to drive `idac` instead of guessing at raw IDAPython.
-- **Safe mutations** — every mutation supports `preview`, which applies the change under IDA's undo, captures the before/after, and rolls it back. Dry-run any rename, retype, or prototype change before committing it.
+- **Agent-native by default** — every command can emit structured JSON (`-j`), and the
+  `idac` Agent Plugin teaches compatible agents to drive `idac` instead of guessing at
+  raw IDAPython.
+- **Safe mutations** — supported mutations offer `preview`, which applies the change,
+  captures the before/after, and restores it with IDA undo or an operation-specific rollback. Dry-run retypes,
+  prototype changes, and other preview-capable edits before committing them.
 - **Built for batches** — recover an entire class hierarchy, retype a hundred locals, or decompile every `Handler_*` in one invocation against a shared context.
-- **Live or headless** — the same commands work against a running IDA GUI session or a saved `.i64`/`.idb`. Switch targets with `-c`; with one GUI open, omit it entirely.
+- **Live or headless** — the same commands work against a running IDA GUI session,
+  a saved `.i64`, or a binary that IDA can open. Select a path with `-c`, an exact
+  running instance with `--instance`, or omit both when exactly one instance is ready.
 
 ## Demo
 
 Run this against the fixture committed in this repo:
 
 ```bash
-idac decompilemany "CreateHandler_" --out-dir decomp/ -c "db:fixtures/idb/handler_hierarchy.i64"
+idac decompilemany "CreateHandler_" --out-dir decomp/ \
+  -c fixtures/idb/handler_hierarchy.i64
 ```
 
 Every matching function is decompiled into its own `.c` file (named `<symbol>_0x<address>`) alongside a `manifest.json` index:
@@ -86,18 +97,32 @@ Handler *__cdecl CreateHandler_Text()
 }
 ```
 
-The same command works against a live GUI session — drop `-c` and `idac` auto-targets the only open instance.
+The same command works against a live GUI session — drop `-c` when it is the only
+READY Nexus instance.
 
 ## Quick start
 
-Install the CLI from [PyPI](https://pypi.org/project/idac/), then wire up the GUI plugin and agent skill:
+Install the CLI from [PyPI](https://pypi.org/project/idac/). For live desktop work,
+install the matching GUI integration:
 
 ```bash
 uv tool install idac         # installs the `idac` command on your PATH
-idac doctor                  # verify IDA install, license, and bridge
-idac misc plugin install     # GUI bridge plugin
-idac misc skill install      # Claude Code + Codex skill
+idac setup gui               # GUI plugin matching the installed ida-nexus client
+idac doctor                  # report local versions and check the IDA environment
 ```
+
+Restart IDA or load the installed Nexus component, then rerun `idac doctor` and
+`idac targets list --json`. Headless work does not require the GUI component;
+select an existing database or binary with `-c` to start a managed worker.
+
+For the agent guidance, install the Agent Plugin (see [Agent plugin](#agent-plugin)).
+
+`ida-hcli>=0.24.0` is an `idac` runtime dependency. Setup and diagnostics
+run it through `idac`'s Python environment; they do not require `uvx` or a
+separately installed HCLI executable. Runtime dependencies use minimum versions;
+`uv.lock` records the resolved versions for reproducible development installs.
+`setup gui` selects the release matching the installed Nexus client and lets the
+installer resolve ida-domain within the declared requirement.
 
 To install the latest development version straight from git instead:
 
@@ -111,36 +136,94 @@ Talk to a live GUI session:
 idac targets list --json
 idac decompile "sub_08041337"
 idac decompile "sub_08041337" --f5        # force a fresh Hex-Rays pass
-idac decompile "sub_08041337" -c "pid:1234"
+idac decompile "sub_08041337" --instance "<record-id>"
 ```
 
 Work headless against an existing database:
 
 ```bash
-idac database show -c "db:sample.i64"
-idac decompile "ExampleClass::method_1" -c "db:sample.i64"
+idac database show -c sample.i64
+idac decompile "ExampleClass::method_1" -c sample.i64
 ```
 
 To run from a checkout without installing globally, use `uv run idac --help`.
 
 ## Requirements
 
-- **Python 3.10+** and [`uv`](https://docs.astral.sh/uv/).
-- **IDA Pro** with the **Hex-Rays decompiler** (required for `decompile`, `ctree`, and class recovery).
-- A valid IDA license. Headless work uses `idalib`, which requires `idapro` to be installed and importable.
+- **Python 3.11+** and [`uv`](https://docs.astral.sh/uv/).
+- **IDA Pro 9.4+** with the **Hex-Rays decompiler** for `decompile`, `ctree`,
+  and class recovery.
+- A valid IDA license and an IDA Python environment on Python 3.11 or newer.
+- `ida-nexus>=0.13.2` and `ida-domain>=0.5.1`, installed as dependencies of `idac`.
+  Install the matching GUI component with
+  `idac setup gui`.
 
-`idac` discovers your IDA install from the user config automatically. On macOS it also falls back to the standard IDA 9.3 layout at `/Applications/IDA Professional 9.3.app/Contents/MacOS`. Run `idac doctor` to confirm what was detected.
+Run `idac doctor` to report CLI package versions, check the configured IDA version
+through HCLI without starting IDA, and check the installed GUI
+component, Nexus discovery, and the runtime inside every ready IDA instance.
+When Codex or Claude is on `PATH`, it also compares installed `idac` Agent Plugin
+versions with the CLI version and warns if they differ. Each optional agent check
+has a two-second default timeout; `--timeout` overrides it.
+Remote runtimes must satisfy the package requirements, and Nexus enforces protocol
+compatibility. `idac` does not fall back to another backend.
+
+## Upgrading from 0.19
+
+The rewrite requires Python 3.11+ and IDA Pro 9.4+. Install the matching Nexus GUI
+component with `idac setup gui` for live desktop work, and install the Agent Plugin
+separately for agent guidance.
+
+If uv's `exclude-newer` policy makes `ida-nexus>=0.13.2` unavailable, installation
+fails during dependency resolution. Use a policy cutoff that admits the required
+Nexus release before upgrading; the resolver cannot satisfy this dependency with
+an older release.
+
+Update existing commands and scripts as follows:
+
+| Previous usage | Current usage |
+|----------------|---------------|
+| `-c db:sample.i64` | `-c sample.i64`; existing binary paths work too |
+| `-c pid:1234`, `-c module:NAME`, or a bare module selector | `--instance RECORD_ID` from `idac targets list --json` |
+| A legacy `.idb` database | Convert it to `.i64` in IDA first |
+| `misc plugin install` | `setup gui`, followed by restarting IDA or loading the Nexus component |
+| `misc skill install` | Install the [Agent Plugin](#agent-plugin) through your client's marketplace |
+| `idac docs` | Subcommand `--help`, `--full-help`, and the installed skill's references |
+| `database open`, `database close`, or `targets cleanup` | Select the database with `-c`; Nexus manages workers and their lifetime |
+| `database save DESTINATION` | `database save` checkpoints the selected database; it accepts no destination path |
+| `py exec --persist` | Combine dependent Python work in one invocation; each execution has a fresh namespace |
+
+`targets list --json` returns Nexus records with `record_id`, `state`, `detail`,
+`backend`, `pid`, `idb_path`, `exe_path`, `managed`, and `started_at`. Update scripts
+that read the old target fields. Omitted selectors require exactly one READY
+instance, including managed headless workers. `-c` can attach to a matching GUI
+database, so it does not guarantee headless execution.
+
+Put target and timeout options on `batch` and `preview`, not on their child
+commands. Successful headless mutations save automatically; batches keep earlier
+successful changes even if a later step fails. GUI saves remain explicit. See
+[How it works](#how-it-works) and [batch usage](#run-an-ordered-mutation-pass-with-batch)
+for execution and journal behavior.
 
 ## How it works
 
-`idac` has two execution paths, and the same command surface drives both:
+Every IDA operation goes through the public ida-nexus Python API. `-c/--context PATH`
+opens or attaches to an `.i64` or input binary. Nexus prefers a matching live GUI
+database, reuses a matching managed worker, or starts a headless worker. Use
+`--instance RECORD_ID` to attach to one exact record from `idac targets list`.
 
-- **`gui`** connects to a running IDA desktop over a Unix-socket bridge plugin. With exactly one GUI open, most commands need no `-c` at all. Use `-c pid:<pid>` or `-c <module>` to pick one of several open sessions.
-- **`idalib`** opens a `.i64`/`.idb`/binary in a short-lived headless worker. Passing `-c "db:<path>"` starts or reuses a per-database `idalib` process automatically; those rows show `backend: "idalib"` in `targets list --json`.
+With neither selector, `idac` proceeds only when discovery finds exactly one READY
+instance. Ambiguous, missing, blocked, disconnected, timed-out, or version-mismatched
+targets fail explicitly. An operation is never retried on a different instance.
 
-Discover everything that's reachable with `idac targets list --json`. Checkpoint headless state with `idac database save -c "db:<path>"`; `idac database close -c "db:<path>"` saves before closing by default, and `--discard` abandons pending changes.
+Headless opens enable auto-analysis and wait for it to finish. A released worker stays
+warm for five idle minutes, and successful headless mutations are checkpointed before
+another remote request or lease release. A failed preview or locally interrupted
+request retires that exact headless worker with `save=False`; the operation is never
+retried. Live GUI commands do not force analysis or save; checkpoint GUI changes
+explicitly with `idac database save`.
 
-For bridge socket and sandbox diagnostics, run `idac docs troubleshooting`.
+Use `idac targets list --json` to inspect discovery records and `idac doctor` to
+diagnose the local and remote runtime stack.
 
 ## Agent sandbox setup
 
@@ -150,19 +233,26 @@ Scaffold a project-local reversing workspace for sandboxed agents:
 idac workspace init reversing-workspace
 ```
 
-That creates workspace-local `.claude/` and `.codex/` config, agent guidance files, prompt templates, a `references/` copy of the bundled skill docs, and a git-backed directory layout for RE work. The generated sandbox settings are intentionally broad so sandboxed agents can reach the `idac` Unix socket bridge.
+That creates workspace-local `.claude/` and `.codex/` config, agent guidance files,
+prompt templates, and a git-backed directory layout for RE work. Nexus discovery and
+execution are local to the host; the generated workspace allows the local access
+needed by `idac`. Install the Agent Plugin in the client separately; workspace
+initialization does not copy the skill or its references.
+
+Claude and Codex share `AGENTS.md` directly; the workspace does not generate a
+separate `CLAUDE.md`.
 
 To customize the generated files, see the templates under [src/idac/workspace_template/default](src/idac/workspace_template/default).
 
 ## Usage
 
-Use `idac <command> --help` for one subcommand, `idac --full-help` for the complete CLI surface, and `idac docs` for an index of bundled command, workflow, and IDA reference material (`idac docs guide`, `idac docs cli`, `idac docs workflows`, `idac docs class-recovery`, ...).
+Use `idac <command> --help` for one subcommand and `idac --full-help` for the complete CLI surface. Command grammar, workflow, and IDA reference material ships with the plugin's skill and is loaded by agents that have it installed.
 
 ### Command families
 
 | Family | Commands |
 |--------|----------|
-| Discovery | `doctor`, `docs`, `targets list`, `database show`, `segment list`, `bookmark list/show`, `comment show` |
+| Discovery | `doctor`, `targets list`, `database show`, `segment list`, `bookmark list/show`, `comment show` |
 | Functions | `function list`, `metadata`, `frame`, `stackvars`, `callees`, `callers`, `prototype`, `locals` |
 | Decompilation | `decompile`, `decompilemany`, `disasm`, `disasm --start/--end`, `ctree` |
 | Search | `search bytes`, `search strings`, `xrefs`, `imports` |
@@ -172,7 +262,7 @@ Use `idac <command> --help` for one subcommand, `idac --full-help` for the compl
 | Batch | `batch`, `batch --lint`, `preview` |
 | IDAPython | `py exec` |
 | Workspace | `workspace init` |
-| Maintenance | `misc reanalyze`, `database open/save/close`, `targets cleanup`, `misc plugin`, `misc skill` |
+| Maintenance | `misc reanalyze`, `database save`, `setup gui` |
 
 ### Output
 
@@ -180,17 +270,27 @@ Most read commands default to `--format text`. Use `--format json` (or `-j`) or 
 
 ## Highlights
 
-A few of the commands that make `idac` worth reaching for. See `idac docs cli` and `idac docs workflows` for the full reference.
+A few of the commands that make `idac` worth reaching for. Install the plugin for the full command and workflow reference.
 
 ### Preview a mutation before committing
 
-`preview` is a wrapper that runs the real mutation under IDA undo and rolls it back, returning the before/after so you (or an agent) can verify the change first:
+`preview` is a wrapper that runs the real mutation and restores it with IDA undo or an operation-specific rollback, returning the before/after so you (or an agent) can verify the change first:
 
 ```bash
 idac preview -o "/tmp/preview.json" \
   function prototype set "sub_08041337" \
   --decl "int __fastcall sub_08041337(void *ctx, const unsigned char *buf, unsigned int len)"
 ```
+
+The wrapper owns the preview artifact. A wrapped command cannot set `--out`,
+`--out-file`, or `--out-dir`; put `--out` on `preview` itself. Output paths are
+also rejected when they alias the selected binary/database or any command input.
+Put `-c`, `--instance`, and `--timeout` on the wrapper too; child commands cannot
+override them.
+
+Unfiltered type, struct, and enum lists can use the preview or batch wrapper's
+`--out` to preserve their full results. File output checks use the selected
+Nexus database and input paths, including GUI databases saved under another name.
 
 ### Recover C++ class hierarchies
 
@@ -208,7 +308,7 @@ idac type class vtable "ExampleDerived" --runtime
 Select by name filter or by reading exact identifiers from a file; emit one combined file or one `.c` per function plus a `manifest.json`:
 
 ```bash
-idac decompilemany "Handler_" --out-dir "decomp/" -c "db:sample.i64"
+idac decompilemany "Handler_" --out-dir "decomp/" -c sample.i64
 idac decompilemany "Handler_.*" --regex --out-dir "decomp/" --disasm --ctree
 
 printf '%s\n' main sub_401000 0x401234 > funcs.txt
@@ -218,9 +318,17 @@ idac decompilemany --functions-file "funcs.txt" --out-dir "decomp-exact/"
 
 Pass `--f5` after type or prototype changes so each function reflects the latest state. With `--out-dir`, the manifest records each function's `name`, exact `address`, and artifact paths.
 
+For prototype edits that must retain the existing calling convention, use
+`function prototype set --preserve-cc`. This preserves IDA's stored convention
+when the declaration parser would otherwise normalize it. `type check` validates
+dependent declarations together in a temporary type library, without importing
+or replacing database types.
+`misc rename` is batch-safe, so related renames, prototype edits, comments, and
+readbacks can share one Nexus session.
+
 ### Run an ordered mutation pass with batch
 
-Run many subcommands against one shared context, leaving behind a stable ordered log. Batch files use one subcommand per line (drop the leading `idac`) and inherit `-c` and `--timeout` from the `batch` call:
+Run many subcommands against one shared context, leaving behind a stable ordered log. Batch files use one subcommand per line (drop the leading `idac`) and inherit `-c` and `--timeout` from the `batch` call. Child commands cannot set their own target or timeout because the wrapper owns one Nexus session for the entire run:
 
 ```bash
 idac batch "recovery.idac" --out "/tmp/recovery_batch.json"
@@ -238,7 +346,12 @@ function locals rename "0x100000000" 5 --new-name header_size
 function locals rename "0x100000000" 6 --new-name record_type
 ```
 
-Mutating batches require `--out` so the result log is preserved before any change runs. `batch --lint` parses child commands, resolves relative input paths, rejects unsupported batch commands, and warns on risky local selectors before execution. Setup `misc` commands are intentionally rejected from `batch`; `misc reanalyze` is batch-safe and belongs between type/prototype changes and local cleanup.
+Mutating batches require `--out` so the result log is preserved before any change runs. `batch --lint` parses child commands, resolves relative input paths, rejects unsupported batch commands, and warns on risky local selectors before execution. Setup commands are intentionally rejected from `batch`; `misc reanalyze` is batch-safe and belongs between type/prototype changes and local cleanup.
+Before dispatching the first command, `batch` writes a `pending` journal and checkpoints it after every line. It closes the shared Nexus session before replacing that journal with a terminal `ok`, `failed`, or `interrupted` record; Ctrl-C returns 130 without discarding the lifecycle record. Mutating child commands cannot set their own `--out`—the wrapper artifact is the mutation log—while read-only children may still write separate artifacts.
+
+Use `--fail-fast` when later steps depend on earlier ones or local selectors must
+stop on the first miss. A batch does not roll back earlier successful mutations;
+headless checkpoints survive a later failure or interruption.
 
 ### Address locals three ways
 
@@ -261,15 +374,40 @@ When no first-class command fits, drop to IDAPython against the same target:
 idac py exec --code "result = {'entry': hex(idc.get_inf_attr(idc.INF_START_EA))}"
 ```
 
-## Skill
+Each execution uses a fresh namespace; `--persist` is no longer available. Use
+`--script PATH` or `--stdin` for multiline code, and keep dependent work in one
+invocation. Script contents are read locally and execute inside IDA with the local
+filename as `__file__`. Assign JSON-native data to `result`; structured output
+includes `result`, `result_repr`, `stdout`, and `stderr`. `py exec` is treated as
+mutating for saving and cannot be previewed.
 
-A bundled skill in [src/idac/skills/idac](src/idac/skills/idac) teaches Claude Code and Codex to prefer `idac` commands over ad hoc shell or raw IDAPython for RE work.
+## Agent plugin
+
+The [Agent Plugins v1](https://agent-plugins.org/) package in
+[plugins/idac](plugins/idac) teaches compatible agents to prefer `idac` commands over
+ad hoc shell or raw IDAPython for RE work. The repository catalog at
+[.agents/plugins/marketplace.json](.agents/plugins/marketplace.json) points directly to
+that package; [plugins/idac/plugin.json](plugins/idac/plugin.json) is its manifest and
+[plugins/idac/skills/idac](plugins/idac/skills/idac) contains its `idac` skill. The
+plugin is not included in the `idac` Python package.
+
+Install it through an Agent Plugins-compatible client. With Codex:
 
 ```bash
-idac misc skill install
+codex plugin marketplace add trailofbits/idac
+codex plugin add idac@idac
 ```
 
-This installs into both `~/.claude/skills/idac` and `~/.codex/skills/idac`; both agents auto-discover skills from their `skills/` directories. Once installed, the skill loads automatically when relevant. For a ready-to-fill task prompt covering anything from a light analysis pass to class-family recovery, run `idac workspace init <dir>` to scaffold a workspace containing `prompts/recovery-pass.md`.
+Once installed, the skill loads automatically when relevant. The repository contains
+one canonical plugin package, with no client-specific compatibility package or manual
+skill-link fallback.
+
+Run `idac doctor` after updating the CLI or plugin to check that their versions match.
+It reads the installed plugin inventories through `codex plugin list --json` and
+`claude plugin list --json` when those clients are available on `PATH`. Version
+mismatches are warnings; the Agent Plugin is optional and does not affect CLI health.
+
+For a ready-to-fill task prompt covering anything from a light analysis pass to class-family recovery, run `idac workspace init <dir>` to scaffold a workspace containing `prompts/recovery-pass.md`.
 
 ## Development
 
@@ -287,9 +425,12 @@ To put an `idac` on your PATH that tracks your checkout, install it as editable:
 uv tool install -e .
 ```
 
-See [docs/development.md](docs/development.md) for fixture regeneration, live GUI tests, and local tooling details.
+See [docs/development.md](docs/development.md) for fixture regeneration, Nexus
+integration tests, and local tooling details.
 
 ## Credits
 
 Inspired by [@banteg's `bn` Binary Ninja CLI tool](https://github.com/banteg/bn).
+Backend integration is provided by
+[`ida-nexus`](https://github.com/HexRaysSA/ida-nexus).
 Written by [Codex](https://openai.com/codex)/gpt-5.3-codex/gpt-5.4/gpt-5.5.

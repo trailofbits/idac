@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased
+
+This release moves live and headless execution to ida-nexus and changes how users
+select databases, install integrations, and run mutation passes.
+
+- Replaced the bundled GUI bridge and headless daemon with ida-nexus. The supported
+  stack now requires Python 3.11+, IDA Pro 9.4+, `ida-nexus>=0.13.2`, and
+  `ida-domain>=0.5.1`. Run `idac setup gui` to install the Nexus GUI component
+  matching the client, then restart IDA or load the component and run `idac doctor`.
+- Changed `-c/--context` to accept an existing `.i64` or binary path directly, such
+  as `-c sample.i64`, replacing `db:`, `pid:`, and `module:` locators and bare module
+  selectors. Use `--instance <record-id>` from `targets list --json` for one exact
+  READY instance; without a selector, exactly one READY instance is required.
+  Paths can attach to a matching live GUI or reuse or start a managed headless
+  worker. Legacy `.idb` databases must be converted to `.i64`.
+- Removed `database open`, `database close`, and `targets cleanup`; Nexus manages
+  opening and worker lifetime. `database save` checkpoints the selected database
+  and no longer accepts a destination path. `targets list --json` now reports Nexus
+  records with `record_id` and discovery `state`; update scripts using old selectors.
+- Headless opens wait for auto-analysis, and workers remain warm for five idle
+  minutes. Successful headless mutations save before the next remote request or
+  session release, so earlier successful batch steps remain on disk if a later
+  step fails. GUI changes still require an explicit `database save`.
+- Failed previews or locally interrupted requests discard the affected headless
+  worker without saving uncertain state. Commands fail explicitly on target or
+  compatibility errors and do not retry on another instance. GUI preview failures
+  require inspecting or undoing the in-memory state before saving.
+- `batch` and `preview` now own one shared target and timeout; child commands cannot
+  specify `-c`, `--instance`, or `--timeout`. Mutating batch children cannot set their
+  own `--out`. Batch logs record progress after each line and report save or session
+  close failures and interruptions before claiming success. Preview artifacts belong
+  to the wrapper, and output files cannot overwrite the selected database or inputs.
+- Made `py exec` stateless and removed `--persist`. Put dependent Python work in one
+  invocation; script files are read locally and retain their filename and `__file__`.
+- Added `function prototype set --preserve-cc` to retain the stored calling
+  convention while editing parameter names, types, or the return type.
+- Improved `type check` to validate dependent declarations together in a temporary
+  type library without importing or replacing database types. Unfiltered `type
+  struct list` and `type enum list` now require `--out`, like `type list`.
+- Enabled `misc rename` in ordered batches and previews so symbol renames can share
+  a session with prototype edits, comments, and readbacks.
+- Moved agent guidance out of the Python package into an Agent Plugins v1 package.
+  Install it separately through a compatible client's marketplace; Codex users run
+  `codex plugin marketplace add trailofbits/idac` followed by
+  `codex plugin add idac@idac`. This replaces `misc skill install`; `misc plugin
+  install` is replaced by `setup gui`.
+- `doctor` now compares installed `idac` Agent Plugin versions with the CLI version
+  through available Codex and Claude clients, warning when guidance and commands
+  come from different releases.
+- Removed `idac docs`; use subcommand `--help`, `--full-help`, and the installed
+  plugin's skill references. `workspace init` now points at that skill instead of
+  copying its reference docs into each workspace, and generates one shared
+  `AGENTS.md` for Claude and Codex instead of a separate `CLAUDE.md`.
+
 ## 0.19.1
 
 This patch release fixes the version that `idac` reports about itself.

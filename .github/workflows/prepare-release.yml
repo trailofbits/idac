@@ -47,6 +47,7 @@ jobs:
           fi
 
           release_version=$(uv version --short)
+          uv run .github/scripts/sync_agent_plugin_version.py "$release_version"
           release_tags=$(git ls-remote --tags origin 'v*' | cut -f2 | sed -e 's|^refs/tags/||' -e '/\^{}$/d')
           RELEASE_VERSION="$release_version" RELEASE_TAGS="$release_tags" uv run .github/scripts/check_release_version.py
 
@@ -59,10 +60,10 @@ jobs:
           echo "PREVIOUS_TAG=$(printf '%s\n' "$release_tags" | sort -V | tail -1)" >> "$GITHUB_ENV"
 
       - name: Write changelog entry
-        uses: anthropics/claude-code-action@1f291e1cfe0f5fc21db2aef19af844591600ade7 # v1.0.206
+        uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1.12
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ github.token }}
+          openai-api-key: ${{ secrets.OPENAI_CODEX_API_KEY }}
+          permission-profile: ":workspace"
           prompt: |
             Write the CHANGELOG.md entry for idac ${{ env.RELEASE_VERSION }}.
             Publishing the release copies this section verbatim into the
@@ -73,8 +74,8 @@ jobs:
             `git show` on individual commits for detail.
 
             Only changes someone installing idac would notice belong in the
-            entry: commands, flags, output, behavior and bug fixes, GUI bridge
-            and idalib backend behavior, packaging, and the bundled skill,
+            entry: commands, flags, output, behavior and bug fixes, ida-nexus
+            target and database behavior, packaging, and the bundled skill,
             docs, and workspace templates. Mention runtime dependency changes
             only when they fix a vulnerability or change behavior.
 
@@ -94,8 +95,6 @@ jobs:
             the release theme, then short bullets in the user's language, no
             PR numbers or commit hashes. Do not modify already-released
             sections or any other file.
-          claude_args: |
-            --allowedTools "Read,Edit,Write,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git tag:*)"
 
       - name: Create release branch
         id: commit
@@ -116,7 +115,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml uv.lock CHANGELOG.md
+          git add pyproject.toml uv.lock CHANGELOG.md plugins/idac/plugin.json
           git commit -m "Prepare release v$RELEASE_VERSION"
 
           release_commit=$(git rev-parse HEAD)

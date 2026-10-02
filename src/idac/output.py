@@ -31,7 +31,6 @@ class OutputTooLargeError(RuntimeError):
         super().__init__(message)
         self.chars = chars
         self.limit = limit
-        self.out_flag = out_flag
         self.hint = hint
 
 
@@ -46,31 +45,23 @@ class OutputResult:
 def resolve_output_format(fmt: str, out_path: Path | None, *, force_fmt: bool = False) -> str:
     """Infer structured formats from output suffixes unless the caller explicitly forces fmt."""
 
-    if force_fmt:
-        return fmt
-    if out_path and out_path.suffix.lower() == ".json":
-        return "json"
-    if out_path and out_path.suffix.lower() == ".jsonl":
-        return "jsonl"
+    if not force_fmt and out_path is not None:
+        suffix_format = out_path.suffix.lower().removeprefix(".")
+        if suffix_format in {"json", "jsonl"}:
+            return suffix_format
     return fmt
 
 
 def _render_value(value: Any, fmt: str) -> str:
-    """Render a response value in the requested transport format."""
-
-    if fmt == "json":
-        return json.dumps(value, indent=2, sort_keys=True) + "\n"
     if fmt == "jsonl":
         rows = value if isinstance(value, list) else [value]
         return "".join(json.dumps(item, sort_keys=True) + "\n" for item in rows)
-    if isinstance(value, str):
+    if fmt != "json" and isinstance(value, str):
         return value if value.endswith("\n") else value + "\n"
     return json.dumps(value, indent=2, sort_keys=True) + "\n"
 
 
 def _artifact_summary(value: Any) -> dict[str, Any]:
-    """Summarize the result shape without repeating the full payload."""
-
     if isinstance(value, dict):
         return {"kind": "object", "count": len(value), "keys": sorted(value.keys())[:10]}
     if isinstance(value, list):
@@ -78,14 +69,6 @@ def _artifact_summary(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         return {"kind": "string", "chars": len(value)}
     return {"kind": type(value).__name__}
-
-
-def _artifact_write_target(path: Path) -> Path:
-    """Follow symlink destinations so `--out` keeps prior write semantics."""
-
-    if path.is_symlink():
-        return Path(os.path.realpath(path))
-    return path
 
 
 def _default_artifact_mode() -> int:
@@ -97,9 +80,7 @@ def _default_artifact_mode() -> int:
 
 
 def _write_artifact(path: Path, rendered: str, fmt: str, value: Any) -> dict[str, Any]:
-    """Write the rendered payload and return stable metadata about the artifact."""
-
-    write_path = _artifact_write_target(path)
+    write_path = Path(os.path.realpath(path)) if path.is_symlink() else path
     write_path.parent.mkdir(parents=True, exist_ok=True)
     data = rendered.encode("utf-8")
     desired_mode = _default_artifact_mode()

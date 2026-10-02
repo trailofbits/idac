@@ -28,35 +28,57 @@ jobs:
       - name: Lint
         run: make lint
 
-  test:
-    name: Test (IDA ${{ matrix.ida-version }})
-    # Steps run only in the merge queue and only for non-docs changes. The
-    # skips are per-step because a job-level `if` suppresses matrix expansion
-    # and the required per-version checks would never report.
+  unit:
+    name: Unit tests (Python 3.11, no IDA)
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.11"
+
+      - name: Test without IDA
+        run: make test-unit
+
+  test:
+    name: Test (IDA ${{ matrix.ida-version }})
+    # Steps run for manual dispatches and for non-docs merge-queue changes. The
+    # skips remain per-step so this required check still reports for pull requests
+    # and docs-only merges.
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - ida-version: "9.3"
-            ida-installer: release/9.3/ida-pro/ida-pro_93_x64linux.run
           - ida-version: "9.4"
-            ida-installer: release/9.4/ida-pro/ida-pro_94_x64linux.run
+            installer-id: release/9.4/ida-pro/ida-pro_94_x64linux.run
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
-        if: github.event_name == 'merge_group'
+        if: github.event_name != 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Detect code changes
-        if: github.event_name == 'merge_group'
+        if: github.event_name != 'pull_request'
         id: changes
         env:
           BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "code=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
           git fetch --quiet --no-tags --depth=1 origin "$BASE_SHA"
           # markdown under src/ and tests/ is test-covered, so it counts as code
           if git diff --name-only "$BASE_SHA" HEAD | grep -qvE '^([^/]+\.md|docs/.+|LICENSE|\.gitignore)$'; then
@@ -65,22 +87,26 @@ jobs:
             echo "code=false" >>"$GITHUB_OUTPUT"
           fi
 
-      - name: Install IDA Pro
-        if: github.event_name == 'merge_group' && steps.changes.outputs.code == 'true'
-        id: ida
-        uses: HexRaysSA/ida-hcli-actions/install-ida@2ff7f4e7c466809cfae6ea20c81264bdb6a33d49 # v1.1.0
-        with:
-          installer-id: ${{ matrix.ida-installer }}
-          license-id: ${{ secrets.IDA_LICENSE_ID }}
-          api-key: ${{ secrets.HCLI_API_KEY }}
-          python-version: "3.12"
-
       - name: Install uv
-        if: github.event_name == 'merge_group' && steps.changes.outputs.code == 'true'
+        if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true'
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.12"
 
-      - name: Test
-        if: github.event_name == 'merge_group' && steps.changes.outputs.code == 'true'
-        run: make test
+      - name: Install IDA Pro
+        if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true'
+        env:
+          IDA_INSTALLER_ID: ${{ matrix.installer-id }}
+          IDA_LICENSE_ID: ${{ secrets.IDA_LICENSE_ID }}
+          HCLI_API_KEY: ${{ secrets.HCLI_API_KEY }}
+        run: |
+          export IDADIR="$RUNNER_TEMP/opt/ida"
+          echo "IDADIR=$IDADIR" >>"$GITHUB_ENV"
+          uv run --locked hcli ida install --yes --download-id "$IDA_INSTALLER_ID" \
+            --license-id "$IDA_LICENSE_ID" --install-dir "$IDADIR"
+
+      - name: Test through ida-nexus
+        if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true'
+        run: |
+          uv run --locked ida-nexus worker --probe
+          make test-integration

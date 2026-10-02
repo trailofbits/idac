@@ -2,7 +2,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.helpers import preview_snapshot_cli2, run_idalib_json, run_preview_json
+import pytest
+
+from tests.helpers import preview_snapshot, run_nexus_json, run_preview_json
+
+
+@pytest.mark.parametrize("family", [[], ["struct"], ["enum"]])
+def test_unfiltered_type_list_preview_writes_complete_readback(
+    family: list[str], idac_cmd, idac_env, copy_database, tiny_database: Path, tmp_path: Path
+) -> None:
+    database = copy_database(tiny_database)
+    proc, preview = run_preview_json(
+        idac_cmd, idac_env, database, tmp_path / "list-preview.json", "type", *family, "list"
+    )
+
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    assert isinstance(preview["result"], list)
+    assert preview["before"] == preview["after"] == preview["result"]
+    assert preview["undo"] == {"status": "noop", "mode": "read_only", "persisted": False}
 
 
 def test_comment_preview_does_not_persist(
@@ -13,7 +30,7 @@ def test_comment_preview_does_not_persist(
     tmp_path: Path,
 ) -> None:
     database = copy_database(tiny_database)
-    result = preview_snapshot_cli2(
+    result = preview_snapshot(
         idac_cmd,
         idac_env,
         database,
@@ -34,7 +51,7 @@ def test_comment_preview_does_not_persist(
         "comment": "preview comment",
     }
     assert preview["result"]["comment"] == "preview comment"
-    assert preview["undo"]["mode"] == "undo"
+    assert preview["undo"]["mode"] == "rollback"
     assert after == before
 
 
@@ -56,7 +73,7 @@ def test_type_declare_preview_does_not_persist(
         "--decl",
         "typedef struct preview_record { int value; } preview_record;",
     )
-    listed = run_idalib_json(idac_cmd, idac_env, database, "type", "list", "preview_record")
+    listed = run_nexus_json(idac_cmd, idac_env, database, "type", "list", "preview_record")
 
     assert proc.returncode == 0, proc.stderr or proc.stdout
     assert isinstance(preview, dict)

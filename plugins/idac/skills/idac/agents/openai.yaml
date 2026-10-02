@@ -1,0 +1,7 @@
+interface:
+  display_name: "idac"
+  short_description: "Analyze binaries and edit IDA databases with idac"
+  default_prompt: "Use $idac to inspect this IDA target and complete the requested analysis or database edits with verified readback."
+
+policy:
+  allow_implicit_invocation: true

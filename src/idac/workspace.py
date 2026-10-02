@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from .paths import skill_reference_source_dir, workspace_template_source_dir
+from .paths import workspace_template_source_dir
 
 _WORKSPACE_MARKER = ".idac"
 _WORKSPACE_TMP = ".idac/tmp"
@@ -14,23 +14,13 @@ _CONFIG_PATHS = frozenset(
         ".claude/settings.json",
         ".codex/config.toml",
         ".codex/rules/default.rules",
-        "CLAUDE.md",
         "AGENTS.md",
         ".gitignore",
     }
 )
 
 
-def _display_path(relative: Path, *, is_dir: bool) -> str:
-    """Format one created workspace path for user-facing summaries."""
-
-    rendered = relative.as_posix()
-    return f"{rendered}/" if is_dir else rendered
-
-
 def _ensure_directory(path: Path, *, root: Path) -> list[str]:
-    """Create missing directories below ``root`` and report each one."""
-
     created: list[str] = []
     missing: list[Path] = []
     current = path
@@ -39,13 +29,11 @@ def _ensure_directory(path: Path, *, root: Path) -> list[str]:
         current = current.parent
     for directory in reversed(missing):
         directory.mkdir()
-        created.append(_display_path(directory.relative_to(root), is_dir=True))
+        created.append(f"{directory.relative_to(root).as_posix()}/")
     return created
 
 
 def _git_repo_root(path: Path) -> Path | None:
-    """Return the enclosing git root for ``path`` when one exists."""
-
     try:
         proc = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
@@ -62,8 +50,6 @@ def _git_repo_root(path: Path) -> Path | None:
 
 
 def _git_init(path: Path) -> Path:
-    """Initialize a git repository and return its detected root."""
-
     try:
         proc = subprocess.run(
             ["git", "-C", str(path), "init"],
@@ -137,7 +123,7 @@ def _copy_tree(
             overwrite=overwrite,
             skip_existing=skip_existing,
         )
-        display = _display_path(dest.relative_to(tracking_root), is_dir=False)
+        display = dest.relative_to(tracking_root).as_posix()
         if file_created and display not in created:
             created.append(display)
         if file_overwritten and display not in overwritten:
@@ -172,19 +158,8 @@ def initialize_workspace(dest: Path, *, force: bool = False) -> dict[str, Any]:
     created.extend(template_created)
     overwritten.extend(template_overwritten)
 
-    reference_created, reference_overwritten = _copy_tree(
-        skill_reference_source_dir(),
-        destination / "references",
-        tracking_root=destination,
-        force=force,
-        workspace_exists=workspace_exists,
-    )
-    created.extend(reference_created)
-    overwritten.extend(reference_overwritten)
-
     tmp_dir = destination / _WORKSPACE_TMP
-    if not tmp_dir.exists():
-        created.extend(_ensure_directory(tmp_dir, root=destination))
+    created.extend(_ensure_directory(tmp_dir, root=destination))
 
     repo_root = _git_repo_root(destination)
     git_initialized = False
@@ -195,7 +170,7 @@ def initialize_workspace(dest: Path, *, force: bool = False) -> dict[str, Any]:
     return {
         "initialized": True,
         "destination": str(destination.resolve()),
-        "display_destination": str(dest) if str(dest) else ".",
+        "display_destination": str(dest) or ".",
         "created": created,
         "overwritten": overwritten,
         "git": {
@@ -203,7 +178,7 @@ def initialize_workspace(dest: Path, *, force: bool = False) -> dict[str, Any]:
             "repo_root": str(repo_root),
         },
         "next_steps": [
-            "Run `idac misc skill install` if you haven't already",
+            "Install the idac Agent Plugin in your agent client if you haven't already",
             "Edit AGENTS.md to set your default target",
             "Commit when the workspace looks right",
         ],

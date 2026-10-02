@@ -67,7 +67,7 @@ def run_cli_json(
     return json.loads(proc.stdout)
 
 
-def run_idalib(
+def run_nexus(
     idac_cmd: list[str],
     idac_env: dict[str, str],
     database: Path,
@@ -75,21 +75,13 @@ def run_idalib(
     input_text: str | None = None,
     use_json: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    open_proc = subprocess.run(
-        [*idac_cmd, "database", "open", str(database), "--format", "json"],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=idac_env,
-    )
-    assert open_proc.returncode == 0, open_proc.stderr or open_proc.stdout
     format_args = ["--format", "json"] if use_json else []
     return subprocess.run(
         [
             *idac_cmd,
             *_flatten_args(*args),
             "-c",
-            f"db:{database}",
+            str(database),
             *format_args,
         ],
         check=False,
@@ -100,26 +92,26 @@ def run_idalib(
     )
 
 
-def run_idalib_json(
+def run_nexus_json(
     idac_cmd: list[str],
     idac_env: dict[str, str],
     database: Path,
     *args: object,
     input_text: str | None = None,
 ) -> object:
-    proc = run_idalib(idac_cmd, idac_env, database, *args, input_text=input_text, use_json=True)
+    proc = run_nexus(idac_cmd, idac_env, database, *args, input_text=input_text, use_json=True)
     assert proc.returncode == 0, proc.stderr or proc.stdout
     return json.loads(proc.stdout)
 
 
-def run_idalib_text(
+def run_nexus_text(
     idac_cmd: list[str],
     idac_env: dict[str, str],
     database: Path,
     *args: object,
     input_text: str | None = None,
 ) -> str:
-    proc = run_idalib(idac_cmd, idac_env, database, *args, input_text=input_text, use_json=False)
+    proc = run_nexus(idac_cmd, idac_env, database, *args, input_text=input_text, use_json=False)
     assert proc.returncode == 0, proc.stderr or proc.stdout
     return proc.stdout
 
@@ -131,12 +123,12 @@ def run_preview_json(
     out_path: Path,
     *args: object,
 ) -> tuple[subprocess.CompletedProcess[str], object]:
-    proc = run_cli(idac_cmd, idac_env, "preview", "-o", str(out_path), "-c", f"db:{database}", *args)
+    proc = run_cli(idac_cmd, idac_env, "preview", "-o", str(out_path), "-c", str(database), *args)
     assert out_path.exists(), proc.stderr or proc.stdout
     return proc, json.loads(out_path.read_text(encoding="utf-8"))
 
 
-def preview_snapshot_cli2(
+def preview_snapshot(
     idac_cmd: list[str],
     idac_env: dict[str, str],
     database: Path,
@@ -146,10 +138,10 @@ def preview_snapshot_cli2(
     preview_args: list[object] | tuple[object, ...],
     filename: str = "preview.json",
 ) -> dict[str, object]:
-    before = run_idalib_json(idac_cmd, idac_env, database, *read_args)
+    before = run_nexus_json(idac_cmd, idac_env, database, *read_args)
     proc, preview = run_preview_json(idac_cmd, idac_env, database, tmp_path / filename, *preview_args)
     assert proc.returncode == 0, proc.stderr or proc.stdout
-    after_preview = run_idalib_json(idac_cmd, idac_env, database, *read_args)
+    after_preview = run_nexus_json(idac_cmd, idac_env, database, *read_args)
     return {
         "before": before,
         "preview": preview,
@@ -157,7 +149,7 @@ def preview_snapshot_cli2(
     }
 
 
-def preview_round_trip_cli2(
+def preview_round_trip(
     idac_cmd: list[str],
     idac_env: dict[str, str],
     database: Path,
@@ -169,7 +161,7 @@ def preview_round_trip_cli2(
     after_persist_args: list[object] | tuple[object, ...] | None = None,
     filename: str = "preview.json",
 ) -> dict[str, object]:
-    preview_result = preview_snapshot_cli2(
+    preview_result = preview_snapshot(
         idac_cmd,
         idac_env,
         database,
@@ -178,8 +170,8 @@ def preview_round_trip_cli2(
         preview_args=persist_args if preview_args is None else preview_args,
         filename=filename,
     )
-    persisted = run_idalib_json(idac_cmd, idac_env, database, *persist_args)
-    after_persist = run_idalib_json(
+    persisted = run_nexus_json(idac_cmd, idac_env, database, *persist_args)
+    after_persist = run_nexus_json(
         idac_cmd,
         idac_env,
         database,
@@ -194,12 +186,12 @@ def preview_round_trip_cli2(
 
 __all__ = [
     "normalize_pseudocode_call_arguments",
-    "preview_round_trip_cli2",
-    "preview_snapshot_cli2",
+    "preview_round_trip",
+    "preview_snapshot",
     "run_cli",
     "run_cli_json",
-    "run_idalib",
-    "run_idalib_json",
-    "run_idalib_text",
+    "run_nexus",
+    "run_nexus_json",
+    "run_nexus_text",
     "run_preview_json",
 ]

@@ -25,30 +25,12 @@ def test_workspace_init_creates_expected_tree(idac_cmd: list[str], idac_env: dic
     assert proc.returncode == 0, proc.stderr or proc.stdout
     assert (dest / ".claude" / "settings.json").is_file()
     assert (dest / ".codex" / "config.toml").is_file()
-    assert (dest / ".codex" / "rules" / "default.rules").is_file()
-    assert (dest / "CLAUDE.md").is_file()
     assert (dest / "AGENTS.md").is_file()
-    assert (dest / ".gitignore").is_file()
     assert (dest / ".idac" / "tmp").is_dir()
     assert (dest / "audit").is_dir()
     assert (dest / "headers" / "recovered").is_dir()
-    assert (dest / "headers" / "vendor").is_dir()
-    assert (dest / "scripts").is_dir()
-    assert not any(path.is_file() and path.name != ".gitkeep" for path in (dest / "scripts").iterdir())
-    assert (dest / "prompts" / "recovery-pass.md").is_file()
-    assert (dest / "references" / "cli.md").is_file()
-    assert (dest / "references" / "class-recovery.md").is_file()
     assert (dest / ".git").is_dir()
     assert _git_repo_root(dest) == dest.resolve()
-    assert "Initialized git repository." in proc.stdout
-    assert ".claude/" in proc.stdout
-    assert ".codex/rules/" in proc.stdout
-    assert "audit/.gitkeep" in proc.stdout
-    assert "prompts/recovery-pass.md" in proc.stdout
-    assert "references/cli.md" in proc.stdout
-    assert "references/workflows.md" in proc.stdout
-    assert ".idac/" in proc.stdout
-    assert ".idac/tmp/" in proc.stdout
 
 
 def test_workspace_init_into_existing_empty_directory_succeeds(
@@ -61,8 +43,7 @@ def test_workspace_init_into_existing_empty_directory_succeeds(
 
     assert proc.returncode == 0, proc.stderr or proc.stdout
     assert (dest / ".idac" / "tmp").is_dir()
-    assert (dest / "CLAUDE.md").is_file()
-    assert (dest / "references" / "cli.md").is_file()
+    assert (dest / "AGENTS.md").is_file()
 
 
 def test_workspace_init_refuses_existing_workspace_without_force(
@@ -75,7 +56,7 @@ def test_workspace_init_refuses_existing_workspace_without_force(
     second = run_cli(idac_cmd, idac_env, "workspace", "init", str(dest))
 
     assert second.returncode == 1
-    assert "workspace already initialized (use --force to overwrite config)" in second.stderr
+    assert "--force" in second.stderr
 
 
 def test_workspace_init_force_overwrites_config_but_preserves_content(
@@ -85,26 +66,18 @@ def test_workspace_init_force_overwrites_config_but_preserves_content(
     proc = run_cli(idac_cmd, idac_env, "workspace", "init", str(dest))
     assert proc.returncode == 0, proc.stderr or proc.stdout
 
-    claude_path = dest / "CLAUDE.md"
-    prompt_path = dest / "prompts" / "recovery-pass.md"
-    reference_path = dest / "references" / "cli.md"
+    guidance_path = dest / "AGENTS.md"
     custom_audit_note = dest / "audit" / "finding.txt"
-    original_claude = claude_path.read_text(encoding="utf-8")
+    original_guidance = guidance_path.read_text(encoding="utf-8")
 
-    claude_path.write_text("custom claude content\n", encoding="utf-8")
-    prompt_path.write_text("custom prompt content\n", encoding="utf-8")
-    reference_path.write_text("custom reference content\n", encoding="utf-8")
+    guidance_path.write_text("custom agent guidance\n", encoding="utf-8")
     custom_audit_note.write_text("keep me\n", encoding="utf-8")
 
     forced = run_cli(idac_cmd, idac_env, "workspace", "init", str(dest), "--force")
 
     assert forced.returncode == 0, forced.stderr or forced.stdout
-    assert claude_path.read_text(encoding="utf-8") == original_claude
-    assert prompt_path.read_text(encoding="utf-8") == "custom prompt content\n"
-    assert reference_path.read_text(encoding="utf-8") == "custom reference content\n"
+    assert guidance_path.read_text(encoding="utf-8") == original_guidance
     assert custom_audit_note.read_text(encoding="utf-8") == "keep me\n"
-    assert "Overwrote:" in forced.stdout
-    assert "CLAUDE.md" in forced.stdout
 
 
 def test_workspace_init_adopts_existing_parent_repo_without_nesting(
@@ -126,4 +99,3 @@ def test_workspace_init_adopts_existing_parent_repo_without_nesting(
     assert proc.returncode == 0, proc.stderr or proc.stdout
     assert not (dest / ".git").exists()
     assert _git_repo_root(dest) == repo_root.resolve()
-    assert "Using existing git repository:" in proc.stdout

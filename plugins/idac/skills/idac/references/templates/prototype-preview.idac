@@ -1,0 +1,18 @@
+# Generic prototype preview pass
+#
+# Support types must already exist. Replace every placeholder declaration and address,
+# then run:
+#   idac batch prototype-preview.idac --lint --out /tmp/prototype-preview.lint.json
+#   idac batch prototype-preview.idac --fail-fast --out /tmp/prototype-preview.json
+# Inspect every preview's before/after data in that journal. Only then run the matching
+# prototype-pass.idac commit file against the same target.
+
+function prototype show 0x100000000
+function prototype check 0x100000000 --decl "int __fastcall ExampleClass__parseHeader(ExampleClass *__hidden this, const unsigned __int8 *buf, unsigned int len)"
+preview function prototype set 0x100000000 --decl "int __fastcall ExampleClass__parseHeader(ExampleClass *__hidden this, const unsigned __int8 *buf, unsigned int len)"
+function prototype show 0x100000100
+function prototype check 0x100000100 --decl "void *__fastcall ExampleClass__buildResult(ExampleClass *__hidden this, InputContext *ctx, const ExampleOptions *options)"
+preview function prototype set 0x100000100 --decl "void *__fastcall ExampleClass__buildResult(ExampleClass *__hidden this, InputContext *ctx, const ExampleOptions *options)"
+function prototype show 0x100000200
+function prototype check 0x100000200 --decl "unsigned int __fastcall ExampleClass__getCount(const ExampleClass *__hidden this)"
+preview function prototype set 0x100000200 --decl "unsigned int __fastcall ExampleClass__getCount(const ExampleClass *__hidden this)"

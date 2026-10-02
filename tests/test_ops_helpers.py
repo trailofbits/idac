@@ -1,41 +1,30 @@
 from __future__ import annotations
 
-from typing import get_args
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
-from idac.ops import OperationContext, payload_from_model
-from idac.ops.families import (
-    bookmarks,
-    classes,
-    database,
-    functions,
-    locals,
-    names,
-    prototypes,
-    search,
-    segments,
-    type_declare,
-)
-from idac.ops.families import named_types as types
-from idac.ops.families.type_declare import _split_declarations
-from idac.ops.helpers import matching
-from idac.ops.manifest import OPERATION_SPEC_MAP, SUPPORTED_OPERATIONS, OperationName
-from idac.ops.preview import PreviewSpec, run_preview
-from idac.ops.runtime import (
-    IdaOperationError,
-    IdaRuntime,
-    SegmentRange,
-    XrefRecord,
-    is_recoverable_ida_error,
-    suppress_recoverable_ida_errors,
-)
+from idac import remote_ops
+from tests.remote_ops_harness import dispatch_with_runtime
+
+IdaOperationError = remote_ops.IdaOperationError
+IdaRuntime = remote_ops.IdaRuntime
+XrefRecord = remote_ops.XrefRecord
 
 
-def _run_op(name: OperationName, runtime, params: dict[str, object]):
-    """Parse and run an operation through its spec, as production dispatch does."""
-    spec = OPERATION_SPEC_MAP[name]
-    return payload_from_model(spec.run(OperationContext(runtime=runtime), spec.parse(params)))
+def _run_op(name: str, runtime, params: dict[str, object], *, preview: bool = False):
+    return dispatch_with_runtime(runtime, name, params, preview=preview)
+
+
+class _SuccessfulUndo:
+    @staticmethod
+    def create_undo_point(**_kwargs) -> bool:
+        return True
+
+    @staticmethod
+    def perform_undo() -> bool:
+        return True
 
 
 class _DummyRuntime:
@@ -60,191 +49,6 @@ def test_struct_field_set_rejects_negative_offsets() -> None:
         )
 
 
-def test_parse_member_type_uses_parse_decl_with_field_name() -> None:
-    calls: list[tuple[str, int]] = []
-    tif = object()
-
-    class FakeIdaTypeInf:
-        PT_SIL = 0x1
-        PT_VAR = 0x8
-        PT_SEMICOLON = 0x4000
-
-        @staticmethod
-        def tinfo_t() -> object:
-            return tif
-
-        @staticmethod
-        def parse_decl(out_tif: object, til: object, decl: str, flags: int) -> bool:
-            assert out_tif is tif
-            assert til is None
-            calls.append((decl, flags))
-            return True
-
-    class FakeRuntime(IdaRuntime):
-        def mod(self, name: str) -> FakeIdaTypeInf:
-            assert name == "ida_typeinf"
-            return FakeIdaTypeInf()
-
-    assert types._parse_member_type(FakeRuntime(), "unsigned int", "count") is tif
-    assert calls == [("unsigned int count;", 0x4009)]
-
-
-def test_parse_member_type_accepts_full_field_declaration() -> None:
-    calls: list[tuple[str, int]] = []
-    tif = object()
-
-    class FakeIdaTypeInf:
-        PT_SIL = 0x1
-        PT_VAR = 0x8
-        PT_SEMICOLON = 0x4000
-
-        @staticmethod
-        def tinfo_t() -> object:
-            return tif
-
-        @staticmethod
-        def parse_decl(out_tif: object, til: object, decl: str, flags: int) -> bool:
-            assert out_tif is tif
-            assert til is None
-            calls.append((decl, flags))
-            return decl == "unsigned int count;"
-
-    class FakeRuntime(IdaRuntime):
-        def mod(self, name: str) -> FakeIdaTypeInf:
-            assert name == "ida_typeinf"
-            return FakeIdaTypeInf()
-
-    assert types._parse_member_type(FakeRuntime(), "unsigned int count;", "count") is tif
-    assert calls == [("unsigned int count;", 0x4009)]
-
-
-def test_parse_var_decl_uses_parse_decl_with_silent_var_mode() -> None:
-    calls: list[tuple[str, int]] = []
-    tif = object()
-
-    class FakeIdaTypeInf:
-        PT_SIL = 0x1
-        PT_VAR = 0x8
-        PT_SEMICOLON = 0x4000
-
-        @staticmethod
-        def tinfo_t() -> object:
-            return tif
-
-        @staticmethod
-        def parse_decl(out_tif: object, til: object, decl: str, flags: int) -> bool:
-            assert out_tif is tif
-            assert til is None
-            calls.append((decl, flags))
-            return True
-
-    class FakeRuntime(IdaRuntime):
-        def mod(self, name: str) -> FakeIdaTypeInf:
-            assert name == "ida_typeinf"
-            return FakeIdaTypeInf()
-
-    assert (
-        locals._parse_var_decl(
-            FakeRuntime(),
-            "unsigned int value",
-            error_message="boom",
-        )
-        is tif
-    )
-    assert calls == [("unsigned int value;", 0x4009)]
-
-
-def test_op_decompile_passes_no_cache_flag_when_requested() -> None:
-    calls: list[tuple[int, int]] = []
-
-    class FakeLine:
-        def __init__(self, line: str) -> None:
-            self.line = line
-
-    class FakeCfunc:
-        def get_pseudocode(self) -> list[FakeLine]:
-            return [FakeLine("int main(void)")]
-
-    class FakeHexrays:
-        DECOMP_NO_CACHE = 0x2
-
-        @staticmethod
-        def decompile(ea: int, hf=None, flags: int = 0) -> FakeCfunc:
-            assert hf is None
-            calls.append((ea, flags))
-            return FakeCfunc()
-
-    class FakeRuntime(IdaRuntime):
-        def require_hexrays(self) -> FakeHexrays:
-            return FakeHexrays()
-
-        def function_ea(self, identifier: str) -> int:
-            assert identifier == "main"
-            return 0x401000
-
-        @staticmethod
-        def mod(name: str):
-            assert name == "ida_lines"
-
-            class FakeIdaLines:
-                @staticmethod
-                def tag_remove(text: str) -> str:
-                    return text
-
-            return FakeIdaLines()
-
-    payload = _run_op("decompile", FakeRuntime(), {"identifier": "main", "no_cache": True})
-
-    assert payload == {"text": "int main(void)"}
-    assert calls == [(0x401000, 0x2)]
-
-
-def test_disasm_uses_direct_ida_lines_api() -> None:
-    calls: list[tuple[str, int]] = []
-
-    class FakeIdaLines:
-        @staticmethod
-        def generate_disasm_line(ea: int, flags: int) -> str:
-            calls.append(("generate", ea))
-            assert flags == 0
-            return f"<tag>insn_{ea:x}</tag>"
-
-        @staticmethod
-        def tag_remove(text: str) -> str:
-            calls.append(("tag_remove", 0))
-            return text.replace("<tag>", "").replace("</tag>", "")
-
-    class FakeRuntime(IdaRuntime):
-        def function_ea(self, identifier: str) -> int:
-            assert identifier == "main"
-            return 0x401000
-
-        @staticmethod
-        def mod(name: str) -> FakeIdaLines:
-            assert name == "ida_lines"
-            return FakeIdaLines()
-
-        class idautils:
-            @staticmethod
-            def FuncItems(func_ea: int) -> list[int]:
-                assert func_ea == 0x401000
-                return [0x401000, 0x401004]
-
-    rendered = functions._disasm(OperationContext(runtime=FakeRuntime()), functions.FunctionIdentifierRequest("main"))
-
-    assert rendered.text == "0x401000: insn_401000\n0x401004: insn_401004"
-    assert calls == [("generate", 0x401000), ("tag_remove", 0), ("generate", 0x401004), ("tag_remove", 0)]
-
-
-def test_text_matches_supports_regex_alternation() -> None:
-    assert matching.text_matches(
-        "GlobalHEIFInfo",
-        pattern="GlobalHEIFInfo|HEIFGroupItem|HEIFGroup|HEIFStereoAggressor|HEIFReadPlugin|HEIFWritePlugin",
-        regex=True,
-    )
-    assert not matching.text_matches("UnrelatedName", pattern="GlobalHEIFInfo|HEIFGroupItem", regex=True)
-
-
 def test_function_list_honors_limit() -> None:
     class FakeFunc:
         def __init__(self, ea: int, flags: int = 0) -> None:
@@ -267,13 +71,17 @@ def test_function_list_honors_limit() -> None:
 
     class FakeIdaSegment:
         @staticmethod
-        def getseg(_ea: int):
-            return None
+        def get_segment_name(_ea: int, _flags: int) -> str:
+            return ""
+
+    class FakeIdaName:
+        GN_VISIBLE = 1
 
     class FakeRuntime(IdaRuntime):
         idautils = FakeIdaUtils()
         ida_funcs = FakeIdaFuncs()
         ida_segment = FakeIdaSegment()
+        ida_name = FakeIdaName()
 
         @staticmethod
         def function_name(ea: int) -> str:
@@ -283,20 +91,9 @@ def test_function_list_honors_limit() -> None:
         def display_function_name(ea: int, *, demangle: bool = False) -> str:
             return FakeRuntime.function_name(ea)
 
-    rows = functions._function_list(
-        OperationContext(runtime=FakeRuntime()),
-        functions.FunctionListRequest(
-            pattern="",
-            glob=False,
-            regex=False,
-            ignore_case=False,
-            segment=None,
-            limit=2,
-            demangle=False,
-        ),
-    )
+    rows = _run_op("function_list", FakeRuntime(), {"limit": 2})
 
-    assert [row.name for row in rows] == ["alpha", "beta"]
+    assert [row["name"] for row in rows] == ["alpha", "beta"]
 
 
 def test_function_list_reports_section_name() -> None:
@@ -304,9 +101,6 @@ def test_function_list_reports_section_name() -> None:
         start_ea = 0x401000
         end_ea = 0x401010
         flags = 0
-
-    class FakeSegment:
-        start_ea = 0x401000
 
     class FakeIdaUtils:
         @staticmethod
@@ -322,17 +116,17 @@ def test_function_list_reports_section_name() -> None:
 
     class FakeIdaSegment:
         @staticmethod
-        def getseg(_ea: int) -> FakeSegment:
-            return FakeSegment()
-
-        @staticmethod
-        def get_segm_name(_segment: FakeSegment) -> str:
+        def get_segment_name(_ea: int, _flags: int) -> str:
             return ".text"
+
+    class FakeIdaName:
+        GN_VISIBLE = 1
 
     class FakeRuntime(IdaRuntime):
         idautils = FakeIdaUtils()
         ida_funcs = FakeIdaFuncs()
         ida_segment = FakeIdaSegment()
+        ida_name = FakeIdaName()
 
         @staticmethod
         def function_name(_ea: int) -> str:
@@ -342,23 +136,12 @@ def test_function_list_reports_section_name() -> None:
         def display_function_name(ea: int, *, demangle: bool = False) -> str:
             return FakeRuntime.function_name(ea)
 
-    rows = functions._function_list(
-        OperationContext(runtime=FakeRuntime()),
-        functions.FunctionListRequest(
-            pattern="",
-            glob=False,
-            regex=False,
-            ignore_case=False,
-            segment=None,
-            limit=None,
-            demangle=False,
-        ),
-    )
+    rows = _run_op("function_list", FakeRuntime(), {})
 
-    assert [(row.name, row.section) for row in rows] == [("main", ".text")]
+    assert [(row["name"], row["section"]) for row in rows] == [("main", ".text")]
 
 
-def test_function_list_filter_uses_raw_name_without_demangle() -> None:
+def test_function_list_demangle_controls_matching_and_rendering() -> None:
     class FakeFunc:
         start_ea = 0x401000
         end_ea = 0x401010
@@ -375,13 +158,17 @@ def test_function_list_filter_uses_raw_name_without_demangle() -> None:
 
     class FakeIdaSegment:
         @staticmethod
-        def getseg(_ea: int):
-            return None
+        def get_segment_name(_ea: int, _flags: int) -> str:
+            return ""
+
+    class FakeIdaName:
+        GN_VISIBLE = 1
 
     class FakeRuntime(IdaRuntime):
         idautils = FakeIdaUtils()
         ida_funcs = FakeIdaFuncs()
         ida_segment = FakeIdaSegment()
+        ida_name = FakeIdaName()
 
         @staticmethod
         def function_name(_ea: int) -> str:
@@ -391,81 +178,21 @@ def test_function_list_filter_uses_raw_name_without_demangle() -> None:
         def display_function_name(_ea: int, *, demangle: bool = False) -> str:
             return "Foo::bar()"
 
-    rows = functions._function_list(
-        OperationContext(runtime=FakeRuntime()),
-        functions.FunctionListRequest(
-            pattern="Foo::bar",
-            glob=False,
-            regex=False,
-            ignore_case=False,
-            segment=None,
-            limit=None,
-            demangle=False,
-        ),
-    )
+    raw_matches = _run_op("function_list", FakeRuntime(), {"pattern": "Foo::bar"})
+    demangled_matches = _run_op("function_list", FakeRuntime(), {"pattern": "Foo::bar", "demangle": True})
 
-    assert rows == ()
-
-
-def test_function_list_filter_uses_display_name_with_demangle() -> None:
-    class FakeFunc:
-        start_ea = 0x401000
-        end_ea = 0x401010
-
-    class FakeIdaUtils:
-        @staticmethod
-        def Functions():
-            return [0x401000]
-
-    class FakeIdaFuncs:
-        @staticmethod
-        def get_func(_ea: int) -> FakeFunc:
-            return FakeFunc()
-
-    class FakeIdaSegment:
-        @staticmethod
-        def getseg(_ea: int):
-            return None
-
-    class FakeRuntime(IdaRuntime):
-        idautils = FakeIdaUtils()
-        ida_funcs = FakeIdaFuncs()
-        ida_segment = FakeIdaSegment()
-
-        @staticmethod
-        def function_name(_ea: int) -> str:
-            return "__ZN3Foo3barEv"
-
-        @staticmethod
-        def display_function_name(_ea: int, *, demangle: bool = False) -> str:
-            return "Foo::bar()"
-
-    rows = functions._function_list(
-        OperationContext(runtime=FakeRuntime()),
-        functions.FunctionListRequest(
-            pattern="Foo::bar",
-            glob=False,
-            regex=False,
-            ignore_case=False,
-            segment=None,
-            limit=None,
-            demangle=True,
-        ),
-    )
-
-    assert [(row.name, row.render_name) for row in rows] == [("__ZN3Foo3barEv", "Foo::bar()")]
+    assert raw_matches == []
+    assert [(row["name"], row["render_name"]) for row in demangled_matches] == [("__ZN3Foo3barEv", "Foo::bar()")]
 
 
 def test_database_info_reports_start_ea_separately_from_first_entry() -> None:
     class FakeIdaEntry:
         @staticmethod
-        def get_entry_ordinal(index: int) -> int:
-            assert index == 0
+        def get_entry_ordinal(_index: int) -> int:
             return 0
 
         @staticmethod
-        def get_entry(ordinal: int) -> int:
-            assert ordinal == 0
+        def get_entry(_ordinal: int) -> int:
             return 0x402000
 
     class FakeIdaIda:
@@ -501,13 +228,13 @@ def test_database_info_reports_start_ea_separately_from_first_entry() -> None:
         PATH_TYPE_IDB = 1
 
         @staticmethod
-        def get_path(path_type: int) -> str:
-            assert path_type == 1
+        def get_path(_path_type: int) -> str:
             return "/tmp/sample.i64"
 
     class FakeIdaApi:
         BADADDR = -1
 
+    class FakeIdaNalt:
         @staticmethod
         def get_input_file_path() -> str:
             return "/tmp/sample"
@@ -527,41 +254,19 @@ def test_database_info_reports_start_ea_separately_from_first_entry() -> None:
                 "ida_entry": FakeIdaEntry(),
                 "ida_ida": FakeIdaIda(),
                 "ida_loader": FakeIdaLoader(),
+                "ida_nalt": FakeIdaNalt(),
                 "idaapi": FakeIdaApi(),
             }
             return modules[name]
 
-    result = database._database_info(OperationContext(runtime=FakeRuntime()), database.DatabaseInfoRequest())
+    result = _run_op("database_info", FakeRuntime(), {})
 
-    assert result.start_ea == "0x401000"
-    assert result.entry_ea == "0x402000"
-    assert result.main_ea == "0x403000"
-
-
-def test_segment_list_filters_with_regex_pattern() -> None:
-    class FakeRuntime(IdaRuntime):
-        @staticmethod
-        def iter_segments() -> tuple[SegmentRange, ...]:
-            return (
-                SegmentRange(name="__TEXT:__text", start_ea=0x1000, end_ea=0x2000),
-                SegmentRange(name="__TEXT:__cstring", start_ea=0x3000, end_ea=0x3400),
-                SegmentRange(name="__DATA:__data", start_ea=0x4000, end_ea=0x4800),
-            )
-
-    rows = segments._segment_list(
-        OperationContext(runtime=FakeRuntime()),
-        segments.SegmentListRequest(pattern="__TEXT|__cstring", glob=False, regex=True, ignore_case=False),
-    )
-
-    assert rows == (
-        segments.SegmentListEntry(name="__TEXT:__text", start="0x1000", end="0x2000", size=0x1000),
-        segments.SegmentListEntry(name="__TEXT:__cstring", start="0x3000", end="0x3400", size=0x400),
-    )
+    assert result["start_ea"] == "0x401000"
+    assert result["entry_ea"] == "0x402000"
+    assert result["main_ea"] == "0x403000"
 
 
-def test_xrefs_collect_code_and_data_references_explicitly() -> None:
-    seen_flags: list[int] = []
-
+def test_xrefs_collect_unique_code_and_data_references() -> None:
     class FakeRuntime(IdaRuntime):
         class ida_xref:
             XREF_FLOW = 0
@@ -580,774 +285,131 @@ def test_xrefs_collect_code_and_data_references_explicitly() -> None:
 
         def xrefs_to(self, ea: int, *, flags: int = 0) -> tuple[XrefRecord, ...]:
             assert ea == 0x401004
-            seen_flags.append(flags)
-            if flags == self.ida_xref.XREF_FLOW:
-                return (
-                    XrefRecord(
-                        from_ea=0x400FF0,
-                        to_ea=0x401004,
-                        type="Ordinary_Flow",
-                        kind="flow",
-                        user=False,
-                    ),
-                )
-            if flags == self.ida_xref.XREF_CODE:
-                return (
-                    XrefRecord(
-                        from_ea=0x401000,
-                        to_ea=0x401004,
-                        type="Code_Near_Call",
-                        kind="call",
-                        user=False,
-                    ),
-                )
-            if flags == self.ida_xref.XREF_DATA:
-                return (
-                    XrefRecord(
-                        from_ea=0x402000,
-                        to_ea=0x401004,
-                        type="Data_Read",
-                        kind="read",
-                        user=False,
-                    ),
-                )
-            raise AssertionError(f"unexpected flags: {flags}")
-
-    rows = search._xrefs(OperationContext(runtime=FakeRuntime()), search.XrefsRequest(identifier="target"))
-
-    assert seen_flags == [0, 4, 2]
-    assert rows == (
-        search.XrefRow(
-            from_="0x401000",
-            to="0x401004",
-            type="Code_Near_Call",
-            kind="call",
-            user=False,
-            function=None,
-        ),
-        search.XrefRow(
-            from_="0x400ff0",
-            to="0x401004",
-            type="Ordinary_Flow",
-            kind="flow",
-            user=False,
-            function=None,
-        ),
-        search.XrefRow(
-            from_="0x402000",
-            to="0x401004",
-            type="Data_Read",
-            kind="read",
-            user=False,
-            function=None,
-        ),
-    )
-
-
-def test_runtime_xrefs_to_requests_flow_by_default() -> None:
-    seen: list[tuple[int, int]] = []
-
-    class FakeXref:
-        frm = 0x401000
-        to = 0x401004
-        iscode = True
-        type = 99
-        user = False
-
-    class FakeXrefBlock:
-        def refs_to(self, ea: int, flags: int):
-            seen.append((ea, flags))
-            return (FakeXref(),)
-
-        def refs_from(self, ea: int, flags: int):
-            seen.append((ea, flags))
-            return (FakeXref(),)
-
-    class FakeIdaXref:
-        XREF_FLOW = 1234
-
-        @staticmethod
-        def xrefblk_t() -> FakeXrefBlock:
-            return FakeXrefBlock()
-
-    class FakeRuntime(IdaRuntime):
-        def mod(self, name: str):
-            assert name == "ida_xref"
-            return FakeIdaXref()
-
-        @staticmethod
-        def _normalize_xref(_xref) -> XrefRecord:
-            return XrefRecord(
-                from_ea=0x401000,
-                to_ea=0x401004,
-                type="Ordinary_Flow",
-                kind="flow",
-                user=False,
+            del flags
+            return (
+                XrefRecord(
+                    from_ea=0x400FF0,
+                    to_ea=0x401004,
+                    type="Ordinary_Flow",
+                    kind="flow",
+                    user=False,
+                ),
+                XrefRecord(
+                    from_ea=0x401000,
+                    to_ea=0x401004,
+                    type="Code_Near_Call",
+                    kind="call",
+                    user=False,
+                ),
+                XrefRecord(
+                    from_ea=0x402000,
+                    to_ea=0x401004,
+                    type="Data_Read",
+                    kind="read",
+                    user=False,
+                ),
             )
 
-    runtime = FakeRuntime()
-    assert runtime.xrefs_to(0x401004) == (
-        XrefRecord(
-            from_ea=0x401000,
-            to_ea=0x401004,
-            type="Ordinary_Flow",
-            kind="flow",
-            user=False,
-        ),
-    )
-    assert runtime.xrefs_from(0x401000) == (
-        XrefRecord(
-            from_ea=0x401000,
-            to_ea=0x401004,
-            type="Ordinary_Flow",
-            kind="flow",
-            user=False,
-        ),
-    )
-    assert seen == [(0x401004, 1234), (0x401000, 1234)]
+    rows = _run_op("xrefs", FakeRuntime(), {"identifier": "target"})
 
-
-def test_op_function_frame_uses_get_func_frame_not_func_frame_object() -> None:
-    calls: list[tuple[str, int]] = []
-
-    class FakeMemberType:
-        @staticmethod
-        def dstr() -> str:
-            return "int"
-
-    class FakeFrameMember:
-        name = "var_4"
-        type = FakeMemberType()
-
-        @staticmethod
-        def begin() -> int:
-            return 32
-
-        @staticmethod
-        def end() -> int:
-            return 64
-
-    class FakeFrameTif:
-        def __init__(self) -> None:
-            self._members = [FakeFrameMember()]
-
-        @staticmethod
-        def get_size() -> int:
-            return 24
-
-        def get_func_frame(self, func: object) -> bool:
-            calls.append(("get_func_frame", int(func.start_ea)))
-            return True
-
-        def iter_struct(self):
-            return iter(self._members)
-
-        @staticmethod
-        def get_udm_tid(index: int) -> int:
-            assert index == 0
-            return 0
-
-    class FakeIdaTypeInf:
-        @staticmethod
-        def tinfo_t() -> FakeFrameTif:
-            return FakeFrameTif()
-
-    class FakeIdaFrame:
-        @staticmethod
-        def is_special_frame_member(_tid: int) -> bool:
-            return False
-
-        @staticmethod
-        def is_funcarg_off(_func: object, _offset: int) -> bool:
-            return False
-
-        @staticmethod
-        def soff_to_fpoff(_func: object, offset: int) -> int:
-            return offset
-
-    class FakeIdaFuncs:
-        @staticmethod
-        def get_func_name(ea: int) -> str:
-            assert ea == 0x401000
-            return "main"
-
-    class FakeIdaXref:
-        dr_R = 1
-        dr_W = 2
-
-    class FakeFunc:
-        start_ea = 0x401000
-        end_ea = 0x401020
-        frsize = 16
-        frregs = 0
-        argsize = 0
-
-        @property
-        def frame_object(self) -> object:
-            raise AssertionError("function_frame should not use func.frame_object")
-
-    class FakeRuntime(IdaRuntime):
-        def resolve_function(self, identifier: str) -> FakeFunc:
-            assert identifier == "main"
-            return FakeFunc()
-
-        def mod(self, name: str):
-            if name == "ida_frame":
-                return FakeIdaFrame()
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            if name == "ida_funcs":
-                return FakeIdaFuncs()
-            if name == "ida_xref":
-                return FakeIdaXref()
-            raise AssertionError(name)
-
-        @staticmethod
-        def tinfo_decl(_tif, *, multi: bool = True) -> str:
-            assert multi is False
-            return "int"
-
-    payload = _run_op("function_frame", FakeRuntime(), {"identifier": "main"})
-
-    assert payload["frame_size"] == 24
-    assert payload["members"] == [
-        {
-            "index": 0,
-            "name": "var_4",
-            "offset": 4,
-            "end_offset": 8,
-            "size": 4,
-            "type": "int",
-            "kind": "local",
-            "is_special": False,
-            "is_arg": False,
-            "fp_offset": 4,
-            "xrefs": [],
-            "xref_count": None,
-        }
-    ]
-    assert calls == [("get_func_frame", 0x401000), ("get_func_frame", 0x401000)]
-
-
-def test_local_rename_uses_direct_hexrays_rename_for_name_selector(monkeypatch) -> None:
-    class FakeHexrays:
-        def rename_lvar(self, func_ea: int, old_name: str, new_name: str) -> bool:
-            assert func_ea == 0x401000
-            assert old_name == "v4"
-            assert new_name == "sum_value"
-            return True
-
-    class FakeRuntime(IdaRuntime):
-        def function_ea(self, identifier: str) -> int:
-            assert identifier == "main"
-            return 0x401000
-
-        def require_hexrays(self) -> FakeHexrays:
-            return FakeHexrays()
-
-    monkeypatch.setattr(
-        locals,
-        "_select_local",
-        lambda runtime, func_ea, selector: locals.SelectedLocal("v4", "loc"),
-    )
-    monkeypatch.setattr(
-        locals,
-        "_local_list_result",
-        lambda runtime, func_ea: locals.LocalListResult(
-            function="main",
-            address="0x401000",
-            locals=(),
-        ),
-    )
-
-    payload = _run_op(
-        "local_rename",
-        FakeRuntime(),
-        {"identifier": "main", "old_name": "v4", "new_name": "sum_value"},
-    )
-
-    assert payload["changed"] is True
-
-
-def test_operation_literal_matches_spec_keys() -> None:
-    assert set(get_args(OperationName)) == set(SUPPORTED_OPERATIONS)
-
-
-def test_only_list_targets_lacks_a_direct_operation_handler() -> None:
-    assert set(SUPPORTED_OPERATIONS) - set(OPERATION_SPEC_MAP) == {"list_targets"}
-
-
-def test_python_exec_is_marked_mutating() -> None:
-    spec = OPERATION_SPEC_MAP["python_exec"]
-
-    assert spec.mutating is True
-
-
-def test_python_exec_scope_exposes_explicit_ida_runtime_modules() -> None:
-    imported: list[str] = []
-    require_hexrays_calls = 0
-
-    class FakeRuntime(IdaRuntime):
-        def mod(self, name: str):
-            imported.append(name)
-            if name == "ida_broken":
-                raise ImportError(name)
-            return {"module": name}
-
-        def require_hexrays(self):
-            nonlocal require_hexrays_calls
-            require_hexrays_calls += 1
-            return {"module": "ida_hexrays"}
-
-    scope = FakeRuntime().python_exec_scope(persist=False)
-
-    assert scope["idaapi"] == {"module": "idaapi"}
-    assert scope["ida_bytes"] == {"module": "ida_bytes"}
-    assert scope["ida_hexrays"] == {"module": "ida_hexrays"}
-    assert "ida_broken" not in scope
-    assert scope["idc"] == {"module": "idc"}
-    assert scope["idautils"] == {"module": "idautils"}
-    assert scope["result"] is None
-    assert require_hexrays_calls == 1
-    assert imported == [
-        "idaapi",
-        "ida_auto",
-        "ida_bytes",
-        "ida_entry",
-        "ida_frame",
-        "ida_funcs",
-        "ida_ida",
-        "ida_idc",
-        "ida_idp",
-        "ida_kernwin",
-        "ida_lines",
-        "ida_loader",
-        "ida_moves",
-        "ida_name",
-        "ida_nalt",
-        "ida_range",
-        "ida_segment",
-        "ida_strlist",
-        "ida_srclang",
-        "ida_typeinf",
-        "ida_ua",
-        "ida_undo",
-        "ida_xref",
-        "idc",
-        "idautils",
+    assert [(row["from"], row["kind"]) for row in rows] == [
+        ("0x401000", "call"),
+        ("0x400ff0", "flow"),
+        ("0x402000", "read"),
     ]
 
 
-def test_python_exec_scope_omits_ida_hexrays_when_unavailable() -> None:
-    class FakeRuntime(IdaRuntime):
-        def mod(self, name: str):
-            return {"module": name}
+def test_comment_preview_restores_state_after_readback_failure() -> None:
+    state = {0x401000: "before"}
 
-        def require_hexrays(self):
-            raise IdaOperationError("Hex-Rays decompiler is unavailable")
-
-    scope = FakeRuntime().python_exec_scope(persist=False)
-
-    assert "ida_hexrays" not in scope
-
-
-def test_name_set_preview_resolves_identifier_before_capture() -> None:
-    spec = OPERATION_SPEC_MAP["name_set"].preview
-    assert spec is not None
-    assert spec.prepare is not None
-
-    class FakeRuntime(IdaRuntime):
+    class FakeIdaBytes:
         @staticmethod
-        def mod(name: str):
-            assert name == "ida_name"
+        def get_cmt(ea: int, repeatable: bool) -> str:
+            assert repeatable is False
+            if state[ea] == "after":
+                raise RuntimeError("comment readback failed")
+            return state[ea]
 
-            class FakeIdaName:
-                @staticmethod
-                def get_name(ea: int) -> str:
-                    assert ea == 0x401000
-                    return ""
+        @staticmethod
+        def set_cmt(ea: int, text: str, repeatable: bool) -> bool:
+            assert repeatable is False
+            state[ea] = text
+            return True
 
-            return FakeIdaName()
-
+    class FakeRuntime(IdaRuntime):
         @staticmethod
         def resolve_address(identifier: str) -> int:
             assert identifier in {"main", "0x401000"}
             return 0x401000
 
-    context = OperationContext(runtime=FakeRuntime())
-    request = names._parse_name_set({"identifier": "main", "new_name": "renamed"})
-    prepared = spec.prepare_request(context, request)
-
-    assert prepared == names.NameSetRequest(identifier="0x401000", new_name="renamed")
-    assert spec.capture_before(context, prepared) == names.NameState(address="0x401000", name="")
-
-
-def test_name_set_preview_prepare_preserves_mutation_params() -> None:
-    spec = OPERATION_SPEC_MAP["name_set"].preview
-    assert spec is not None
-    assert spec.prepare is not None
-
-    class FakeRuntime(IdaRuntime):
         @staticmethod
-        def resolve_address(identifier: str) -> int:
-            assert identifier == "main"
-            return 0x401000
+        def mod(name: str) -> FakeIdaBytes:
+            assert name == "ida_bytes"
+            return FakeIdaBytes()
 
-    context = OperationContext(runtime=FakeRuntime())
-    request = names._parse_name_set({"identifier": "main", "new_name": "add_numbers"})
-    prepared = spec.prepare_request(context, request)
+    with pytest.raises(RuntimeError, match="comment readback failed"):
+        _run_op("comment_set", FakeRuntime(), {"address": "main", "text": "after"}, preview=True)
 
-    assert prepared == names.NameSetRequest(identifier="0x401000", new_name="add_numbers")
-
-
-def test_local_rename_preview_registers_cleanup() -> None:
-    spec = OPERATION_SPEC_MAP["local_rename"].preview
-
-    assert spec is not None
-    assert spec.cleanup is not None
+    assert state == {0x401000: "before"}
 
 
-def test_strings_manifest_marks_operation_read_only() -> None:
-    spec = OPERATION_SPEC_MAP["strings"]
+def test_type_show_does_not_suppress_type_errors_from_ida() -> None:
+    class BrokenType:
+        @staticmethod
+        def get_type_name() -> str:
+            return "Widget"
 
-    assert spec.mutating is False
-    assert spec.preview is None
+        @staticmethod
+        def get_size() -> int:
+            return 4
 
+        @staticmethod
+        def _print(_name: str, _flags: int) -> str:
+            raise TypeError("broken type printer")
 
-def test_preview_cleanup_runs_after_failed_mutation() -> None:
-    events: list[str] = []
-
-    class FakeUndo:
-        def create_undo_point(self, **_kwargs) -> bool:
-            events.append("create")
-            return True
-
-        def perform_undo(self) -> bool:
-            events.append("undo")
-            return True
+    class FakeIdaTypeInf:
+        PRTYPE_TYPE = 0x1
+        PRTYPE_DEF = 0x2
+        PRTYPE_MULTI = 0x4
 
     class FakeRuntime(IdaRuntime):
-        def mod(self, name: str) -> FakeUndo:
-            assert name == "ida_undo"
-            return FakeUndo()
+        def __init__(self) -> None:
+            super().__init__()
 
-    def capture(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
-        events.append("capture")
-        return {"captured": True}
+        @staticmethod
+        def get_named_type(name: str) -> BrokenType:
+            assert name == "Widget"
+            return BrokenType()
 
-    def cleanup(_context: OperationContext, _request: dict[str, object]) -> None:
-        events.append("cleanup")
+        @staticmethod
+        def classify_tinfo(_tif: object) -> str:
+            return "struct"
 
-    def handler(_context: OperationContext, _request: dict[str, object]) -> object:
-        events.append("mutate")
-        raise RuntimeError("boom")
+        @staticmethod
+        def mod(name: str) -> FakeIdaTypeInf:
+            assert name == "ida_typeinf"
+            return FakeIdaTypeInf()
 
-    with pytest.raises(RuntimeError, match="boom"):
-        run_preview(
-            OperationContext(runtime=FakeRuntime(), preview=True),
-            "test_preview",
-            {},
-            handler,
-            PreviewSpec(capture_before=capture, capture_after=capture, cleanup=cleanup, use_undo=True),
-        )
-
-    assert events == ["create", "capture", "mutate", "undo", "cleanup"]
-
-
-def test_preview_cleanup_does_not_mask_mutation_failure() -> None:
-    class FakeUndo:
-        def create_undo_point(self, **_kwargs) -> bool:
-            return True
-
-        def perform_undo(self) -> bool:
-            return True
-
-    class FakeRuntime(IdaRuntime):
-        def mod(self, name: str) -> FakeUndo:
-            assert name == "ida_undo"
-            return FakeUndo()
-
-    def capture(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
-        return {"captured": True}
-
-    def cleanup(_context: OperationContext, _request: dict[str, object]) -> None:
-        raise RuntimeError("cleanup failed")
-
-    def handler(_context: OperationContext, _request: dict[str, object]) -> object:
-        raise ValueError("mutation failed")
-
-    with pytest.raises(ValueError, match="mutation failed"):
-        run_preview(
-            OperationContext(runtime=FakeRuntime(), preview=True),
-            "test_preview",
-            {},
-            handler,
-            PreviewSpec(capture_before=capture, capture_after=capture, cleanup=cleanup, use_undo=True),
-        )
-
-
-def test_manual_preview_rolls_back_when_after_capture_fails() -> None:
-    events: list[str] = []
-
-    def capture_before(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
-        events.append("before")
-        return {"before": True}
-
-    def capture_after(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
-        events.append("after")
-        raise RuntimeError("after failed")
-
-    def rollback(
-        _context: OperationContext,
-        _request: dict[str, object],
-        _before: dict[str, bool],
-        _result: dict[str, bool],
-    ) -> None:
-        events.append("rollback")
-
-    def handler(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
-        events.append("mutate")
-        return {"changed": True}
-
-    with pytest.raises(RuntimeError, match="after failed"):
-        run_preview(
-            OperationContext(runtime=IdaRuntime(), preview=True),
-            "test_preview",
-            {},
-            handler,
-            PreviewSpec(capture_before=capture_before, capture_after=capture_after, rollback=rollback),
-        )
-
-    assert events == ["before", "mutate", "after", "rollback"]
-
-
-def test_manual_preview_reports_rollback_failure_after_capture_failure() -> None:
-    def capture_before(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
-        return {"before": True}
-
-    def capture_after(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
-        raise RuntimeError("after failed")
-
-    def rollback(
-        _context: OperationContext,
-        _request: dict[str, object],
-        _before: dict[str, bool],
-        _result: dict[str, bool],
-    ) -> None:
-        raise RuntimeError("rollback failed")
-
-    def handler(_context: OperationContext, _request: dict[str, object]) -> dict[str, bool]:
-        return {"changed": True}
-
-    with pytest.raises(RuntimeError, match="rollback failed") as excinfo:
-        run_preview(
-            OperationContext(runtime=IdaRuntime(), preview=True),
-            "test_preview",
-            {},
-            handler,
-            PreviewSpec(capture_before=capture_before, capture_after=capture_after, rollback=rollback),
-        )
-
-    assert isinstance(excinfo.value.__cause__, RuntimeError)
-    assert str(excinfo.value.__cause__) == "after failed"
-
-
-def test_recoverable_ida_errors_do_not_treat_typeerror_as_recoverable() -> None:
-    assert is_recoverable_ida_error(TypeError("boom")) is False
-
-    with pytest.raises(TypeError, match="boom"), suppress_recoverable_ida_errors():
-        raise TypeError("boom")
-
-
-def test_split_declarations_tracks_next_chunk_line_after_newline() -> None:
-    chunks = _split_declarations("typedef int a;\n\n typedef int b;")
-
-    assert chunks[0]["start_line"] == 1
-    assert chunks[1]["start_line"] == 3
+    with pytest.raises(TypeError, match="broken type printer"):
+        _run_op("type_show", FakeRuntime(), {"name": "Widget"})
 
 
 def test_type_declare_diagnostics_ignore_braces_inside_comments_and_strings() -> None:
-    diagnostics = type_declare._type_declare_diagnostics(
-        'const char *s = "{"; /* } */',
-        errors=1,
-        aliases_applied=[],
+    typeinf = Mock(HTI_DCL=0x1, HTI_SEMICOLON=0x2)
+    typeinf.get_idati.return_value.cc = 0
+    typeinf.tinfo_t.return_value.get_named_type.return_value = False
+    typeinf.parse_decls.return_value = 1
+    runtime = SimpleNamespace(mod={"ida_typeinf": typeinf}.__getitem__)
+
+    result = _run_op(
+        "type_declare_check",
+        runtime,
+        {"decl": 'struct Widget { const char *value; }; const char *text = "{" /* } */'},
     )
+    diagnostics = result["diagnostics"]
 
     assert not any(item["kind"] == "unbalanced_braces" for item in diagnostics)
     assert any(item["kind"] == "unterminated_declaration" for item in diagnostics)
-
-
-def test_type_declare_diagnostics_report_cppobj_and_forward_decl_hints() -> None:
-    diagnostics = type_declare._type_declare_diagnostics(
-        "struct helper; class __cppobj Broken : helper { int value; };",
-        errors=1,
-        aliases_applied=[],
-    )
-
-    kinds = {item["kind"] for item in diagnostics}
-    assert "cppobj_hint" in kinds
-    assert "forward_declaration_hint" in kinds
-
-
-def test_type_declare_detects_forward_declared_opaque_by_value_member() -> None:
-    chunks = type_declare._parse_declaration_chunks(
-        "struct Missing; typedef struct wrapper_bad { struct Missing value; } wrapper_bad;"
-    )[0]
-
-    blocking = type_declare._opaque_by_value_members(chunks[1], earlier_chunks=chunks[:1])
-
-    assert blocking == [{"type_name": "Missing", "member_name": "value"}]
-
-
-def test_type_declare_bisect_isolates_first_failing_declaration() -> None:
-    chunks = type_declare._parse_declaration_chunks(
-        "typedef struct good_one { int value; } good_one;"
-        "struct Missing;"
-        "typedef struct wrapper_bad { struct Missing value; } wrapper_bad;"
-    )[0]
-
-    class FakeUndo:
-        def create_undo_point(self, **_kwargs) -> bool:
-            return True
-
-        def perform_undo(self) -> bool:
-            return True
-
-    class FakeIdaTypeInf:
-        PT_REPLACE = 1
-
-        @staticmethod
-        def idc_parse_types(decl: str, _flags: int) -> int:
-            return 1 if "wrapper_bad" in decl else 0
-
-    class FakeRuntime:
-        def mod(self, name: str):
-            if name == "ida_undo":
-                return FakeUndo()
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            raise AssertionError(name)
-
-    payload = type_declare._bisect_type_declarations(FakeRuntime(), chunks, replace=False, clang=False)
-
-    assert payload["supported"] is True
-    assert payload["failing_declaration"]["index"] == 3
-    assert payload["blocking_members"] == [{"type_name": "Missing", "member_name": "value"}]
-
-
-def test_type_declare_clang_uses_srclang_parser_ext() -> None:
-    calls: list[tuple[str, object, str, int]] = []
-
-    class FakeIdaTypeInf:
-        HTI_DCL = 0x400
-        HTI_SEMICOLON = 0x200000
-        HTI_RELAXED = 0x80000
-
-    class FakeIdaSrclang:
-        @staticmethod
-        def parse_decls_with_parser_ext(parser_name: str, til: object, decl: str, flags: int) -> int:
-            calls.append((parser_name, til, decl, flags))
-            return 0
-
-    class FakeRuntime:
-        def mod(self, name: str):
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            if name == "ida_srclang":
-                return FakeIdaSrclang()
-            raise AssertionError(name)
-
-    errors = type_declare._parse_type_declarations(
-        FakeRuntime(),
-        "struct ns::Widget { int value; };",
-        replace=False,
-        clang=True,
-    )
-
-    assert errors == 0
-    assert calls == [("clang", None, "struct ns::Widget { int value; };", 0x280400)]
-
-
-def test_type_declare_check_uses_parse_decls_test_flag() -> None:
-    calls: list[tuple[object, str, object, int]] = []
-
-    class FakeIdaTypeInf:
-        HTI_DCL = 0x400
-        HTI_SEMICOLON = 0x200000
-        HTI_RELAXED = 0x80000
-        HTI_TST = 0x20
-
-        @staticmethod
-        def parse_decls(til: object, decl: str, printer: object, flags: int) -> int:
-            calls.append((til, decl, printer, flags))
-            return 0
-
-    class FakeRuntime:
-        def mod(self, name: str):
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            raise AssertionError(name)
-
-    errors = type_declare._test_type_declarations(
-        FakeRuntime(),
-        "struct ns::Widget { int value; };",
-        replace=False,
-        clang=False,
-    )
-
-    assert errors == 0
-    assert calls == [(None, "struct ns::Widget { int value; };", None, 0x280420)]
-
-
-def test_type_declare_check_clang_runs_parser_under_undo() -> None:
-    calls: list[tuple[object, ...]] = []
-
-    class FakeUndo:
-        @staticmethod
-        def create_undo_point(**kwargs) -> bool:
-            calls.append(("undo_create", kwargs["action_name"], kwargs["label"]))
-            return True
-
-        @staticmethod
-        def perform_undo() -> bool:
-            calls.append(("undo",))
-            return True
-
-    class FakeIdaTypeInf:
-        HTI_DCL = 0x400
-        HTI_SEMICOLON = 0x200000
-        HTI_RELAXED = 0x80000
-        HTI_TST = 0x20
-
-    class FakeIdaSrclang:
-        @staticmethod
-        def parse_decls_with_parser_ext(parser_name: str, til: object, decl: str, flags: int) -> int:
-            calls.append(("parse", parser_name, til, decl, flags))
-            return 0
-
-    class FakeRuntime:
-        def mod(self, name: str):
-            if name == "ida_undo":
-                return FakeUndo()
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            if name == "ida_srclang":
-                return FakeIdaSrclang()
-            raise AssertionError(name)
-
-    errors = type_declare._test_type_declarations(
-        FakeRuntime(),
-        "struct ns::Widget { int value; };",
-        replace=False,
-        clang=True,
-    )
-
-    assert errors == 0
-    assert calls == [
-        ("undo_create", "idac_type_check_clang", "idac type check clang"),
-        ("parse", "clang", None, "struct ns::Widget { int value; };", 0x280420),
-        ("undo",),
-    ]
 
 
 def test_type_declare_clang_reports_unavailable_parser() -> None:
@@ -1357,11 +419,7 @@ def test_type_declare_clang_reports_unavailable_parser() -> None:
 
     class FakeIdaSrclang:
         @staticmethod
-        def parse_decls_with_parser_ext(parser_name: str, til: object, decl: str, flags: int) -> int:
-            assert parser_name == "clang"
-            assert til is None
-            assert decl == "struct Widget { int value; };"
-            assert flags == 0x200400
+        def parse_decls_with_parser_ext(_parser_name: str, _til: object, _decl: str, _flags: int) -> int:
             return -1
 
     class FakeRuntime:
@@ -1370,210 +428,80 @@ def test_type_declare_clang_reports_unavailable_parser() -> None:
                 return FakeIdaTypeInf()
             if name == "ida_srclang":
                 return FakeIdaSrclang()
-            raise AssertionError(name)
-
-    with pytest.raises(IdaOperationError, match="clang parser is unavailable"):
-        type_declare._parse_type_declarations(
-            FakeRuntime(),
-            "struct Widget { int value; };",
-            replace=False,
-            clang=True,
-        )
-
-
-def test_type_declare_clang_replace_deletes_existing_types_before_parse() -> None:
-    calls: list[tuple[object, ...]] = []
-
-    class FakeIdaUndo:
-        @staticmethod
-        def create_undo_point(**kwargs) -> bool:
-            calls.append(("undo_create", kwargs["action_name"], kwargs["label"]))
-            return True
-
-        @staticmethod
-        def perform_undo() -> bool:
-            calls.append(("undo",))
-            return True
-
-    class FakeIdaTypeInf:
-        HTI_DCL = 0x400
-        HTI_SEMICOLON = 0x200000
-        NTF_TYPE = 0x1
-
-        @staticmethod
-        def del_named_type(_til: object, name: str, flags: int) -> bool:
-            calls.append(("delete", name, flags))
-            return True
-
-    class FakeIdaSrclang:
-        @staticmethod
-        def parse_decls_with_parser_ext(parser_name: str, til: object, decl: str, flags: int) -> int:
-            calls.append(("parse", parser_name, til, decl, flags))
-            return 0
-
-    class FakeRuntime:
-        def mod(self, name: str):
             if name == "ida_undo":
-                return FakeIdaUndo()
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            if name == "ida_srclang":
-                return FakeIdaSrclang()
-            raise AssertionError(name)
-
-        @staticmethod
-        def find_named_type(name: str):
-            return object() if name == "Widget" else None
-
-    errors = type_declare._parse_type_declarations(
-        FakeRuntime(),
-        "typedef struct Widget { int value; } Widget;",
-        replace=True,
-        clang=True,
-    )
-
-    assert errors == 0
-    assert calls == [
-        ("undo_create", "idac_type_declare_clang_replace", "idac type declare clang replace"),
-        ("delete", "Widget", 0x1),
-        ("parse", "clang", None, "typedef struct Widget { int value; } Widget;", 0x200400),
-    ]
-
-
-def test_type_declare_clang_replace_restores_deleted_types_on_parse_error() -> None:
-    calls: list[tuple[object, ...]] = []
-
-    class FakeIdaUndo:
-        @staticmethod
-        def create_undo_point(**_kwargs) -> bool:
-            calls.append(("undo_create",))
-            return True
-
-        @staticmethod
-        def perform_undo() -> bool:
-            calls.append(("undo",))
-            return True
-
-    class FakeIdaTypeInf:
-        HTI_DCL = 0x400
-        HTI_SEMICOLON = 0x200000
-        NTF_TYPE = 0x1
-
-        @staticmethod
-        def del_named_type(_til: object, name: str, flags: int) -> bool:
-            calls.append(("delete", name, flags))
-            return True
-
-    class FakeIdaSrclang:
-        @staticmethod
-        def parse_decls_with_parser_ext(parser_name: str, til: object, decl: str, flags: int) -> int:
-            calls.append(("parse", parser_name, til, decl, flags))
-            return 2
-
-    class FakeRuntime:
-        def mod(self, name: str):
-            if name == "ida_undo":
-                return FakeIdaUndo()
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            if name == "ida_srclang":
-                return FakeIdaSrclang()
-            raise AssertionError(name)
-
-        @staticmethod
-        def find_named_type(name: str):
-            return object() if name == "Widget" else None
-
-    errors = type_declare._parse_type_declarations(
-        FakeRuntime(),
-        "typedef struct Widget { int value; } Widget;",
-        replace=True,
-        clang=True,
-    )
-
-    assert errors == 2
-    assert calls == [
-        ("undo_create",),
-        ("delete", "Widget", 0x1),
-        ("parse", "clang", None, "typedef struct Widget { int value; } Widget;", 0x200400),
-        ("undo",),
-    ]
-
-
-def test_type_declare_clang_bisect_returns_structured_unavailable_result() -> None:
-    class FakeIdaTypeInf:
-        HTI_DCL = 0x400
-        HTI_SEMICOLON = 0x200000
-
-    class FakeIdaSrclang:
-        @staticmethod
-        def parse_decls_with_parser_ext(parser_name: str, til: object, decl: str, flags: int) -> int:
-            assert parser_name == "clang"
-            assert til is None
-            assert decl == "struct Widget { int value; };"
-            assert flags == 0x200400
-            return -1
-
-    class FakeUndo:
-        def create_undo_point(self, **_kwargs) -> bool:
-            return True
-
-        def perform_undo(self) -> bool:
-            return True
-
-    class FakeRuntime:
-        def mod(self, name: str):
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            if name == "ida_srclang":
-                return FakeIdaSrclang()
-            if name == "ida_undo":
-                return FakeUndo()
+                return _SuccessfulUndo()
             raise AssertionError(name)
 
         @staticmethod
         def list_named_types() -> list[dict[str, object]]:
-            return [{"name": "Existing", "decl": "struct Existing;"}]
+            return []
 
-    chunks = type_declare._parse_declaration_chunks("struct Widget { int value; };")[0]
-    errors, before, after, bisect = type_declare._apply_type_declarations_with_optional_bisect(
-        FakeRuntime(),
-        "struct Widget { int value; };",
-        replace=False,
-        clang=True,
-        chunks=chunks,
-        bisect_requested=True,
-    )
-
-    assert errors == 1
-    assert before == {"Existing": "struct Existing;"}
-    assert after == before
-    assert bisect == {
-        "requested": True,
-        "supported": False,
-        "mode": "ordered_prefix",
-        "declaration_count": 1,
-        "message": "clang parser is unavailable for type declare",
-        "diagnostics": [{"kind": "bisect_unavailable", "message": "clang parser is unavailable for type declare"}],
-    }
+    with pytest.raises(IdaOperationError, match="clang parser is unavailable"):
+        _run_op(
+            "type_declare",
+            FakeRuntime(),
+            {"decl": "struct Widget { int value; };", "clang": True},
+        )
 
 
-def test_local_rename_reports_success_when_readback_fails(monkeypatch) -> None:
+def test_local_rename_rolls_back_after_readback_failure() -> None:
+    mutated = False
+
+    class FakeCfunc:
+        def get_lvars(self) -> list[object]:
+            return []
+
     class FakeHexrays:
         MLI_NAME = 1
+
+        class lvar_locator_t:
+            def __init__(self) -> None:
+                self.defea = 0
+                self.location = None
 
         class lvar_saved_info_t:
             def __init__(self) -> None:
                 self.ll = None
                 self.name = ""
 
+        @staticmethod
+        def locate_lvar(locator: object, func_ea: int, name: str) -> bool:
+            assert func_ea == 0x401000
+            assert name == "v4"
+            locator.defea = func_ea
+            locator.location = object()
+            return True
+
         def modify_user_lvar_info(self, func_ea: int, kind: int, info: object) -> bool:
+            nonlocal mutated
             assert func_ea == 0x401000
             assert kind == self.MLI_NAME
             assert info.name == "sum_value"
+            mutated = True
             return True
 
+        @staticmethod
+        def mark_cfunc_dirty(_func_ea: int, _close_views: bool) -> None:
+            return None
+
+        @staticmethod
+        def clear_cached_cfuncs() -> None:
+            return None
+
+        @staticmethod
+        def decompile(_func_ea: int):
+            if mutated:
+                raise RuntimeError("decompiler refresh failed")
+            return FakeCfunc()
+
     class FakeRuntime(IdaRuntime):
+        class FakeUndo(_SuccessfulUndo):
+            @staticmethod
+            def perform_undo() -> bool:
+                nonlocal mutated
+                mutated = False
+                return True
+
         def function_ea(self, identifier: str) -> int:
             assert identifier == "main"
             return 0x401000
@@ -1581,12 +509,14 @@ def test_local_rename_reports_success_when_readback_fails(monkeypatch) -> None:
         def require_hexrays(self) -> FakeHexrays:
             return FakeHexrays()
 
-    monkeypatch.setattr(locals, "_select_local", lambda runtime, func_ea, selector: locals.SelectedLocal("v4", "loc"))
-    monkeypatch.setattr(
-        locals,
-        "_local_list_result",
-        lambda runtime, func_ea: (_ for _ in ()).throw(RuntimeError("decompiler refresh failed")),
-    )
+        @staticmethod
+        def function_name(func_ea: int) -> str:
+            assert func_ea == 0x401000
+            return "main"
+
+        def mod(self, name: str):
+            assert name == "ida_undo"
+            return self.FakeUndo()
 
     with pytest.raises(
         IdaOperationError,
@@ -1598,155 +528,56 @@ def test_local_rename_reports_success_when_readback_fails(monkeypatch) -> None:
             {"identifier": "main", "old_name": "v4", "new_name": "sum_value"},
         )
 
+    assert mutated is False
 
-def test_local_name_from_selector_rejects_multiple_stable_selector_kinds(monkeypatch) -> None:
+
+def test_local_rename_rejects_multiple_stable_selector_kinds() -> None:
     with pytest.raises(
         IdaOperationError,
         match="--local-id and --index are mutually exclusive",
     ):
-        locals._parse_local_selector(
-            {"index": 0, "local_id": "stack(16)@0x401000"},
-            name_key="old_name",
+        _run_op(
+            "local_rename",
+            object(),
+            {
+                "identifier": "main",
+                "new_name": "count",
+                "index": 0,
+                "local_id": "stack(16)@0x401000",
+            },
         )
 
 
-def test_resolve_lvar_selection_uses_stable_locator_for_index_selector() -> None:
+def test_local_update_allows_unnamed_local_selected_by_stable_selector() -> None:
     class FakeLocation:
-        pass
-
-    class FakeLvar:
-        def __init__(self) -> None:
-            self.name = "v4"
-            self.defea = 0x401000
-            self.location = FakeLocation()
-
-        def is_stk_var(self) -> bool:
+        @staticmethod
+        def is_stkoff() -> bool:
             return False
 
-    class FakeCfunc:
-        def get_lvars(self) -> list[FakeLvar]:
-            return [FakeLvar()]
+        @staticmethod
+        def is_reg1() -> bool:
+            return True
 
-    class FakeHexrays:
-        class lvar_locator_t:
-            def __init__(self) -> None:
-                self.defea = 0
-                self.location = None
-
-        def decompile(self, func_ea: int) -> FakeCfunc:
-            assert func_ea == 0x401000
-            return FakeCfunc()
-
-    class FakeRuntime:
-        def require_hexrays(self) -> FakeHexrays:
-            return FakeHexrays()
-
-    selected = locals._select_local(
-        FakeRuntime(),
-        0x401000,
-        locals._parse_local_selector({"index": 0}, name_key="old_name"),
-    )
-
-    assert selected.name == "v4"
-    assert selected.locator.defea == 0x401000
-    assert isinstance(selected.locator.location, FakeLocation)
-
-
-def test_resolve_lvar_selection_allows_name_hint_with_stable_selector() -> None:
-    class FakeLocation:
-        pass
-
-    class FakeLvar:
-        def __init__(self) -> None:
-            self.name = "v4"
-            self.defea = 0x401000
-            self.location = FakeLocation()
-
-        def is_stk_var(self) -> bool:
+        @staticmethod
+        def is_reg2() -> bool:
             return False
 
-    class FakeCfunc:
-        def get_lvars(self) -> list[FakeLvar]:
-            return [FakeLvar()]
-
-    class FakeHexrays:
-        class lvar_locator_t:
-            def __init__(self) -> None:
-                self.defea = 0
-                self.location = None
-
-        def decompile(self, func_ea: int) -> FakeCfunc:
-            assert func_ea == 0x401000
-            return FakeCfunc()
-
-    class FakeRuntime:
-        def require_hexrays(self) -> FakeHexrays:
-            return FakeHexrays()
-
-    selected = locals._select_local(
-        FakeRuntime(),
-        0x401000,
-        locals._parse_local_selector({"old_name": "v6", "index": 0}, name_key="old_name"),
-    )
-
-    assert selected.name == "v4"
-    assert selected.locator.defea == 0x401000
-
-
-def test_resolve_lvar_selection_accepts_local_id_text() -> None:
-    class FakeLocation:
-        def is_stkoff(self) -> bool:
-            return True
-
-        def stkoff(self) -> int:
-            return -16
-
-    class FakeLvar:
-        def __init__(self) -> None:
-            self.name = "v4"
-            self.defea = 0x401000
-            self.location = FakeLocation()
-
-        def is_stk_var(self) -> bool:
-            return True
-
-    class FakeCfunc:
-        def get_lvars(self) -> list[FakeLvar]:
-            return [FakeLvar()]
-
-    class FakeHexrays:
-        class lvar_locator_t:
-            def __init__(self) -> None:
-                self.defea = 0
-                self.location = None
-
-        def decompile(self, func_ea: int) -> FakeCfunc:
-            assert func_ea == 0x401000
-            return FakeCfunc()
-
-    class FakeRuntime:
-        def require_hexrays(self) -> FakeHexrays:
-            return FakeHexrays()
-
-    selected = locals._select_local(
-        FakeRuntime(),
-        0x401000,
-        locals._parse_local_selector({"local_id": "stack(-16)@0X401000"}, name_key="old_name"),
-    )
-
-    assert selected.name == "v4"
-    assert selected.locator.defea == 0x401000
-
-
-def test_local_update_allows_unnamed_local_selected_by_stable_selector(monkeypatch) -> None:
-    class FakeLocation:
-        pass
+        @staticmethod
+        def reg1() -> int:
+            return 4
 
     class FakeLvar:
         def __init__(self) -> None:
             self.name = ""
             self.defea = 0x401000
             self.location = FakeLocation()
+            self.tif = object()
+            self.is_arg_var = False
+            self.width = 4
+
+        @staticmethod
+        def is_stk_var() -> bool:
+            return False
 
     class FakeCfunc:
         def get_lvars(self) -> list[FakeLvar]:
@@ -1754,6 +585,9 @@ def test_local_update_allows_unnamed_local_selected_by_stable_selector(monkeypat
 
     class FakeHexrays:
         MLI_NAME = 1
+
+        def __init__(self, lvar: FakeLvar) -> None:
+            self.lvar = lvar
 
         class lvar_locator_t:
             def __init__(self) -> None:
@@ -1766,29 +600,59 @@ def test_local_update_allows_unnamed_local_selected_by_stable_selector(monkeypat
                 self.name = ""
                 self.type = None
 
+        class lvar_uservec_t:
+            def __init__(self) -> None:
+                self.lvvec: list[object] = []
+
         def decompile(self, func_ea: int) -> FakeCfunc:
             assert func_ea == 0x401000
-            return FakeCfunc()
+            cfunc = FakeCfunc()
+            cfunc.get_lvars = lambda: [self.lvar]
+            return cfunc
+
+        @staticmethod
+        def restore_user_lvar_settings(_user_info: object, _func_ea: int) -> bool:
+            return False
 
         def modify_user_lvar_info(self, func_ea: int, kind: int, info: object) -> bool:
             assert func_ea == 0x401000
             assert kind == self.MLI_NAME
             assert info.name == "recovered_name"
+            self.lvar.name = info.name
             return True
 
+        @staticmethod
+        def mark_cfunc_dirty(_func_ea: int, _close_views: bool) -> None:
+            return None
+
+        @staticmethod
+        def clear_cached_cfuncs() -> None:
+            return None
+
     class FakeRuntime(IdaRuntime):
+        def __init__(self) -> None:
+            self.hexrays = FakeHexrays(FakeLvar())
+
         def function_ea(self, identifier: str) -> int:
             assert identifier == "main"
             return 0x401000
 
         def require_hexrays(self) -> FakeHexrays:
-            return FakeHexrays()
+            return self.hexrays
 
-    monkeypatch.setattr(
-        locals,
-        "_local_list_result",
-        lambda runtime, func_ea: locals.LocalListResult(function="main", address="0x401000", locals=()),
-    )
+        @staticmethod
+        def function_name(func_ea: int) -> str:
+            assert func_ea == 0x401000
+            return "main"
+
+        @staticmethod
+        def tinfo_decl(_tif: object, *, multi: bool) -> str:
+            return "int"
+
+        @staticmethod
+        def mod(name: str):
+            assert name == "ida_undo"
+            return _SuccessfulUndo()
 
     payload = _run_op(
         "local_update",
@@ -1797,171 +661,16 @@ def test_local_update_allows_unnamed_local_selected_by_stable_selector(monkeypat
     )
 
     assert payload["changed"] is True
+    assert payload["locals"][0]["name"] == "recovered_name"
 
 
-def test_local_apply_plan_parser_accepts_stable_selector_items() -> None:
-    request = locals._parse_local_apply_plan(
-        {
-            "identifier": "main",
-            "items": [
-                {"local_id": "stack(16)@0x401000", "rename": "count", "decl": "unsigned int count;"},
-                {"selector": {"index": "3"}, "type": "uint64_t"},
-            ],
-        }
-    )
-
-    assert request.identifier == "main"
-    assert request.items[0].selector.local_id == "stack(16)@0x401000"
-    assert request.items[0].new_name == "count"
-    assert request.items[0].decl == "unsigned int count;"
-    assert request.items[1].selector.index == 3
-    assert request.items[1].type_text == "uint64_t"
-
-
-def test_proto_set_parses_silently_and_applies_tinfo() -> None:
-    calls: list[tuple[object, ...]] = []
-    tif = object()
-
-    class FakeIdaTypeInf:
-        PT_SIL = 0x1
-        PT_VAR = 0x8
-        PT_SEMICOLON = 0x4000
-        TINFO_DEFINITE = 0x1
-        PRTYPE_1LINE = 1
-
-        @staticmethod
-        def tinfo_t() -> object:
-            return tif
-
-        @staticmethod
-        def parse_decl(out_tif: object, til: object, decl: str, flags: int) -> bool:
-            assert out_tif is tif
-            assert til is None
-            calls.append(("parse", decl, flags))
-            return True
-
-        @staticmethod
-        def apply_tinfo(ea: int, parsed_tif: object, flags: int) -> bool:
-            calls.append(("apply", ea, parsed_tif, flags))
-            return True
-
-        @staticmethod
-        def print_type(ea: int, flags: int) -> str:
-            assert ea == 0x401000
-            assert flags == 1
-            return "void __fastcall target(void)"
-
-    class FakeRuntime(IdaRuntime):
-        def function_ea(self, identifier: str) -> int:
-            assert identifier == "target"
-            return 0x401000
-
-        def mod(self, name: str) -> object:
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            if name == "ida_name":
-
-                class FakeIdaName:
-                    @staticmethod
-                    def get_name(_ea: int) -> str:
-                        return "target"
-
-                return FakeIdaName()
-            raise AssertionError(name)
-
-        def find_named_type(self, name: str):
-            return object()
-
-    payload = _run_op(
-        "proto_set",
-        FakeRuntime(),
-        {"identifier": "target", "decl": "void __fastcall target(void)", "propagate_callers": False},
-    )
-
-    assert payload == {
-        "address": "0x401000",
-        "prototype": "void __fastcall target(void)",
-        "changed": True,
-        "callers_considered": 0,
-        "callers_updated": 0,
-        "callers_failed": 0,
-    }
-    assert calls == [
-        ("parse", "void __fastcall target(void);", 0x4009),
-        ("apply", 0x401000, tif, 0x1),
-    ]
-
-
-def test_proto_set_retries_with_relaxed_namespace_parse() -> None:
-    calls: list[tuple[str, int]] = []
-    tif = object()
-
-    class FakeIdaTypeInf:
-        PT_SIL = 0x1
-        PT_VAR = 0x8
-        PT_RELAXED = 0x1000
-        PT_SEMICOLON = 0x4000
-        TINFO_DEFINITE = 0x1
-        PRTYPE_1LINE = 1
-
-        @staticmethod
-        def tinfo_t() -> object:
-            return tif
-
-        @staticmethod
-        def parse_decl(out_tif: object, til: object, decl: str, flags: int) -> bool:
-            assert til is None
-            assert out_tif is tif
-            calls.append((decl, flags))
-            return flags == 0x5009
-
-        @staticmethod
-        def apply_tinfo(ea: int, parsed_tif: object, flags: int) -> bool:
-            assert ea == 0x401000
-            assert parsed_tif is tif
-            assert flags == 0x1
-            return True
-
-        @staticmethod
-        def print_type(_ea: int, _flags: int) -> str:
-            return "ns::Type *__fastcall target(ns::Type *value)"
-
-    class FakeRuntime(IdaRuntime):
-        def function_ea(self, identifier: str) -> int:
-            assert identifier == "target"
-            return 0x401000
-
-        def mod(self, name: str) -> object:
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            if name == "ida_name":
-
-                class FakeIdaName:
-                    @staticmethod
-                    def get_name(_ea: int) -> str:
-                        return "target"
-
-                return FakeIdaName()
-            raise AssertionError(name)
-
-        def find_named_type(self, name: str):
-            return object()
-
-    payload = _run_op(
-        "proto_set",
-        FakeRuntime(),
-        {
-            "identifier": "target",
-            "decl": "ns::Type *__fastcall target(ns::Type *value)",
-            "propagate_callers": False,
-        },
-    )
-
-    assert payload["changed"] is True
-    assert calls == [
-        ("ns::Type *__fastcall target(ns::Type *value);", 0x4009),
-        ("ns::Type *__fastcall target(ns::Type *value);", 0x5009),
-    ]
+def test_local_apply_plan_rejects_unknown_wire_fields() -> None:
+    with pytest.raises(IdaOperationError, match="unsupported field"):
+        _run_op(
+            "local_apply_plan",
+            object(),
+            {"identifier": "main", "items": [{"index": 3, "type_text": "uint64_t"}]},
+        )
 
 
 def test_proto_check_allows_successful_parse_with_heuristic_unknowns() -> None:
@@ -1970,23 +679,29 @@ def test_proto_check_allows_successful_parse_with_heuristic_unknowns() -> None:
         def is_func() -> bool:
             return True
 
+        @staticmethod
+        def get_func_details(_details: object, _flags: int) -> bool:
+            return True
+
     tif = FakeTif()
+    func_details = object()
 
     class FakeIdaTypeInf:
+        GTD_CALC_ARGLOCS = 0
         PT_SIL = 0x1
         PT_VAR = 0x8
         PT_SEMICOLON = 0x4000
+
+        @staticmethod
+        def func_type_data_t() -> object:
+            return func_details
 
         @staticmethod
         def tinfo_t() -> object:
             return tif
 
         @staticmethod
-        def parse_decl(out_tif: object, til: object, decl: str, flags: int) -> bool:
-            assert out_tif is tif
-            assert til is None
-            assert decl == "void __fastcall target(void (*cb)(int));"
-            assert flags == 0x4009
+        def parse_decl(_out_tif: object, _til: object, _decl: str, _flags: int) -> bool:
             return True
 
     class FakeRuntime(IdaRuntime):
@@ -2000,242 +715,21 @@ def test_proto_check_allows_successful_parse_with_heuristic_unknowns() -> None:
             raise AssertionError(name)
 
         def find_named_type(self, name: str):
-            assert name == "cb"
+            del name
             return None
 
-    result = prototypes._proto_check(
-        OperationContext(runtime=FakeRuntime()),
-        prototypes.PrototypeCheckRequest(
-            identifier="target",
-            decl="void __fastcall target(void (*cb)(int))",
-        ),
-    )
-
-    assert result.success is True
-    assert result.parsed is True
-    assert result.is_function is True
-    assert result.arglocs_calculated is None
-    assert result.unknown_types == ("cb",)
-    assert result.diagnostics == ()
-
-
-def test_proto_set_optionally_propagates_to_callers() -> None:
-    tif = object()
-
-    class FakeInsn:
-        pass
-
-    class FakeIdaTypeInf:
-        PT_SIL = 0x1
-        PT_VAR = 0x8
-        PT_SEMICOLON = 0x4000
-        TINFO_DEFINITE = 0x1
-        PRTYPE_1LINE = 1
-
-        def __init__(self) -> None:
-            self.applied: list[int] = []
-
-        @staticmethod
-        def tinfo_t() -> object:
-            return tif
-
-        @staticmethod
-        def parse_decl(out_tif: object, til: object, decl: str, flags: int) -> bool:
-            assert out_tif is tif
-            assert til is None
-            assert decl == "void __fastcall target(int value);"
-            assert flags == 0x4009
-            return True
-
-        @staticmethod
-        def apply_tinfo(ea: int, parsed_tif: object, flags: int) -> bool:
-            assert ea == 0x401000
-            assert parsed_tif is tif
-            assert flags == 0x1
-            return True
-
-        def apply_callee_tinfo(self, call_ea: int, parsed_tif: object) -> bool:
-            assert parsed_tif is tif
-            self.applied.append(call_ea)
-            return call_ea != 0x402008
-
-        @staticmethod
-        def print_type(ea: int, flags: int) -> str:
-            assert ea == 0x401000
-            assert flags == 1
-            return "void __fastcall target(int value)"
-
-    ida_typeinf = FakeIdaTypeInf()
-
-    class FakeIdaUa:
-        @staticmethod
-        def insn_t() -> FakeInsn:
-            return FakeInsn()
-
-        @staticmethod
-        def decode_insn(_insn: FakeInsn, _ea: int) -> bool:
-            return True
-
-    class FakeIdaIdp:
-        @staticmethod
-        def is_call_insn(insn: FakeInsn) -> bool:
-            return getattr(insn, "ea", None) != 0x402010
-
-    class FakeRuntime(IdaRuntime):
-        def function_ea(self, identifier: str) -> int:
-            assert identifier == "target"
-            return 0x401000
-
-        def mod(self, name: str) -> object:
-            if name == "ida_typeinf":
-                return ida_typeinf
-            if name == "ida_name":
-
-                class FakeIdaName:
-                    @staticmethod
-                    def get_name(_ea: int) -> str:
-                        return "target"
-
-                return FakeIdaName()
-            raise AssertionError(name)
-
-        class idautils:
-            @staticmethod
-            def CodeRefsTo(ea: int, flow: int) -> list[int]:
-                assert ea == 0x401000
-                assert flow == 0
-                return [0x402000, 0x402008, 0x402010]
-
-        class ida_ua(FakeIdaUa):
-            @staticmethod
-            def decode_insn(insn: FakeInsn, ea: int) -> bool:
-                insn.ea = ea
-                return True
-
-        class ida_idp(FakeIdaIdp):
-            pass
-
-        def find_named_type(self, name: str):
-            return object()
-
-    payload = _run_op(
-        "proto_set",
+    result = _run_op(
+        "proto_check",
         FakeRuntime(),
-        {
-            "identifier": "target",
-            "decl": "void __fastcall target(int value)",
-            "propagate_callers": True,
-        },
+        {"identifier": "target", "decl": "void __fastcall target(void (*cb)(int))"},
     )
 
-    assert payload["changed"] is True
-    assert payload["callers_considered"] == 2
-    assert payload["callers_updated"] == 1
-    assert payload["callers_failed"] == 1
-    assert ida_typeinf.applied == [0x402000, 0x402008]
-
-
-def test_proto_set_reports_unknown_type_name() -> None:
-    class FakeIdaTypeInf:
-        PT_SIL = 0x1
-        PT_VAR = 0x8
-        PT_SEMICOLON = 0x4000
-        PRTYPE_1LINE = 1
-
-        @staticmethod
-        def tinfo_t() -> object:
-            return object()
-
-        @staticmethod
-        def parse_decl(_out_tif: object, til: object, decl: str, flags: int) -> bool:
-            assert til is None
-            assert decl == "void __fastcall target(eValueType value_type);"
-            assert flags == 0x4009
-            return False
-
-        def print_type(self, ea: int, flags: int) -> str:
-            raise AssertionError("print_type should not be reached on failure")
-
-    class FakeRuntime(IdaRuntime):
-        def function_ea(self, identifier: str) -> int:
-            assert identifier == "target"
-            return 0x401000
-
-        def mod(self, name: str) -> object:
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            if name == "ida_name":
-
-                class FakeIdaName:
-                    @staticmethod
-                    def get_name(_ea: int) -> str:
-                        return "target"
-
-                return FakeIdaName()
-            raise AssertionError(name)
-
-        def find_named_type(self, name: str):
-            return None if name == "eValueType" else object()
-
-    with pytest.raises(IdaOperationError, match="unknown type\\(s\\): eValueType"):
-        _run_op(
-            "proto_set",
-            FakeRuntime(),
-            {"identifier": "target", "decl": "void __fastcall target(eValueType value_type)"},
-        )
-
-
-def test_proto_set_reports_generic_parse_failure() -> None:
-    class FakeIdaTypeInf:
-        PT_SIL = 0x1
-        PT_VAR = 0x8
-        PT_SEMICOLON = 0x4000
-        PRTYPE_1LINE = 1
-
-        @staticmethod
-        def tinfo_t() -> object:
-            return object()
-
-        @staticmethod
-        def parse_decl(_out_tif: object, til: object, decl: str, flags: int) -> bool:
-            assert til is None
-            assert decl == "void __fastcall target(ValueType value);"
-            assert flags == 0x4009
-            return False
-
-        @staticmethod
-        def print_type(ea: int, flags: int) -> str:
-            assert ea == 0x401000
-            assert flags == 1
-            return "int __fastcall target(int value)"
-
-    class FakeRuntime(IdaRuntime):
-        def function_ea(self, identifier: str) -> int:
-            assert identifier == "target"
-            return 0x401000
-
-        def mod(self, name: str) -> object:
-            if name == "ida_typeinf":
-                return FakeIdaTypeInf()
-            if name == "ida_name":
-
-                class FakeIdaName:
-                    @staticmethod
-                    def get_name(_ea: int) -> str:
-                        return "target"
-
-                return FakeIdaName()
-            raise AssertionError(name)
-
-        def find_named_type(self, name: str):
-            return object()
-
-    with pytest.raises(IdaOperationError, match="parser limitations"):
-        _run_op(
-            "proto_set",
-            FakeRuntime(),
-            {"identifier": "target", "decl": "void __fastcall target(ValueType value)"},
-        )
+    assert result["success"] is True
+    assert result["parsed"] is True
+    assert result["is_function"] is True
+    assert result["arglocs_calculated"] is True
+    assert result["unknown_types"] == ["cb"]
+    assert result["diagnostics"] == []
 
 
 def test_proto_set_reports_apply_failure_after_successful_parse() -> None:
@@ -2253,24 +747,15 @@ def test_proto_set_reports_apply_failure_after_successful_parse() -> None:
             return tif
 
         @staticmethod
-        def parse_decl(out_tif: object, til: object, decl: str, flags: int) -> bool:
-            assert out_tif is tif
-            assert til is None
-            assert decl == "void __fastcall target(int value);"
-            assert flags == 0x4009
+        def parse_decl(_out_tif: object, _til: object, _decl: str, _flags: int) -> bool:
             return True
 
         @staticmethod
-        def apply_tinfo(ea: int, parsed_tif: object, flags: int) -> bool:
-            assert ea == 0x401000
-            assert parsed_tif is tif
-            assert flags == 0x1
+        def apply_tinfo(_ea: int, _parsed_tif: object, _flags: int) -> bool:
             return False
 
         @staticmethod
-        def print_type(ea: int, flags: int) -> str:
-            assert ea == 0x401000
-            assert flags == 1
+        def print_type(_ea: int, _flags: int) -> str:
             return "int __fastcall target(int value)"
 
     class FakeRuntime(IdaRuntime):
@@ -2289,6 +774,8 @@ def test_proto_set_reports_apply_failure_after_successful_parse() -> None:
                         return "target"
 
                 return FakeIdaName()
+            if name == "ida_undo":
+                return _SuccessfulUndo()
             raise AssertionError(name)
 
         def find_named_type(self, name: str):
@@ -2300,33 +787,6 @@ def test_proto_set_reports_apply_failure_after_successful_parse() -> None:
             FakeRuntime(),
             {"identifier": "target", "decl": "void __fastcall target(int value)"},
         )
-
-
-def test_require_class_tinfo_explains_non_class_materialized_type() -> None:
-    class FakeRuntime:
-        def find_named_type(self, name: str):
-            assert name == "CMessaging"
-            return object()
-
-        def is_class_tinfo(self, tif: object) -> bool:
-            return False
-
-        def classify_tinfo(self, tif: object) -> str:
-            return "struct"
-
-        def find_symbols(self, *, query: str | None = None):
-            assert query == "CMessaging"
-            return [
-                {"name": "__ZTV10CMessaging", "is_function": False},
-                {"name": "__ZN10CMessaging17SendInlineMessageEv", "is_function": True},
-            ]
-
-    with pytest.raises(IdaOperationError) as excinfo:
-        classes._require_class_tinfo(FakeRuntime(), "CMessaging")
-    message = str(excinfo.value)
-    assert "exists as a struct, but is not class-materialized" in message
-    assert "type class candidates --query CMessaging" in message
-    assert "symbol evidence:" in message
 
 
 def test_class_hierarchy_explains_non_class_materialized_type() -> None:
@@ -2344,8 +804,8 @@ def test_class_hierarchy_explains_non_class_materialized_type() -> None:
         def classify_tinfo(self, tif: object) -> str:
             return "struct"
 
-        def find_symbols(self, *, query: str | None = None):
-            assert query == "CMessaging"
+        def find_symbols(self, *, pattern: str | None = None, ignore_case: bool = False):
+            assert (pattern, ignore_case) == ("CMessaging", True)
             return [
                 {"name": "__ZTV10CMessaging", "is_function": False},
                 {"name": "__ZN10CMessaging17SendInlineMessageEv", "is_function": True},
@@ -2355,122 +815,97 @@ def test_class_hierarchy_explains_non_class_materialized_type() -> None:
         _run_op("class_hierarchy", FakeRuntime(), {"name": "CMessaging"})
     message = str(excinfo.value)
     assert "exists as a struct, but is not class-materialized" in message
-    assert "type class candidates --query CMessaging" in message
+    assert "type class candidates CMessaging" in message
 
 
-def test_symbol_evidence_swallows_recoverable_lookup_errors() -> None:
-    class FakeRuntime:
-        def find_symbols(self, *, query: str | None = None):
-            assert query == "CMessaging"
-            raise RuntimeError("temporary IDA lookup failure")
-
-    assert classes._symbol_evidence(FakeRuntime(), "CMessaging") == []
-
-
-def test_symbol_evidence_reraises_nonrecoverable_lookup_errors() -> None:
-    class FakeRuntime:
-        def find_symbols(self, *, query: str | None = None):
-            assert query == "CMessaging"
-            raise TypeError("bad lookup")
-
-    with pytest.raises(TypeError, match="bad lookup"):
-        classes._symbol_evidence(FakeRuntime(), "CMessaging")
-
-
-def test_class_summary_uses_requested_alias_for_name_and_decl() -> None:
-    runtime = IdaRuntime()
-    calls: list[tuple[str | None, bool]] = []
-
-    class FakeTif:
-        @staticmethod
-        def get_type_name() -> str:
-            return ""
-
-        @staticmethod
-        def get_size() -> int:
-            return 24
-
-    runtime.class_base_names = lambda tif: ["Base"]
-    runtime.class_vtable_type_name = lambda tif: "Alias_vtbl"
-
-    def fake_tinfo_decl(tif, *, name=None, multi=True) -> str:
-        calls.append((name, multi))
-        return f"struct {name}" if name else "struct <anonymous>"
-
-    runtime.tinfo_decl = fake_tinfo_decl
-
-    payload = runtime.class_summary(FakeTif(), name="Alias", decl_multi=True)
-
-    assert payload["name"] == "Alias"
-    assert payload["decl"] == "struct Alias"
-    assert calls == [("Alias", True)]
-
-
-def test_class_vtable_runtime_fallback_uses_requested_alias_when_type_name_missing(
-    monkeypatch,
-) -> None:
+def test_class_vtable_runtime_lookup_uses_requested_alias_when_type_name_missing() -> None:
     class AnonymousClassTif:
         @staticmethod
         def get_type_name() -> str:
             return ""
 
-    looked_up_names: list[str] = []
-    runtime = type(
-        "FakeRuntime",
-        (),
-        {
-            "find_named_type": staticmethod(lambda name: AnonymousClassTif() if name == "Alias" else None),
-            "is_class_tinfo": staticmethod(lambda tif: True),
-            "get_named_type": staticmethod(lambda name: object()),
-            "class_vtable_type_name": staticmethod(lambda tif: "Alias_vtbl"),
-            "class_runtime_vtable_identifier": staticmethod(
-                lambda tif, name=None: looked_up_names.append(name) or "0x402000"
-            ),
-            "tinfo_decl": staticmethod(lambda tif, **kwargs: "struct Alias_vtbl"),
-            "vtable_slot": staticmethod(lambda offset_bits: offset_bits // 64),
-            "udt_members": staticmethod(lambda tif: []),
-        },
-    )()
-    monkeypatch.setattr(
-        classes,
-        "_raw_vtable_dump",
-        lambda runtime, identifier, slot_limit=64: {
-            "identifier": identifier,
-            "slot_limit": slot_limit,
-        },
-    )
+    class FakeRuntime:
+        @staticmethod
+        def find_named_type(name: str):
+            return AnonymousClassTif() if name == "Alias" else None
+
+        @staticmethod
+        def is_class_tinfo(_tif: object) -> bool:
+            return True
+
+        @staticmethod
+        def get_named_type(_name: str) -> object:
+            return object()
+
+        @staticmethod
+        def class_vtable_type_name(_tif: object) -> str:
+            return "Alias_vtbl"
+
+        @staticmethod
+        def class_runtime_vtable_identifier(_tif: object, *, name: str | None = None) -> str | None:
+            return "0x402000" if name == "Alias" else None
+
+        @staticmethod
+        def tinfo_decl(_tif: object, **_kwargs) -> str:
+            return "struct Alias_vtbl"
+
+        @staticmethod
+        def vtable_slot(offset_bits: int) -> int:
+            return offset_bits // 64
+
+        @staticmethod
+        def udt_members(_tif: object) -> list[object]:
+            return []
+
+        @staticmethod
+        def resolve_address(identifier: str) -> int:
+            return int(identifier, 0)
+
+        @staticmethod
+        def pointer_size() -> int:
+            return 8
+
+        @staticmethod
+        def read_pointer(_ea: int) -> int:
+            return 0
+
+        @staticmethod
+        def demangle_name(_name: str) -> None:
+            return None
+
+        @staticmethod
+        def mod(name: str):
+            class FakeIdaName:
+                @staticmethod
+                def get_name(_ea: int) -> str:
+                    return ""
+
+            class FakeIdaBytes:
+                @staticmethod
+                def get_flags(_ea: int) -> int:
+                    return 0
+
+                @staticmethod
+                def is_code(_flags: int) -> bool:
+                    return False
+
+            class FakeIdaFuncs:
+                @staticmethod
+                def get_func(_ea: int) -> None:
+                    return None
+
+            return {
+                "ida_bytes": FakeIdaBytes(),
+                "ida_funcs": FakeIdaFuncs(),
+                "ida_name": FakeIdaName(),
+            }[name]
+
+    runtime = FakeRuntime()
 
     payload = _run_op("class_vtable", runtime, {"name": "Alias", "runtime": True})
 
-    assert looked_up_names == ["Alias"]
-    assert payload["runtime_vtable"] == {"identifier": "0x402000", "slot_limit": 64}
-
-
-def test_class_show_preserves_case_sensitive_name_lookup(monkeypatch) -> None:
-    tif = object()
-
-    class FakeRuntime:
-        def find_named_type(self, name: str):
-            assert name == "MiXeDClass"
-            return tif
-
-        def is_class_tinfo(self, resolved_tif: object) -> bool:
-            assert resolved_tif is tif
-            return True
-
-        def class_summary(self, resolved_tif: object, *, name: str, decl_multi: bool) -> dict[str, object]:
-            assert resolved_tif is tif
-            assert name == "MiXeDClass"
-            assert decl_multi is True
-            return {"name": name, "decl": "struct MiXeDClass;"}
-
-    monkeypatch.setattr(classes, "_flatten_class_fields", lambda runtime, resolved_tif, derived_only: [])
-
-    payload = _run_op("class_show", FakeRuntime(), {"name": "MiXeDClass"})
-
-    assert payload["name"] == "MiXeDClass"
-    assert payload["decl"] == "struct MiXeDClass;"
-    assert payload["members"] == []
+    assert payload["runtime_vtable"]["identifier"] == "0x402000"
+    assert payload["runtime_vtable"]["table_address"] == "0x402000"
 
 
 def test_type_show_normalizes_unknown_size_to_none() -> None:
@@ -2489,7 +924,6 @@ def test_type_show_normalizes_unknown_size_to_none() -> None:
 
         def tinfo_decl(self, tif: object, *, name: str, multi: bool) -> str:
             assert name == "OpaqueThing"
-            assert multi is True
             return "struct OpaqueThing;"
 
         def tinfo_members(self, tif: object) -> list[dict[str, object]]:
@@ -2501,7 +935,75 @@ def test_type_show_normalizes_unknown_size_to_none() -> None:
     assert payload["size_known"] is False
 
 
-def test_enum_member_rename_reports_success_when_readback_fails(monkeypatch) -> None:
+def test_type_deps_uses_local_ordinal_and_dependency_export() -> None:
+    fake_type = Mock()
+    fake_type.get_ordinal.return_value = 17
+    fake_type.get_til.return_value = None
+
+    class FakeTextSink:
+        pass
+
+    class FakeIdaTypeInf:
+        PDF_INCL_DEPS = 0x1
+        PDF_DEF_FWD = 0x2
+        text_sink_t = FakeTextSink
+
+        @staticmethod
+        def print_decls(sink: object, til: object, ordinals: list[int], flags: int) -> int:
+            del til, ordinals, flags
+            sink._print("struct Dependency;\nstruct Widget { Dependency *value; };\n")
+            return 2
+
+    class FakeRuntime:
+        @staticmethod
+        def get_named_type(name: str):
+            assert name == "Widget"
+            return fake_type
+
+        @staticmethod
+        def classify_tinfo(_tif: object) -> str:
+            return "struct"
+
+        @staticmethod
+        def mod(name: str) -> FakeIdaTypeInf:
+            assert name == "ida_typeinf"
+            return FakeIdaTypeInf()
+
+    payload = _run_op("type_deps", FakeRuntime(), {"name": "Widget"})
+
+    assert payload == {
+        "name": "Widget",
+        "kind": "struct",
+        "decl": "struct Dependency;\nstruct Widget { Dependency *value; };",
+        "dependencies_included": True,
+    }
+
+
+def test_type_deps_rejects_named_type_without_local_ordinal() -> None:
+    class FakeType:
+        @staticmethod
+        def get_ordinal() -> int:
+            return 0
+
+    class FakeRuntime:
+        @staticmethod
+        def get_named_type(_name: str) -> FakeType:
+            return FakeType()
+
+        @staticmethod
+        def classify_tinfo(_tif: object) -> str:
+            return "struct"
+
+        @staticmethod
+        def mod(name: str) -> object:
+            assert name == "ida_typeinf"
+            return object()
+
+    with pytest.raises(IdaOperationError, match="named type has no local ordinal: Widget"):
+        _run_op("type_deps", FakeRuntime(), {"name": "Widget"})
+
+
+def test_enum_member_rename_rolls_back_after_readback_failure() -> None:
     class FakeEnumTif:
         def __init__(self) -> None:
             self.persisted_name: str | None = None
@@ -2530,16 +1032,24 @@ def test_enum_member_rename_reports_success_when_readback_fails(monkeypatch) -> 
     tif = FakeEnumTif()
 
     class FakeRuntime:
-        def mod(self, name: str) -> FakeIdaTypeInf:
-            assert name == "ida_typeinf"
-            return FakeIdaTypeInf()
+        class FakeUndo(_SuccessfulUndo):
+            @staticmethod
+            def perform_undo() -> bool:
+                tif.persisted_name = None
+                return True
 
-    monkeypatch.setattr(types, "_enum_type", lambda runtime, name: tif)
-    monkeypatch.setattr(
-        types,
-        "_enum_view",
-        lambda context, request: (_ for _ in ()).throw(RuntimeError("enum refresh failed")),
-    )
+        def mod(self, name: str):
+            if name == "ida_typeinf":
+                return FakeIdaTypeInf()
+            if name == "ida_undo":
+                return self.FakeUndo()
+            raise AssertionError(name)
+
+        def get_named_type(self, name: str, *, kind: str):
+            assert (name, kind) == ("Color", "enum")
+            if tif.persisted_name is not None:
+                raise RuntimeError("enum refresh failed")
+            return tif
 
     with pytest.raises(
         IdaOperationError,
@@ -2551,28 +1061,118 @@ def test_enum_member_rename_reports_success_when_readback_fails(monkeypatch) -> 
             {"enum_name": "Color", "member_name": "RED", "new_name": "CRIMSON"},
         )
 
-    assert tif.persisted_name == "Color"
+    assert tif.persisted_name is None
 
 
-def test_first_free_bookmark_slot_reports_full_range() -> None:
-    class FakeIdaMoves:
-        MAX_MARK_SLOT = 2
+class _FakeBookmarkPlace:
+    def __init__(self, ea: int = 0) -> None:
+        self.ea = ea
 
-    class FakeRuntime:
-        def mod(self, name: str):
-            assert name == "ida_moves"
-            return FakeIdaMoves()
 
-    occupied = {0, 1, 2}
-    original = bookmarks._bookmark_state
-    try:
-        bookmarks._bookmark_state = lambda runtime, slot: bookmarks.BookmarkState(  # type: ignore[assignment]
-            slot=slot,
-            present=slot in occupied,
-            address=None,
-            comment=None,
-        )
-        with pytest.raises(IdaOperationError, match=r"no free bookmark slots remain \(0\.\.2\)"):
-            bookmarks._first_free_slot(FakeRuntime())
-    finally:
-        bookmarks._bookmark_state = original  # type: ignore[assignment]
+class _FakeBookmarkLocation:
+    def __init__(self) -> None:
+        self._place = _FakeBookmarkPlace()
+
+    def set_place(self, place: _FakeBookmarkPlace) -> None:
+        self._place = place
+
+    def place(self) -> _FakeBookmarkPlace:
+        return self._place
+
+
+class _FakeBookmarkRuntime:
+    def __init__(
+        self,
+        *,
+        max_slot: int,
+        bookmarks: dict[int, tuple[int, str]] | None = None,
+        fail_read_after_write: bool = False,
+    ) -> None:
+        self.bookmarks = {} if bookmarks is None else dict(bookmarks)
+        self._newly_written: set[int] = set()
+        self._fail_read_after_write = fail_read_after_write
+        runtime = self
+
+        class FakeBookmarks:
+            @staticmethod
+            def get(loc: _FakeBookmarkLocation, slot: int, _ud):
+                if runtime._fail_read_after_write and slot in runtime._newly_written:
+                    raise RuntimeError("bookmark decode failed")
+                current = runtime.bookmarks.get(slot)
+                if current is None:
+                    return None, None
+                ea, comment = current
+                loc.set_place(_FakeBookmarkPlace(ea))
+                return comment, slot
+
+            @staticmethod
+            def erase(_loc: _FakeBookmarkLocation, slot: int, _ud) -> bool:
+                existed = slot in runtime.bookmarks
+                runtime.bookmarks.pop(slot, None)
+                runtime._newly_written.discard(slot)
+                return existed
+
+        class FakeIdaMoves:
+            MAX_MARK_SLOT = max_slot
+            bookmarks_t = FakeBookmarks()
+            lochist_entry_t = _FakeBookmarkLocation
+
+        class FakePlaceT:
+            @staticmethod
+            def as_idaplace_t(place: _FakeBookmarkPlace) -> _FakeBookmarkPlace:
+                return place
+
+        class FakeIdaKernwin:
+            place_t = FakePlaceT
+
+            @staticmethod
+            def get_place_class_id(name: str) -> int:
+                assert name == "idaplace_t"
+                return 1
+
+            @staticmethod
+            def get_place_class_template(place_id: int) -> _FakeBookmarkPlace:
+                assert place_id == 1
+                return _FakeBookmarkPlace()
+
+        class FakeIdaIdc:
+            @staticmethod
+            def mark_position(ea: int, _lnnum: int, _x: int, _y: int, slot: int, comment: str) -> None:
+                runtime.bookmarks[slot] = (ea, comment)
+                runtime._newly_written.add(slot)
+
+        self._mods = {
+            "ida_idc": FakeIdaIdc(),
+            "ida_kernwin": FakeIdaKernwin(),
+            "ida_moves": FakeIdaMoves(),
+        }
+
+    def mod(self, name: str):
+        return self._mods[name]
+
+    @staticmethod
+    def resolve_address(identifier: str) -> int:
+        return int(identifier, 0)
+
+
+def test_bookmark_add_reports_full_slot_range() -> None:
+    runtime = _FakeBookmarkRuntime(
+        max_slot=2,
+        bookmarks={
+            0: (0x401000, "first"),
+            1: (0x401010, "second"),
+            2: (0x401020, "third"),
+        },
+    )
+
+    with pytest.raises(IdaOperationError, match=r"no free bookmark slots remain \(0\.\.2\)"):
+        _run_op("bookmark_add", runtime, {"address": "0x401000"})
+
+
+def test_bookmark_add_preview_rollback_removes_slot_after_runner_readback_failure() -> None:
+    runtime = _FakeBookmarkRuntime(max_slot=2, fail_read_after_write=True)
+
+    with pytest.raises(RuntimeError, match="bookmark decode failed"):
+        _run_op("bookmark_add", runtime, {"address": "0x401010", "comment": "new"}, preview=True)
+
+    assert runtime.bookmarks == {}

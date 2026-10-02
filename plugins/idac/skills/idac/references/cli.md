@@ -1,0 +1,214 @@
+# idac Quick Reference
+
+Use targeted `idac <command> --help` for the installed command's exact grammar.
+This reference highlights useful reads and non-obvious CLI behavior. For persistent
+edits, follow [mutation workflows](workflows.md#safe-mutation-loop).
+
+## Conventions
+
+- list commands use one optional positional filter such as `NAME_FILTER` or `TYPE_FILTER`
+- `--regex` enables regular-expression matching
+- matching is case-sensitive by default; `-i` makes it case-insensitive
+- `function list` text output includes the containing section, such as `.plt` or `.text`
+- `function list --demangle` matches and renders demangled display names
+- `function metadata` and JSON `function list` rows include `display_name` when available; JSON `function list` rows also include `section`
+- `function list` also accepts `--segment` to scope by segment and `--limit` to cap returned rows; `search bytes` accepts `--limit` too
+- function-taking commands can resolve a unique demangled C++ name such as `ExampleClass::method_1`; if multiple functions match, use a mangled name, full signature, or address
+- `segment list` lists database segments
+- maintenance operations live under `misc`; installation commands live under `setup`; workspace scaffolding lives under `workspace`
+
+## Context selection
+
+- `-c/--context PATH` opens or attaches to an `.i64` or input binary through Nexus.
+- `--instance RECORD_ID` attaches to one exact READY discovery record from
+  `targets list`.
+- The selectors are mutually exclusive. With neither, exactly one READY Nexus instance
+  must exist.
+- Context options may be placed before the command or on a context-aware subcommand.
+- Headless opens wait for analysis and use a five-minute idle keepalive. Successful
+  headless mutations are checkpointed before the next remote request or lease
+  release; live GUI saves are explicit.
+- Discovery, timeout, connection, and version failures have no fallback or automatic
+  retry.
+
+## Common reads
+
+```bash
+idac database show --json
+idac function list
+idac function list --demangle
+idac function list "init|open|close" --demangle --regex -i
+idac function list "sub_08041337"
+idac function list "sub_.*" --regex
+idac function list "sub_08041337" -i
+idac segment list
+idac segment list "__TEXT|__cstring" --regex
+idac function metadata "sub_08041337"
+idac function frame "sub_08041337"
+idac function stackvars "sub_08041337"
+idac function callees "sub_08041337"
+idac function callers "sub_08041337"
+idac function prototype show "sub_08042010"
+idac function locals list "sub_08041337"
+idac decompile "sub_08041337"
+idac decompile "ExampleClass::method_1"
+idac decompile "sub_08041337" -o "/tmp/sub_08041337.txt"
+idac decompilemany "sub_08041337" --out-file "/tmp/sub_08041337.c"
+idac decompilemany --functions-file "funcs.txt" --out-dir "/tmp/decomp"
+idac decompilemany --functions-file "funcs.txt" --out-dir "/tmp/decomp" --disasm --ctree
+idac disasm "sub_08041337"
+idac disasm --start "0x100000460" --end "0x1000004a0"
+idac ctree "sub_08041337"
+idac xrefs "sub_08041337"
+idac imports
+idac search bytes "74 69 6e 79" --segment "__cstring" --timeout 30
+idac search strings "tiny" --segment "__cstring" --timeout 30
+idac type show "ExampleStruct"
+idac type deps "ExampleStruct"
+idac type check --decl-file "recovered_types.h" --json
+idac function prototype check "sub_08041337" --decl-file "sub_08041337_proto.h" --json
+idac comment show "sub_08041337" --scope function
+idac bookmark list
+```
+
+`xrefs` is a top-level command; there is no `function xrefs` command.
+For broad function discovery, prefer `function list "name1|name2" --regex -i` so IDA filters before rendering. Add `--demangle` when the filter should match demangled display names. Avoid producing a full function list just to pipe it into `rg`; add `--out <path>` if the filtered result is still too large for inline output.
+`search strings` and `search bytes` require both `--timeout` and `--segment`.
+String listing reads already-defined strings; `--scan` reads string-like bytes
+without defining them. On dyld shared caches, string listing is disabled: use
+`--scan` with explicit `--start` / `--end` bounds totaling at most 16 MiB.
+
+## Comments and bookmarks
+
+```bash
+idac comment set "sub_08041337" "parses the record header" --scope function
+idac comment set "0x100000460" "length check before the copy" --scope line
+idac comment delete "sub_08041337" --scope function
+idac bookmark add "sub_08041337" --comment "entry parser"
+idac bookmark set 3 "0x100000460" --comment "length check"
+idac bookmark show 3
+idac bookmark delete 3
+```
+
+Comment scopes are `line`, `function`, `anterior`, and `posterior`. `--anterior` and
+`--posterior` are shorthands for the matching scope, and `--repeatable` selects the
+repeatable slot for `line` and `function` comments. `bookmark add` takes the first free
+slot; `bookmark set` writes an explicit slot number.
+
+`comment set`, `comment delete`, and the mutating `bookmark` commands are
+preview-capable and batch-safe. Prefer them over local-only notes when a finding belongs
+with the address it describes.
+
+## Struct field and enum member edits
+
+Edit one member of an existing local type without re-declaring the whole type:
+
+```bash
+idac type struct field set "ExampleStruct" "entry_count" --offset 0x18 --decl "unsigned int"
+idac type struct field rename "ExampleStruct" "field_20" "flags"
+idac type struct field delete "ExampleStruct" "field_28"
+idac type enum member set "ExampleEnum" "EXAMPLE_FLAG_RETRY" --value 0x4
+idac type enum member rename "ExampleEnum" "member_2" "EXAMPLE_FLAG_ASYNC"
+idac type enum member delete "ExampleEnum" "member_3"
+```
+
+- `--offset` is a byte offset. A field already at that exact offset is retyped and, if
+  needed, renamed; otherwise a new field is added there.
+- `type struct field set --decl` accepts bare type text such as `unsigned int` or a full
+  member declaration such as `unsigned int entry_count;`. Use `--decl-file` for array or
+  function-pointer members.
+- `type enum member set --value` is required and adds the member when it does not exist;
+  `--mask` applies to bitfield enums.
+- All six commands are mutating, preview-capable, and batch-safe, and they default to
+  JSON output. They return the refreshed struct or enum, so the command output is the
+  readback.
+- Prefer these for small corrections to a type that is already close. Re-import through
+  `type declare --replace` when the layout changes broadly.
+
+## Preview
+
+`function prototype set --preserve-cc` retains the current database calling
+convention when editing a return type, parameter type, or parameter name. IDA's
+parser can otherwise normalize the convention even when the declaration repeats
+the displayed keyword. Use the flag for ABI-preserving edits; omit it for a
+deliberate calling-convention change.
+
+`idac` preview is always a wrapper and always writes JSON or JSONL.
+The payload includes `command`, `status`, `before`, `after`, `result`, `readback`, `undo`, `artifacts`, and `stderr`.
+
+```bash
+idac function prototype show "sub_08042010"
+idac function prototype check "sub_08042010" --decl "long long __cdecl sub_08042010(long long lhs, long long rhs)"
+idac preview -o "/tmp/preview.json" \
+  function prototype set "sub_08042010" --decl "long long __cdecl sub_08042010(long long lhs, long long rhs)"
+```
+
+The wrapper owns the preview artifact. Wrapped commands cannot set `--out`,
+`--out-file`, or `--out-dir`; put `--out` on `preview`. Output paths cannot
+alias the selected binary/database or a command input file. Insert `--` before the
+wrapped command when its first token starts with a dash.
+
+Preview-capable read-only commands are treated as no-op previews with identical `before` and `after` payloads. Commands not marked preview-capable remain rejected by the wrapper.
+
+For unfiltered type, struct, and enum lists, the preview or batch wrapper's
+`--out` satisfies the artifact requirement. File output checks protect the
+resolved Nexus database and original input, even when a GUI database was saved
+under another name.
+
+## Batch
+
+Batch accepts one subcommand per line, without a leading `idac`. Blank lines and
+`#` comments are allowed. Put target and timeout options on the wrapper. Persistent
+mutations require wrapper `--out`; mutating children cannot set their own output
+paths. Read-only children may write artifacts, whose relative paths resolve from
+the batch file's directory.
+
+Use `--lint --out <lint.json>` before mutation batches, and `--fail-fast` when later
+steps depend on earlier success or local selectors must stop on the first miss.
+Keep previews and matching commits in separate runs so you can inspect the preview
+journal between them. See [batch workflows](workflows.md#batch) for complete
+examples, supported commands, and journal lifecycle.
+
+## Setup and misc commands
+
+Installation commands live under `setup` and are rejected from `batch`:
+
+- `setup gui` — use HCLI to install the GUI plugin matching the installed Nexus
+  client, with ida-domain resolved from the declared dependency requirement.
+
+IDA maintenance commands live under `misc`:
+
+- `misc rename` — rename a function or global symbol. Preview-capable and
+  batch-safe; use an address when later batch steps must survive the rename.
+- `misc reanalyze` — re-run IDA analysis on a function or range. Batch-safe, not preview-capable; place it between type/prototype mutations and local cleanup. Add `--end` for a range instead of a single function.
+
+Workspace scaffolding lives under `workspace`:
+
+- `workspace init [DEST]` — create a recovery workspace with `audit/`, `headers/`,
+  `scripts/`, `prompts/`, and `.idac/tmp/`, with shared `AGENTS.md` guidance for
+  Claude and Codex. Reuse existing workspace conventions.
+  `--force` overwrites user-tunable config; use it only when replacing that config
+  is intended.
+
+## Output notes
+
+- terminal output still enforces the inline size limit
+- large inline results print a truncated prefix first, then error
+- `type declare --clang` uses IDA's clang parser for more complex C/C++ declarations
+- `type declare --bisect` isolates the first declaration IDA rejects when a multi-declaration import fails; it reports the failing line range, whether that declaration imports on its own, and any by-value members whose types are still opaque. It needs IDA undo support and is rejected by `type check`.
+- `type declare --alias OLD=NEW` rewrites identifiers before import; use it to flatten namespace-qualified names
+- `type check` validates the whole header in a temporary type library, resolving
+  dependencies between declarations and existing local types without importing
+  or replacing database types. For an import replacing existing layouts, preview
+  `type declare --replace` directly to inspect the actual replacement.
+- `function prototype check` validates a function declaration without applying it
+- `type deps NAME` prints an existing type with IDA dependency expansion when available
+- `type list`, `type struct list`, and `type enum list` require `--out` when no pattern is given
+- for `function locals retype`, `--type` is shorthand for simple type text; use `--decl` or `--decl-file` for a full declaration, such as arrays or function pointers
+- `decompile` uses `-o/--out` for a single rendered result; `decompilemany` uses `--out-file` or `--out-dir` for bulk artifacts
+- `decompilemany FUNCTION_FILTER` selects functions by name substring; it is not a list of exact functions
+- for multiple explicit functions, write one function name or address per line and pass `decompilemany --functions-file <path>`
+- `decompilemany --out-file` writes combined text
+- `decompilemany --out-dir` writes one file per function plus `manifest.json`
+- `decompilemany --disasm` and `--ctree` require `--out-dir` and add per-function `.asm` and `.ctree` artifacts to the manifest
+- long `decompilemany --out-dir` artifact names are shortened with a stable digest; use `manifest.json` `.functions[].address` as the stable exact lookup key, and `.functions[].artifact_path` / `.functions[].artifacts` for file paths
