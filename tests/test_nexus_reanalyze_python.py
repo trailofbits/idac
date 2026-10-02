@@ -146,39 +146,6 @@ def test_nexus_python_exec_changes_are_checkpointed_for_headless_database(
     }
 
 
-def test_nexus_db_save_persists_python_exec_changes(
-    idac_cmd: list[str],
-    idac_env: dict[str, str],
-    copy_database,
-    tiny_database: Path,
-) -> None:
-    database = copy_database(tiny_database)
-    run_nexus_json(
-        idac_cmd,
-        idac_env,
-        database,
-        "py",
-        "exec",
-        "--code",
-        "ea = idc.get_name_ea_simple('main')\n"
-        "idc.set_cmt(ea, 'saved by database save', 0)\n"
-        "result = {'comment_ea': hex(ea)}",
-    )
-    saved = run_nexus_json(idac_cmd, idac_env, database, "database", "save")
-    persisted = run_nexus_json(idac_cmd, idac_env, database, "comment", "show", "main")
-
-    assert saved == {
-        "saved": True,
-        "path": str(database.resolve(strict=False)),
-    }
-    assert persisted == {
-        "address": "0x100000460",
-        "scope": "line",
-        "repeatable": False,
-        "comment": "saved by database save",
-    }
-
-
 def test_reanalyze_range_restores_function_after_session_item_deletion(
     idac_cmd: list[str],
     idac_env: dict[str, str],

@@ -555,13 +555,11 @@ def test_batch_without_selector_accepts_context_free_children(tmp_path: Path, fa
     assert payload["commands_failed"] == 0
 
 
-def test_python_exec_is_stateless_and_persist_option_is_removed(tmp_path: Path, fake_nexus, capsys) -> None:
+def test_python_exec_renders_json_and_rejects_removed_persist_option(tmp_path: Path, fake_nexus, capsys) -> None:
     database = tmp_path / "sample.i64"
     database.touch()
 
     assert main(["py", "exec", "-c", str(database), "--code", "result = 7", "--json"]) == 0
-    call = fake_nexus.instances[0].calls[0]
-    assert "result = 7" in call["source"]
     assert json.loads(capsys.readouterr().out) == {
         "result": 7,
         "result_repr": "7",

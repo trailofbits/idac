@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from idac import remote_ops
@@ -113,16 +115,6 @@ class _FakeIdaStrlist:
         return True
 
 
-class _FakeIdaIda:
-    @staticmethod
-    def inf_get_min_ea() -> int:
-        return 0x1000
-
-    @staticmethod
-    def inf_get_max_ea() -> int:
-        return 0x2000
-
-
 class _FakeIdaNalt:
     STRTYPE_TERMCHR = 7
     STRTYPE_C = 0
@@ -159,7 +151,10 @@ class _FakeRuntime(IdaRuntime):
         self._ida_strlist = _FakeIdaStrlist(self._items)
         self._mods = {
             "ida_bytes": _FakeIdaBytes(self._items, scan_lengths=scan_lengths),
-            "ida_ida": _FakeIdaIda(),
+            "ida_ida": SimpleNamespace(
+                inf_get_min_ea=lambda: min(item.start_ea for item in self._segment_ranges),
+                inf_get_max_ea=lambda: max(item.end_ea for item in self._segment_ranges),
+            ),
             "ida_strlist": self._ida_strlist,
             "ida_nalt": _FakeIdaNalt(input_path),
         }
@@ -171,31 +166,8 @@ class _FakeRuntime(IdaRuntime):
     def resolve_address(identifier: str) -> int:
         return int(identifier, 0)
 
-    def resolve_segment_ranges(
-        self,
-        selector: str,
-        *,
-        start: str | None = None,
-        end: str | None = None,
-        require_bounds: bool = False,
-        missing_message: str = "range requires both start and end addresses",
-    ) -> tuple[SegmentRange, ...]:
-        assert selector == "__TEXT"
-        if require_bounds and (start is None or end is None):
-            raise IdaOperationError(missing_message)
-        range_start = self._segment_ranges[0].start_ea if start is None else int(start, 0)
-        range_end = self._segment_ranges[-1].end_ea if end is None else int(end, 0)
-        if range_end <= range_start:
-            raise IdaOperationError("range end must be greater than the start")
-        return tuple(
-            SegmentRange(
-                name=item.name,
-                start_ea=max(item.start_ea, range_start),
-                end_ea=min(item.end_ea, range_end),
-            )
-            for item in self._segment_ranges
-            if min(item.end_ea, range_end) > max(item.start_ea, range_start)
-        )
+    def iter_segments(self) -> tuple[SegmentRange, ...]:
+        return self._segment_ranges
 
 
 def test_op_strings_filters_defined_strings_and_restores_global_options() -> None:
@@ -322,11 +294,14 @@ def test_op_strings_dsc_scan_rejects_large_ranges() -> None:
 def test_op_strings_filters_to_selected_segment_ranges() -> None:
     runtime = _FakeRuntime(
         items={
-            0x1010: (0, 5, b"alpha"),
+            0x1010: (0, 10, b"Tiny token"),
             0x2010: (0, 10, b"Tiny token"),
         }
     )
-    runtime._segment_ranges = (SegmentRange(name="__TEXT:__cstring", start_ea=0x2000, end_ea=0x2100),)
+    runtime._segment_ranges = (
+        SegmentRange(name="__DATA:__cstring", start_ea=0x1000, end_ea=0x1100),
+        SegmentRange(name="__TEXT:__cstring", start_ea=0x2000, end_ea=0x2100),
+    )
 
     rows = _op_strings(runtime, {"pattern": "tiny", "ignore_case": True, "segment": "__TEXT"})
 
