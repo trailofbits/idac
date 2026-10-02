@@ -180,7 +180,8 @@ IDA maintenance commands live under `misc`:
 Workspace scaffolding lives under `workspace`:
 
 - `workspace init [DEST]` — create a recovery workspace with `audit/`, `headers/`,
-  `scripts/`, `prompts/`, and `.idac/tmp/`. Reuse existing workspace conventions.
+  `scripts/`, `prompts/`, and `.idac/tmp/`, with shared `AGENTS.md` guidance for
+  Claude and Codex. Reuse existing workspace conventions.
   `--force` overwrites user-tunable config; use it only when replacing that config
   is intended.
 

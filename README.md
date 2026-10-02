@@ -17,6 +17,7 @@ session or a headless database.
 - [Demo](#demo)
 - [Quick start](#quick-start)
 - [Requirements](#requirements)
+- [Upgrading from 0.19](#upgrading-from-019)
 - [How it works](#how-it-works)
 - [Agent sandbox setup](#agent-sandbox-setup)
 - [Usage](#usage)
@@ -101,14 +102,18 @@ READY Nexus instance.
 
 ## Quick start
 
-Install the CLI from [PyPI](https://pypi.org/project/idac/), then install the matching
-GUI integration:
+Install the CLI from [PyPI](https://pypi.org/project/idac/). For live desktop work,
+install the matching GUI integration:
 
 ```bash
 uv tool install idac         # installs the `idac` command on your PATH
 idac setup gui               # GUI plugin matching the installed ida-nexus client
 idac doctor                  # report local versions and check the IDA environment
 ```
+
+Restart IDA or load the installed Nexus component, then rerun `idac doctor` and
+`idac targets list --json`. Headless work does not require the GUI component;
+select an existing database or binary with `-c` to start a managed worker.
 
 For the agent guidance, install the Agent Plugin (see [Agent plugin](#agent-plugin)).
 
@@ -158,6 +163,36 @@ component, Nexus discovery, and the runtime inside every ready IDA instance.
 Remote runtimes must satisfy the package requirements, and Nexus enforces protocol
 compatibility. `idac` does not fall back to another backend.
 
+## Upgrading from 0.19
+
+The rewrite requires Python 3.11+ and IDA Pro 9.4+. Install the matching Nexus GUI
+component with `idac setup gui` for live desktop work, and install the Agent Plugin
+separately for agent guidance. Update existing commands and scripts as follows:
+
+| Previous usage | Current usage |
+|----------------|---------------|
+| `-c db:sample.i64` | `-c sample.i64`; existing binary paths work too |
+| `-c pid:1234`, `-c module:NAME`, or a bare module selector | `--instance RECORD_ID` from `idac targets list --json` |
+| A legacy `.idb` database | Convert it to `.i64` in IDA first |
+| `misc plugin install` | `setup gui`, followed by restarting IDA or loading the Nexus component |
+| `misc skill install` | Install the [Agent Plugin](#agent-plugin) through your client's marketplace |
+| `idac docs` | Subcommand `--help`, `--full-help`, and the installed skill's references |
+| `database open`, `database close`, or `targets cleanup` | Select the database with `-c`; Nexus manages workers and their lifetime |
+| `database save DESTINATION` | `database save` checkpoints the selected database; it accepts no destination path |
+| `py exec --persist` | Combine dependent Python work in one invocation; each execution has a fresh namespace |
+
+`targets list --json` returns Nexus records with `record_id`, `state`, `detail`,
+`backend`, `pid`, `idb_path`, `exe_path`, `managed`, and `started_at`. Update scripts
+that read the old target fields. Omitted selectors require exactly one READY
+instance, including managed headless workers. `-c` can attach to a matching GUI
+database, so it does not guarantee headless execution.
+
+Put target and timeout options on `batch` and `preview`, not on their child
+commands. Successful headless mutations save automatically; batches keep earlier
+successful changes even if a later step fails. GUI saves remain explicit. See
+[How it works](#how-it-works) and [batch usage](#run-an-ordered-mutation-pass-with-batch)
+for execution and journal behavior.
+
 ## How it works
 
 Every IDA operation goes through the public ida-nexus Python API. `-c/--context PATH`
@@ -176,7 +211,8 @@ request retires that exact headless worker with `save=False`; the operation is n
 retried. Live GUI commands do not force analysis or save; checkpoint GUI changes
 explicitly with `idac database save`.
 
-For selection and Nexus diagnostics, install the plugin (see [Agent plugin](#agent-plugin)).
+Use `idac targets list --json` to inspect discovery records and `idac doctor` to
+diagnose the local and remote runtime stack.
 
 ## Agent sandbox setup
 
@@ -189,7 +225,11 @@ idac workspace init reversing-workspace
 That creates workspace-local `.claude/` and `.codex/` config, agent guidance files,
 prompt templates, and a git-backed directory layout for RE work. Nexus discovery and
 execution are local to the host; the generated workspace allows the local access
-needed by `idac`.
+needed by `idac`. Install the Agent Plugin in the client separately; workspace
+initialization does not copy the skill or its references.
+
+Claude and Codex share `AGENTS.md` directly; the workspace does not generate a
+separate `CLAUDE.md`.
 
 To customize the generated files, see the templates under [src/idac/workspace_template/default](src/idac/workspace_template/default).
 
@@ -234,6 +274,8 @@ idac preview -o "/tmp/preview.json" \
 The wrapper owns the preview artifact. A wrapped command cannot set `--out`,
 `--out-file`, or `--out-dir`; put `--out` on `preview` itself. Output paths are
 also rejected when they alias the selected binary/database or any command input.
+Put `-c`, `--instance`, and `--timeout` on the wrapper too; child commands cannot
+override them.
 
 ### Recover C++ class hierarchies
 
@@ -292,6 +334,10 @@ function locals rename "0x100000000" 6 --new-name record_type
 Mutating batches require `--out` so the result log is preserved before any change runs. `batch --lint` parses child commands, resolves relative input paths, rejects unsupported batch commands, and warns on risky local selectors before execution. Setup commands are intentionally rejected from `batch`; `misc reanalyze` is batch-safe and belongs between type/prototype changes and local cleanup.
 Before dispatching the first command, `batch` writes a `pending` journal and checkpoints it after every line. It closes the shared Nexus session before replacing that journal with a terminal `ok`, `failed`, or `interrupted` record; Ctrl-C returns 130 without discarding the lifecycle record. Mutating child commands cannot set their own `--out`—the wrapper artifact is the mutation log—while read-only children may still write separate artifacts.
 
+Use `--fail-fast` when later steps depend on earlier ones or local selectors must
+stop on the first miss. A batch does not roll back earlier successful mutations;
+headless checkpoints survive a later failure or interruption.
+
 ### Address locals three ways
 
 `function locals update/rename/retype` share one selector model — local name, numeric index, or canonical `local_id`. Prefer `--index` or `--local-id` for longer passes and after reanalysis, since names drift:
@@ -312,6 +358,13 @@ When no first-class command fits, drop to IDAPython against the same target:
 ```bash
 idac py exec --code "result = {'entry': hex(idc.get_inf_attr(idc.INF_START_EA))}"
 ```
+
+Each execution uses a fresh namespace; `--persist` is no longer available. Use
+`--script PATH` or `--stdin` for multiline code, and keep dependent work in one
+invocation. Script contents are read locally and execute inside IDA with the local
+filename as `__file__`. Assign JSON-native data to `result`; structured output
+includes `result`, `result_repr`, `stdout`, and `stderr`. `py exec` is treated as
+mutating for saving and cannot be previewed.
 
 ## Agent plugin
 

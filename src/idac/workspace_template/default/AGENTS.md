@@ -26,9 +26,11 @@ exactly one READY Nexus instance exists. Otherwise ask instead of guessing.
 
 - Start each pass from `prompts/recovery-pass.md`. Target, Scope, and Objective are
   required — ask when they are missing.
-- Follow the skill's mutation rules for every database change: preview before commit,
-  lint batches before running them, reanalyze and reread after type or prototype
-  changes, and calibrate local selectors from fresh locals JSON.
+- Follow the skill's mutation workflow for database edits. Preview parser-risky
+  type/prototype changes and uncertain selectors; confirmed renames, comments, and
+  parameter-name edits with `--preserve-cc` can be committed directly with readback.
+  Lint mutation batches, reanalyze after meaningful type or prototype changes, and
+  calibrate local selectors from fresh locals JSON.
 - Record every pass in `audit/<target>-recovery.md` using the skill's checkpoint-note
   skeleton. Keep entries append-only and factual, and distinguish proven facts from
   inferred names, types, and semantics.

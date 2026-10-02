@@ -12,14 +12,15 @@ single function to a multi-target type/prototype recovery effort.
 - **Prior work**: {{PRIOR_WORK}} (audit entry, recovered header, artifact path, or "none")
 
 Any value still containing `{{...}}` is unfilled. Target, Scope, and Objective are
-required — ask for them instead of guessing. Context may stay unfilled only when
-AGENTS.md sets a default target; Prior work defaults to "none".
+required — ask for them instead of guessing. For an unfilled Context, use the
+AGENTS.md default target; if none is set, omit a selector only when exactly one
+READY Nexus instance exists. Otherwise ask. Prior work defaults to "none".
 
 ## References
 
-Install the `idac` skill first; it carries the guide and loads focused references on
-demand for command grammar, the safe mutation loop, Nexus context selection, and
-runtime troubleshooting.
+Install the `idac` Agent Plugin through a compatible client first; its skill loads
+focused references for command grammar, the mutation workflow, Nexus context
+selection, and runtime troubleshooting.
 
 ## Pass contract
 
@@ -27,9 +28,11 @@ runtime troubleshooting.
   and `headers/recovered/`. Extend prior work instead of rediscovering it; if the latest
   audit entry no longer matches the database, note the mismatch and re-verify before
   building on it.
-- Follow the skill's mutation rules for every database or header
-  change: preview before commit, lint batches, reanalyze and reread after type or
-  prototype changes.
+- Follow the skill's mutation workflow for database edits: preview parser-risky
+  type/prototype changes and uncertain selectors, and read back committed state.
+  Confirmed renames, comments, and parameter-name edits with `--preserve-cc` can
+  be committed directly. Lint mutation batches and reanalyze and reread after
+  meaningful type or prototype changes.
 - Work from the binary/database only. Do external correlation only if the user
   explicitly asks or the task is specifically about external correlation.
 - Keep recovered declarations in `headers/recovered/<target>.h` and durable notes in
@@ -57,9 +60,10 @@ writing or importing class or vtable declarations.
 
 ## Done when
 
-- The stated objective is met, verified by redecompiling (with `--f5`) every mutated
-  function and at least one caller of each changed prototype.
-- Class work passes the skill's class-recovery verification checklist.
+- The stated objective is met and affected state is verified. Use fresh `--f5`
+  pseudocode for meaningful type/prototype changes and an affected caller when
+  propagation matters; annotation-only edits need annotation readback.
+- Class work satisfies the relevant checks in the skill's class-recovery reference.
 - An audit entry appended to `audit/<target>-recovery.md` — using the skill's
   checkpoint-note skeleton — records the changes, the evidence, failed commands,
   remaining uncertainty, and next steps concrete enough for another agent to continue

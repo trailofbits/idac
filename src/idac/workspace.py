@@ -14,7 +14,6 @@ _CONFIG_PATHS = frozenset(
         ".claude/settings.json",
         ".codex/config.toml",
         ".codex/rules/default.rules",
-        "CLAUDE.md",
         "AGENTS.md",
         ".gitignore",
     }

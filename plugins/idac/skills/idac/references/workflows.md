@@ -251,14 +251,15 @@ Use `--script` or a quoted heredoc with `--stdin` for multiline Python; keep
 `--code` to simple expressions so shell escaping does not become Python syntax.
 
 ```bash
-idac py exec --code "result = {'imagebase': hex(idaapi.get_imagebase())}"
+idac py exec --code "result = {'imagebase': hex(ida_nalt.get_imagebase())}"
 idac py exec --script "inspect_slots.py" --json --out "slots.json"
 ```
 
 Supported inputs are `--code`, `--stdin`, and `--script`, with a fresh namespace
-per execution. Core `ida*` modules, `idautils`, `idc`, and `result` are available
-when their imports succeed; import other required IDA modules explicitly. Assign
-JSON-native data to `result` for structured output. `--script` sets `__file__` to
+per execution. `--persist` is no longer available; combine work that shares Python
+variables in one invocation. Core `ida*` modules, `idautils`, `idc`, and `result`
+are available when their imports succeed; import other required IDA modules
+explicitly. Assign JSON-native data to `result` for structured output. `--script` sets `__file__` to
 the local script path, but execution happens inside IDA; that path is not evidence
 that sibling files exist in the remote environment. The local `idac` package is
 not part of the execution scope.
@@ -267,6 +268,7 @@ For IDA 9.4, the following read-only API recipe was verified against the runtime
 
 ```python
 import ida_ida, ida_nalt, ida_typeinf
+
 tif = ida_typeinf.tinfo_t()
 assert ida_nalt.get_tinfo(tif, ea)
 details = ida_typeinf.func_type_data_t()

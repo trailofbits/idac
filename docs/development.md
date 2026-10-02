@@ -3,7 +3,9 @@
 ## Local setup
 
 `idac` requires Python 3.11 or newer, `ida-nexus>=0.13.2`, and
-`ida-domain>=0.5.1`. `uv.lock` records the resolved development dependencies.
+`ida-domain>=0.5.1`; GUI installation uses `ida-hcli>=0.24.0`. These packages are
+installed as runtime dependencies. IDA-backed work requires IDA Pro 9.4+.
+`uv.lock` records the resolved development dependencies.
 
 ```bash
 uv sync
@@ -65,7 +67,7 @@ execution, and saves. Keep these invariants when changing it:
 - `-c/--context` is a filesystem path to an `.i64` or input binary;
   `--instance` is an exact Nexus discovery record ID.
 - A top-level invocation owns one lazily opened handle. Batch and preview children reuse
-  it and cannot switch contexts.
+  it and cannot set their own target or timeout options.
 - Headless opens request auto-analysis and wait for completion; attaching to a live GUI
   does not force analysis. The default headless analysis wait is finite (120 seconds),
   and an explicit `--timeout` overrides it. Analysis or compatibility failure retires
@@ -169,3 +171,21 @@ Pull requests run lint and the no-IDA unit suite. Merge-queue runs additionally 
 IDA 9.4 and execute the complete Nexus integration suite. Refresh the GUI component
 with `idac setup gui` when updating Nexus, and validate changes to the resolved stack
 with the integration suite.
+
+## Releases
+
+Merge feature changes into `main` before preparing their release. Versions are
+managed by GitHub Actions; do not edit `pyproject.toml`, `uv.lock`, or the Agent
+Plugin version manually to prepare a release.
+
+```bash
+gh workflow run prepare-release.yml --ref main
+```
+
+This bumps the minor version by default; add `-f version=X.Y.Z` to choose an
+explicit version. The workflow updates the Python package and Agent Plugin
+versions, turns the `Unreleased` changelog into a versioned entry, creates a
+`release/vX.Y.Z` branch, and opens its PR. Review the generated changelog and
+merge that PR through the merge queue. The publish workflow then tags the merge
+commit, creates the GitHub release from that changelog section, and publishes to
+PyPI. Do not create release tags or publish manually.

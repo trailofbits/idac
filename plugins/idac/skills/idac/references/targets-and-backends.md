@@ -10,7 +10,8 @@ fails.
 
 ## Select by path
 
-Use `-c/--context PATH` with an `.i64` database or a binary that IDA can open:
+Use `-c/--context PATH` with an `.i64` database or a binary that IDA can open.
+Pass the path directly; legacy `db:` locators are no longer accepted:
 
 ```bash
 idac database show -c sample.i64 --json
@@ -36,6 +37,7 @@ choice, import it in IDA first, make the choice there, and save an `.i64`.
 
 ## Select a running instance
 
+Exact Nexus record IDs replace `pid:`, `module:`, and bare module-name selectors.
 List discovery records, then pass the exact `record_id`:
 
 ```bash
@@ -74,6 +76,10 @@ deadline; headless analysis alone falls back to 120 seconds.
 
 One top-level invocation owns one Nexus lease. `batch`, previews, and
 `decompilemany` reuse that context for all child work.
+
+Selecting a path opens or attaches automatically; there are no `database open`
+or `database close` commands. `database save` checkpoints the selected database
+and accepts no destination path.
 
 `batch` and `preview` own the target and timeout for that lease. Put `-c`,
 `--instance`, and `--timeout` on the wrapper; child commands that specify any of
