@@ -809,6 +809,21 @@ def test_open_error_is_translated_without_retry_or_fallback() -> None:
     assert runtime.attach_calls == []
 
 
+def test_worker_version_failure_surfaces_the_requirement_and_preserves_output() -> None:
+    output = (
+        "idalib worker launcher 26692 exited with status 1\n\n"
+        "<frozen site>: RuntimeWarning: Unexpected value in sys.prefix\n"
+        "[ida-nexus] IDA Nexus requires IDA 9.4 or newer\n"
+    )
+    runtime = FakeRuntime(open_error=FakeNexusError(output))
+    session = NexusSession("/tmp/sample.i64", api=fake_api(runtime))
+    with pytest.raises(NexusSessionError) as caught:
+        _ = session.handle
+    assert str(caught.value) == "IDA Nexus requires IDA 9.4 or newer"
+    assert caught.value.details["worker_output"] == output.strip()
+    assert len(runtime.open_calls) == 1
+
+
 def test_attach_error_is_terminal_without_retry_or_target_fallback() -> None:
     selected = FakeInstance("gui", "gui", managed=False)
     fallback = FakeInstance("other", "gui", managed=False)

@@ -16,6 +16,7 @@ def agent_client_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Keep doctor tests independent of clients installed on the developer's machine."""
 
     monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr("hcli.lib.ida.find_current_ida_version", lambda: "9.4")
     return tmp_path
 
 
@@ -100,11 +101,39 @@ def test_doctor_reports_a_healthy_nexus_stack() -> None:
         ("runtime", "ida_nexus"): "ok",
         ("runtime", "ida_domain"): "ok",
         ("runtime", "ida_hcli"): "ok",
+        ("runtime", "ida"): "ok",
         ("gui", "plugin"): "ok",
         ("nexus", "discovery"): "ok",
         ("nexus", "remote_environment"): "ok",
     }
     assert expected.items() <= statuses.items()
+
+
+@pytest.mark.parametrize("version,supported", [("9.3", False), ("9.4", True), ("10.0", True)])
+def test_doctor_checks_local_ida_without_a_running_database(monkeypatch, version: str, supported: bool) -> None:
+    monkeypatch.setattr("hcli.lib.ida.find_current_ida_version", lambda: version)
+    result = doctor.run_doctor(runner=_hcli_success, discover_databases_fn=lambda _timeout: [])
+    check = next(item for item in result["checks"] if (item["component"], item["name"]) == ("runtime", "ida"))
+    assert check["status"] == ("ok" if supported else "error")
+    assert check["details"]["installed"] == version
+    assert result["healthy"] is supported
+    if not supported:
+        assert "requires IDA 9.4 or newer" in check["summary"]
+
+
+@pytest.mark.parametrize("version", [None, "invalid"])
+def test_doctor_reports_unavailable_local_ida_version(monkeypatch, version) -> None:
+    def detect():
+        if version is None:
+            raise RuntimeError("no IDA installation configured")
+        return version
+
+    monkeypatch.setattr("hcli.lib.ida.find_current_ida_version", detect)
+    result = doctor.run_doctor(runner=_hcli_success, discover_databases_fn=lambda _timeout: [])
+    check = next(item for item in result["checks"] if (item["component"], item["name"]) == ("runtime", "ida"))
+    assert check["status"] == "error"
+    assert "could not determine" in check["summary"]
+    assert result["healthy"] is False
 
 
 @pytest.mark.parametrize("client", ["codex", "claude"])
@@ -176,6 +205,22 @@ def test_doctor_keeps_optional_skill_inventory_failures_nonfatal(agent_client_pa
         check = next(item for item in result["checks"] if item["component"] == "agent")
         assert check["status"] == "warn"
         assert "could not check" in check["summary"]
+
+
+@pytest.mark.parametrize("timeout,expected", [(None, 2.0), (0.5, 0.5), (4.0, 4.0)])
+def test_doctor_bounds_optional_agent_inventory(agent_client_path: Path, timeout, expected: float) -> None:
+    (agent_client_path / "codex").touch(mode=0o755)
+
+    def run(command, **kwargs):
+        if command[0] == "codex":
+            assert kwargs["timeout"] == expected
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return _hcli_success(command, **kwargs)
+
+    result = doctor.run_doctor(timeout=timeout, runner=run, discover_databases_fn=lambda _timeout: [])
+    assert result["healthy"] is True
+    check = next(item for item in result["checks"] if item["component"] == "agent")
+    assert check["status"] == "warn"
 
 
 def test_doctor_reports_blocked_protocol_without_probing() -> None:

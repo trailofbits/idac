@@ -127,9 +127,11 @@ When GUI installation or repair is part of the task, use `idac setup gui`.
 It uses HCLI to install the GUI release matching the installed Nexus
 client and passes the declared ida-domain requirement to the installer. Restart
 IDA or load the installed Nexus component as required by IDA, then rerun discovery.
-`doctor` reports local package versions and checks the independently installed GUI
+`doctor` reports local package versions, checks HCLI's configured IDA version
+without starting IDA, and checks the independently installed GUI
 component and READY instances against the declared runtime requirements. Nexus
 discovery enforces protocol compatibility.
 When Codex or Claude is available on `PATH`, `doctor` also checks installed `idac`
 Agent Plugin versions against the CLI version. Update the CLI or plugin if they
 do not match; this optional guidance check produces a warning, not a runtime error.
+Each agent inventory has a two-second default timeout, overridden by `--timeout`.

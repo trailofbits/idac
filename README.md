@@ -158,10 +158,12 @@ To run from a checkout without installing globally, use `uv run idac --help`.
   Install the matching GUI component with
   `idac setup gui`.
 
-Run `idac doctor` to report CLI package versions and check the installed GUI
+Run `idac doctor` to report CLI package versions, check the configured IDA version
+through HCLI without starting IDA, and check the installed GUI
 component, Nexus discovery, and the runtime inside every ready IDA instance.
 When Codex or Claude is on `PATH`, it also compares installed `idac` Agent Plugin
-versions with the CLI version and warns if they differ.
+versions with the CLI version and warns if they differ. Each optional agent check
+has a two-second default timeout; `--timeout` overrides it.
 Remote runtimes must satisfy the package requirements, and Nexus enforces protocol
 compatibility. `idac` does not fall back to another backend.
 
@@ -169,7 +171,14 @@ compatibility. `idac` does not fall back to another backend.
 
 The rewrite requires Python 3.11+ and IDA Pro 9.4+. Install the matching Nexus GUI
 component with `idac setup gui` for live desktop work, and install the Agent Plugin
-separately for agent guidance. Update existing commands and scripts as follows:
+separately for agent guidance.
+
+If uv's `exclude-newer` policy makes `ida-nexus>=0.13.2` unavailable, installation
+fails during dependency resolution. Use a policy cutoff that admits the required
+Nexus release before upgrading; the resolver cannot satisfy this dependency with
+an older release.
+
+Update existing commands and scripts as follows:
 
 | Previous usage | Current usage |
 |----------------|---------------|

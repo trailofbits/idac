@@ -11,6 +11,7 @@ from typing import Any
 from packaging.version import InvalidVersion, Version
 
 from .compatibility import (
+    MINIMUM_IDA_VERSION,
     REMOTE_ENVIRONMENT_CODE,
     compatibility_mismatches,
     runtime_requirements,
@@ -50,6 +51,32 @@ def _first_line(text: str | None) -> str:
         if stripped:
             return stripped[:200]
     return ""
+
+
+def _local_ida_check() -> dict[str, Any]:
+    """Check HCLI's configured installation without loading IDA or opening a database."""
+    from hcli.lib.ida import find_current_ida_version
+
+    required = ".".join(str(part) for part in MINIMUM_IDA_VERSION)
+    try:
+        installed = find_current_ida_version()
+        supported = Version(installed) >= Version(required)
+    except Exception as exc:
+        return _check(
+            "error",
+            "runtime",
+            "ida",
+            f"could not determine the configured IDA version: {exc}",
+            expected=f">={required}",
+        )
+    return _check(
+        "ok" if supported else "error",
+        "runtime",
+        "ida",
+        f"Configured IDA {installed}" if supported else f"Configured IDA {installed}; requires IDA {required} or newer",
+        installed=installed,
+        expected=f">={required}",
+    )
 
 
 def _run_hcli_status(
@@ -154,7 +181,7 @@ def _agent_skill_checks(*, cli_version: str, timeout: float | None, runner: Comm
         command = [client, "plugin", "list", "--json"]
         try:
             process = runner(
-                command, check=False, capture_output=True, text=True, timeout=10.0 if timeout is None else timeout
+                command, check=False, capture_output=True, text=True, timeout=2.0 if timeout is None else timeout
             )
             if process.returncode != 0:
                 raise ValueError(_first_line(process.stderr) or f"plugin inventory exited with {process.returncode}")
@@ -372,6 +399,7 @@ def run_doctor(
             )
             for distribution in ("idac", "ida-nexus", "ida-domain", "ida-hcli")
         ),
+        _local_ida_check(),
         _run_hcli_status(timeout=timeout, runner=runner),
         *_agent_skill_checks(cli_version=version_getter("idac"), timeout=timeout, runner=runner),
     ]

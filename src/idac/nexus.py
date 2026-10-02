@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -87,6 +88,10 @@ def translate_nexus_error(error: BaseException) -> NexusSessionError:
     raw_details = getattr(error, "details", None)
     details = {str(key): value for key, value in raw_details.items()} if isinstance(raw_details, dict) else {}
     message = str(error).strip() or type(error).__name__
+    version_failure = re.search(r"^\[ida-nexus\] (.*requires IDA \d+\.\d+ or newer)\s*$", message, re.MULTILINE)
+    if version_failure is not None:
+        details["worker_output"] = message
+        message = version_failure.group(1)
     return NexusSessionError(message, kind=kind, status=status, details=details)
 
 
