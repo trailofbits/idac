@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 import pytest
 
 from idac import remote_ops
@@ -392,24 +395,15 @@ def test_type_show_does_not_suppress_type_errors_from_ida() -> None:
 
 
 def test_type_declare_diagnostics_ignore_braces_inside_comments_and_strings() -> None:
-    class FakeIdaTypeInf:
-        HTI_DCL = 0x1
-        HTI_SEMICOLON = 0x2
-        HTI_TST = 0x4
-
-        @staticmethod
-        def parse_decls(_til, _decl: str, _printer, _flags: int) -> int:
-            return 1
-
-    class FakeRuntime:
-        @staticmethod
-        def mod(name: str) -> FakeIdaTypeInf:
-            assert name == "ida_typeinf"
-            return FakeIdaTypeInf()
+    typeinf = Mock(HTI_DCL=0x1, HTI_SEMICOLON=0x2)
+    typeinf.get_idati.return_value.cc = 0
+    typeinf.tinfo_t.return_value.get_named_type.return_value = False
+    typeinf.parse_decls.return_value = 1
+    runtime = SimpleNamespace(mod={"ida_typeinf": typeinf}.__getitem__)
 
     result = _run_op(
         "type_declare_check",
-        FakeRuntime(),
+        runtime,
         {"decl": 'struct Widget { const char *value; }; const char *text = "{" /* } */'},
     )
     diagnostics = result["diagnostics"]
@@ -942,10 +936,9 @@ def test_type_show_normalizes_unknown_size_to_none() -> None:
 
 
 def test_type_deps_uses_local_ordinal_and_dependency_export() -> None:
-    class FakeType:
-        @staticmethod
-        def get_ordinal() -> int:
-            return 17
+    fake_type = Mock()
+    fake_type.get_ordinal.return_value = 17
+    fake_type.get_til.return_value = None
 
     class FakeTextSink:
         pass
@@ -963,9 +956,9 @@ def test_type_deps_uses_local_ordinal_and_dependency_export() -> None:
 
     class FakeRuntime:
         @staticmethod
-        def get_named_type(name: str) -> FakeType:
+        def get_named_type(name: str):
             assert name == "Widget"
-            return FakeType()
+            return fake_type
 
         @staticmethod
         def classify_tinfo(_tif: object) -> str:

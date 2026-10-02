@@ -263,7 +263,9 @@ Pass `--f5` after type or prototype changes so each function reflects the latest
 
 For prototype edits that must retain the existing calling convention, use
 `function prototype set --preserve-cc`. This preserves IDA's stored convention
-when the declaration parser would otherwise normalize it.
+when the declaration parser would otherwise normalize it. `type check` validates
+dependent declarations together in a temporary type library, without importing
+or replacing database types.
 
 ### Run an ordered mutation pass with batch
 

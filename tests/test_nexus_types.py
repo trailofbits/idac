@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.helpers import run_nexus, run_nexus_json
 
 SHARED_TYPE_DECL = (
@@ -37,6 +39,56 @@ def test_nexus_type_declare_and_list(
     payload = run_nexus_json(idac_cmd, idac_env, database, ["type", "list", "test_cli"])
     names = {item.get("name") for item in payload if isinstance(item, dict)}
     assert {"test_cli_mode", "test_cli_record"} <= names
+
+
+@pytest.mark.parametrize("clang", [False, True])
+def test_nexus_type_check_resolves_header_dependencies_without_importing(
+    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, clang: bool
+) -> None:
+    database = copy_database(tiny_database)
+    decl = (
+        "enum check_mode { CHECK_A = 1, CHECK_B = 2 };"
+        "struct check_record { enum check_mode mode; unsigned length; const char *data; };"
+    )
+    args = ["type", "check", "--decl", decl]
+    if clang:
+        args.append("--clang")
+    checked = run_nexus_json(idac_cmd, idac_env, database, args)
+    assert checked["success"] is True
+    assert checked["errors"] == 0
+    assert run_nexus_json(idac_cmd, idac_env, database, ["type", "list", "check_"]) == []
+
+
+@pytest.mark.parametrize("forward_decl", ["", "struct test_cli_record; "])
+def test_nexus_type_check_resolves_existing_types_and_preserves_them_on_failure(
+    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, forward_decl: str
+) -> None:
+    database = copy_database(tiny_database)
+    _declare_types(idac_cmd, idac_env, database)
+    before = run_nexus_json(idac_cmd, idac_env, database, ["type", "show", "test_cli_record"])
+    checked = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        ["type", "check", "--decl", forward_decl + "struct check_wrapper { test_cli_record record; };"],
+    )
+    assert checked["success"] is True
+    proc = run_nexus(
+        idac_cmd,
+        idac_env,
+        database,
+        [
+            "type",
+            "check",
+            "--decl",
+            "struct test_cli_record { long long changed; }; struct invalid { Missing value; };",
+        ],
+        use_json=True,
+    )
+    assert proc.returncode == 1
+    assert json.loads(proc.stdout)["success"] is False
+    assert run_nexus_json(idac_cmd, idac_env, database, ["type", "show", "test_cli_record"]) == before
+    assert run_nexus_json(idac_cmd, idac_env, database, ["type", "list", "check_wrapper"]) == []
 
 
 def test_nexus_type_show_includes_members(

@@ -4149,7 +4149,7 @@ def _named_types_print_type_deps(runtime: IdaRuntime, tif, name: str) -> str:
 
     sink = Sink()
     flags = ida_typeinf.PDF_INCL_DEPS | ida_typeinf.PDF_DEF_FWD
-    exported = int(ida_typeinf.print_decls(sink, None, [ordinal], flags))
+    exported = int(ida_typeinf.print_decls(sink, tif.get_til(), [ordinal], flags))
     decl = sink.text.strip()
     if exported == 0 or not decl:
         raise IdaOperationError(f"failed to export dependencies for named type: {name}")
@@ -4858,17 +4858,15 @@ def _type_declare_parse_type_declarations(runtime: IdaRuntime, decl: str, *, rep
 def _type_declare_parse_type_declarations_with_clang(runtime: IdaRuntime, decl: str) -> int:
     ida_typeinf = runtime.mod("ida_typeinf")
     ida_srclang = runtime.mod("ida_srclang")
-    hti_flags = _type_declare_clang_parse_flags(ida_typeinf, decl, test=False)
+    hti_flags = _type_declare_parse_flags(ida_typeinf, decl)
     errors = ida_srclang.parse_decls_with_parser_ext("clang", None, decl, hti_flags)
     if errors < 0:
         raise IdaOperationError("clang parser is unavailable for type declare")
     return errors
 
 
-def _type_declare_clang_parse_flags(ida_typeinf: Any, decl: str, *, test: bool) -> int:
+def _type_declare_parse_flags(ida_typeinf: Any, decl: str) -> int:
     hti_flags = ida_typeinf.HTI_DCL | ida_typeinf.HTI_SEMICOLON
-    if test:
-        hti_flags |= ida_typeinf.HTI_TST
     if "::" in decl:
         hti_flags |= ida_typeinf.HTI_RELAXED
     return hti_flags
@@ -4876,17 +4874,41 @@ def _type_declare_clang_parse_flags(ida_typeinf: Any, decl: str, *, test: bool) 
 
 def _type_declare_test_type_declarations(runtime: IdaRuntime, decl: str, *, clang: bool) -> int:
     ida_typeinf = runtime.mod("ida_typeinf")
-    if clang:
-        ida_srclang = runtime.mod("ida_srclang")
-        hti_flags = _type_declare_clang_parse_flags(ida_typeinf, decl, test=True)
-        errors = ida_srclang.parse_decls_with_parser_ext("clang", None, decl, hti_flags)
-        if errors < 0:
-            raise IdaOperationError("clang parser is unavailable for type check")
-        return errors
-    hti_flags = ida_typeinf.HTI_DCL | ida_typeinf.HTI_SEMICOLON | ida_typeinf.HTI_TST
-    if "::" in decl:
-        hti_flags |= ida_typeinf.HTI_RELAXED
-    return int(ida_typeinf.parse_decls(None, decl, None, hti_flags))
+    current = ida_typeinf.get_idati()
+    temporary = ida_typeinf.new_til("idac-type-check", "Temporary declaration validation")
+    if temporary is None:
+        raise IdaOperationError("failed to allocate a temporary type library for validation")
+    try:
+        temporary.cc = current.cc
+        # HTI_TST discards declarations before subsequent declarations can use
+        # them. Parse into a disposable TIL, seeding dependencies from IDA's
+        # declaration exporter so typedef names survive the transfer.
+        chunks = _type_declare_parse_declaration_chunks(decl)[0]
+        declared = _type_declare_declared_type_names(
+            [chunk for chunk in chunks if not _type_declare_FORWARD_DECL_RE.match(chunk.text)]
+        )
+        referenced = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*", decl))
+        dependencies = []
+        for name in sorted(referenced - declared):
+            tif = ida_typeinf.tinfo_t()
+            if tif.get_named_type(current, name):
+                dependencies.append(_named_types_print_type_deps(runtime, tif, name))
+        if dependencies:
+            support_decl = "\n".join(dependencies)
+            errors = ida_typeinf.parse_decls(
+                temporary, support_decl, None, _type_declare_parse_flags(ida_typeinf, support_decl)
+            )
+            if errors:
+                raise IdaOperationError(f"failed to copy type dependencies for validation: {errors} parser error(s)")
+        hti_flags = _type_declare_parse_flags(ida_typeinf, decl)
+        if clang:
+            errors = runtime.mod("ida_srclang").parse_decls_with_parser_ext("clang", temporary, decl, hti_flags)
+            if errors < 0:
+                raise IdaOperationError("clang parser is unavailable for type check")
+            return int(errors)
+        return int(ida_typeinf.parse_decls(temporary, decl, None, hti_flags))
+    finally:
+        ida_typeinf.free_til(temporary)
 
 
 def _type_declare_typedef_alias_names(text: str) -> set[str]:
