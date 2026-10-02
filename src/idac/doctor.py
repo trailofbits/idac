@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from packaging.version import InvalidVersion
+from packaging.version import InvalidVersion, Version
 
 from .compatibility import (
     REMOTE_ENVIRONMENT_CODE,
@@ -141,6 +142,66 @@ def _run_hcli_status(
         expected=str(expected),
         installed=installed,
     )
+
+
+def _agent_skill_checks(*, cli_version: str, timeout: float | None, runner: CommandRunner) -> list[dict[str, Any]]:
+    """Compare installed agent guidance with the CLI using each client's inventory."""
+
+    checks: list[dict[str, Any]] = []
+    for client in ("codex", "claude"):
+        if shutil.which(client) is None:
+            continue
+        command = [client, "plugin", "list", "--json"]
+        try:
+            process = runner(
+                command, check=False, capture_output=True, text=True, timeout=10.0 if timeout is None else timeout
+            )
+            if process.returncode != 0:
+                raise ValueError(_first_line(process.stderr) or f"plugin inventory exited with {process.returncode}")
+            payload = json.loads(process.stdout)
+            entries = payload.get("installed") if client == "codex" and isinstance(payload, dict) else payload
+            if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
+                raise ValueError("plugin inventory returned an invalid result")
+        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            checks.append(
+                _check(
+                    "warn",
+                    "agent",
+                    client,
+                    f"could not check the installed idac skill in {client}: {exc}",
+                    expected=cli_version,
+                )
+            )
+            continue
+
+        for entry in entries:
+            plugin_id = entry.get("pluginId") if client == "codex" else entry.get("id")
+            if not isinstance(plugin_id, str) or plugin_id.split("@", 1)[0] != "idac":
+                continue
+            installed = entry.get("version")
+            try:
+                matches = isinstance(installed, str) and Version(installed) == Version(cli_version)
+            except InvalidVersion:
+                matches = False
+            summary = f"{client} idac skill version {installed or 'unknown'} "
+            if matches:
+                summary += f"matches CLI version {cli_version}"
+            else:
+                summary += f"does not match CLI version {cli_version}; update the CLI or Agent Plugin"
+            checks.append(
+                _check(
+                    "ok" if matches else "warn",
+                    "agent",
+                    client,
+                    summary,
+                    plugin_id=plugin_id,
+                    installed=installed,
+                    expected=cli_version,
+                    enabled=entry.get("enabled"),
+                    scope=entry.get("scope"),
+                )
+            )
+    return checks
 
 
 def _discover_check(
@@ -309,9 +370,10 @@ def run_doctor(
                 f"Installed {distribution} version",
                 installed=version_getter(distribution),
             )
-            for distribution in ("ida-nexus", "ida-domain", "ida-hcli")
+            for distribution in ("idac", "ida-nexus", "ida-domain", "ida-hcli")
         ),
         _run_hcli_status(timeout=timeout, runner=runner),
+        *_agent_skill_checks(cli_version=version_getter("idac"), timeout=timeout, runner=runner),
     ]
     if discover_databases_fn is None:
         from ida_nexus import discover_databases

@@ -35,6 +35,9 @@ installer. Its JSON result reports `ida_domain_requirement` rather than claiming
 a particular ida-domain version was installed. Do not copy integration files into
 IDA by hand. `doctor` reports local package versions; remote IDA environments must
 satisfy the runtime requirements declared in package metadata.
+It also uses available Codex and Claude CLIs to compare installed `idac` Agent
+Plugin versions with the CLI version. Missing plugins are optional; mismatches or
+unavailable plugin inventories produce warnings rather than runtime errors.
 
 ## Testing
 

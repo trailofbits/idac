@@ -3,9 +3,20 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from idac import doctor
+
+
+@pytest.fixture(autouse=True)
+def agent_client_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Keep doctor tests independent of clients installed on the developer's machine."""
+
+    monkeypatch.setenv("PATH", str(tmp_path))
+    return tmp_path
 
 
 def _instance(record_id: str = "gui-123") -> SimpleNamespace:
@@ -94,6 +105,77 @@ def test_doctor_reports_a_healthy_nexus_stack() -> None:
         ("nexus", "remote_environment"): "ok",
     }
     assert expected.items() <= statuses.items()
+
+
+@pytest.mark.parametrize("client", ["codex", "claude"])
+@pytest.mark.parametrize("matching", [True, False])
+def test_doctor_compares_installed_skill_and_cli_versions(agent_client_path: Path, client: str, matching: bool) -> None:
+    executable = agent_client_path / client
+    executable.touch(mode=0o755)
+    cli_version = _versions("idac")
+    installed = cli_version if matching else "0.1.0"
+    identity_key = "pluginId" if client == "codex" else "id"
+    entries = [
+        {identity_key: "other@marketplace", "version": "0.1.0"},
+        {identity_key: "idac@marketplace", "version": installed, "enabled": True},
+    ]
+    payload = (
+        {"installed": entries, "available": [{"pluginId": "idac@unused", "version": "0.0.1"}]}
+        if client == "codex"
+        else entries
+    )
+
+    def run(command, **kwargs):
+        if command[0] == client:
+            return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+        return _hcli_success(command, **kwargs)
+
+    result = doctor.run_doctor(
+        runner=run,
+        discover_databases_fn=lambda _timeout: [_discovered()],
+        remote_probe_fn=_remote_environment,
+    )
+
+    assert result["healthy"] is True
+    assert result["status"] == ("ok" if matching else "warn")
+    agent_checks = [item for item in result["checks"] if item["component"] == "agent"]
+    assert len(agent_checks) == 1
+    check = agent_checks[0]
+    assert check["status"] == ("ok" if matching else "warn")
+    assert check["details"]["installed"] == installed
+    assert check["details"]["expected"] == cli_version
+    assert installed in check["summary"]
+    assert cli_version in check["summary"]
+
+
+@pytest.mark.parametrize("inventory", ["empty", "malformed", "failed", "timeout"])
+def test_doctor_keeps_optional_skill_inventory_failures_nonfatal(agent_client_path: Path, inventory: str) -> None:
+    executable = agent_client_path / "codex"
+    executable.touch(mode=0o755)
+
+    def run(command, **kwargs):
+        if command[0] != "codex":
+            return _hcli_success(command, **kwargs)
+        if inventory == "timeout":
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        if inventory == "failed":
+            return subprocess.CompletedProcess(command, 1, "", "plugin list failed")
+        stdout = json.dumps({"installed": []}) if inventory == "empty" else "not JSON"
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    result = doctor.run_doctor(
+        runner=run,
+        discover_databases_fn=lambda _timeout: [_discovered()],
+        remote_probe_fn=_remote_environment,
+    )
+
+    assert result["healthy"] is True
+    if inventory == "empty":
+        assert result["status"] == "ok"
+    else:
+        check = next(item for item in result["checks"] if item["component"] == "agent")
+        assert check["status"] == "warn"
+        assert "could not check" in check["summary"]
 
 
 def test_doctor_reports_blocked_protocol_without_probing() -> None:

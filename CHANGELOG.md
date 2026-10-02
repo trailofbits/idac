@@ -46,6 +46,9 @@ select databases, install integrations, and run mutation passes.
   `codex plugin marketplace add trailofbits/idac` followed by
   `codex plugin add idac@idac`. This replaces `misc skill install`; `misc plugin
   install` is replaced by `setup gui`.
+- `doctor` now compares installed `idac` Agent Plugin versions with the CLI version
+  through available Codex and Claude clients, warning when guidance and commands
+  come from different releases.
 - Removed `idac docs`; use subcommand `--help`, `--full-help`, and the installed
   plugin's skill references. `workspace init` now points at that skill instead of
   copying its reference docs into each workspace, and generates one shared

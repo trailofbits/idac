@@ -160,6 +160,8 @@ To run from a checkout without installing globally, use `uv run idac --help`.
 
 Run `idac doctor` to report CLI package versions and check the installed GUI
 component, Nexus discovery, and the runtime inside every ready IDA instance.
+When Codex or Claude is on `PATH`, it also compares installed `idac` Agent Plugin
+versions with the CLI version and warns if they differ.
 Remote runtimes must satisfy the package requirements, and Nexus enforces protocol
 compatibility. `idac` does not fall back to another backend.
 
@@ -386,6 +388,11 @@ codex plugin add idac@idac
 Once installed, the skill loads automatically when relevant. The repository contains
 one canonical plugin package, with no client-specific compatibility package or manual
 skill-link fallback.
+
+Run `idac doctor` after updating the CLI or plugin to check that their versions match.
+It reads the installed plugin inventories through `codex plugin list --json` and
+`claude plugin list --json` when those clients are available on `PATH`. Version
+mismatches are warnings; the Agent Plugin is optional and does not affect CLI health.
 
 For a ready-to-fill task prompt covering anything from a light analysis pass to class-family recovery, run `idac workspace init <dir>` to scaffold a workspace containing `prompts/recovery-pass.md`.
 

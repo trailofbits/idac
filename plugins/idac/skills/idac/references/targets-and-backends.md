@@ -130,3 +130,6 @@ IDA or load the installed Nexus component as required by IDA, then rerun discove
 `doctor` reports local package versions and checks the independently installed GUI
 component and READY instances against the declared runtime requirements. Nexus
 discovery enforces protocol compatibility.
+When Codex or Claude is available on `PATH`, `doctor` also checks installed `idac`
+Agent Plugin versions against the CLI version. Update the CLI or plugin if they
+do not match; this optional guidance check produces a warning, not a runtime error.

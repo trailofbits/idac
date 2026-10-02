@@ -41,13 +41,13 @@ def register(
     root_parser: argparse.ArgumentParser, subparsers: argparse._SubParsersAction[argparse.ArgumentParser]
 ) -> None:
     parser = add_command(
-        root_parser, subparsers, "doctor", help_text="Inspect the local and remote ida-nexus environment"
+        root_parser, subparsers, "doctor", help_text="Inspect the Nexus environment and installed agent skill versions"
     )
     parser.add_argument(
         "--timeout",
         type=positive_timeout,
         default=argparse.SUPPRESS,
-        help="Nexus discovery and probe timeout in seconds",
+        help="Diagnostic subprocess, Nexus discovery, and probe timeout in seconds",
     )
     add_output_options(parser, default_format="text")
     parser.set_defaults(
