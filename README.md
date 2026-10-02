@@ -266,6 +266,8 @@ For prototype edits that must retain the existing calling convention, use
 when the declaration parser would otherwise normalize it. `type check` validates
 dependent declarations together in a temporary type library, without importing
 or replacing database types.
+`misc rename` is batch-safe, so related renames, prototype edits, comments, and
+readbacks can share one Nexus session.
 
 ### Run an ordered mutation pass with batch
 

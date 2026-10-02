@@ -26,7 +26,7 @@ def register(
     child.add_argument("new_name", help="Replacement name")
     child.set_defaults(
         run=run_bound_operation,
-        allow_batch=False,
+        allow_batch=True,
         allow_preview=True,
     )
     bind_operation(

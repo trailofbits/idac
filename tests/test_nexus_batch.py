@@ -95,6 +95,36 @@ def test_batch_reuses_batch_dir_and_updates_prototypes_and_locals(
     assert "sum_value = add(2, 3);" in decompiled
 
 
+def test_batch_saves_coordinated_function_rename_prototype_and_comment(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    batch = tmp_path / "edits.idac"
+    batch.write_text(
+        "misc rename 0x1000004b0 eval_add\n"
+        "function prototype set 0x1000004b0 --preserve-cc --decl 'int __cdecl eval_add(int left, int right);'\n"
+        "comment set 0x1000004b0 'coordinated edits' --scope function\n"
+        "function prototype show 0x1000004b0\n"
+        "comment show 0x1000004b0 --scope function\n"
+    )
+    journal = tmp_path / "edits.json"
+    proc = run_cli(idac_cmd, idac_env, "batch", str(batch), "--fail-fast", "--out", str(journal), "-c", str(database))
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    result = json.loads(journal.read_text())
+    assert result["ok"] is True
+    assert result["commands_failed"] == 0
+    prototype = run_nexus_json(idac_cmd, idac_env, database, "function", "prototype", "show", "eval_add")
+    comment = run_nexus_json(idac_cmd, idac_env, database, "comment", "show", "eval_add", "--scope", "function")
+    assert prototype["prototype"] == "int __cdecl eval_add(int left, int right)"
+    assert result["results"][-2]["result"] == prototype
+    assert result["results"][-1]["result"] == comment
+    assert comment["comment"] == "coordinated edits"
+
+
 def test_batch_defaults_to_stdout_json_without_out(
     idac_cmd: list[str],
     idac_env: dict[str, str],
