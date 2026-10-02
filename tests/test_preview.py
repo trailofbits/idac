@@ -2,7 +2,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.helpers import preview_snapshot, run_nexus_json, run_preview_json
+
+
+@pytest.mark.parametrize("family", [[], ["struct"], ["enum"]])
+def test_unfiltered_type_list_preview_writes_complete_readback(
+    family: list[str], idac_cmd, idac_env, copy_database, tiny_database: Path, tmp_path: Path
+) -> None:
+    database = copy_database(tiny_database)
+    proc, preview = run_preview_json(
+        idac_cmd, idac_env, database, tmp_path / "list-preview.json", "type", *family, "list"
+    )
+
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    assert isinstance(preview["result"], list)
+    assert preview["before"] == preview["after"] == preview["result"]
+    assert preview["undo"] == {"status": "noop", "mode": "read_only", "persisted": False}
 
 
 def test_comment_preview_does_not_persist(

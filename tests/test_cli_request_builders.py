@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import pytest
@@ -22,6 +23,7 @@ def capture_nexus(monkeypatch: pytest.MonkeyPatch):
         instances: ClassVar[list[CaptureSession]] = []
 
         def __init__(self, **_kwargs: object) -> None:
+            self.handle = SimpleNamespace(instance=SimpleNamespace(idb_path=_kwargs.get("locator"), exe_path=None))
             self.calls: list[dict[str, Any]] = []
             self.__class__.instances.append(self)
 

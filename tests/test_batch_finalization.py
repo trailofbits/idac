@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import pytest
@@ -14,6 +15,7 @@ class RecordingSession:
     instances: ClassVar[list[RecordingSession]] = []
 
     def __init__(self, locator=None, instance_id=None, timeout=None) -> None:
+        self.handle = SimpleNamespace(instance=SimpleNamespace(idb_path=locator, exe_path=None))
         self.operations: list[str] = []
         self.closed = False
         self.__class__.instances.append(self)
@@ -24,6 +26,9 @@ class RecordingSession:
 
     def close(self) -> None:
         self.closed = True
+
+    def list_targets(self) -> list[dict[str, object]]:
+        return []
 
 
 @pytest.mark.parametrize("suffix", [".json", ".jsonl"])
@@ -51,6 +56,7 @@ def test_batch_save_failure_replaces_pending_checkpoint_with_failed_finalization
             self.locator = locator
             self.instance_id = instance_id
             self.timeout = timeout
+            self.handle = SimpleNamespace(instance=SimpleNamespace(idb_path=locator, exe_path=None))
             self.closed = False
             self.checkpoint_at_close: Any = None
             self.__class__.instances.append(self)
@@ -128,6 +134,7 @@ def test_batch_establishes_wrapper_output_before_dispatch(
         instances: ClassVar[list[RecordingSession]] = []
 
         def __init__(self, locator=None, instance_id=None, timeout=None) -> None:
+            self.handle = SimpleNamespace(instance=SimpleNamespace(idb_path=locator, exe_path=None))
             self.operations: list[str] = []
             self.close_attempts = 0
             self.closed = False
@@ -217,6 +224,7 @@ def test_batch_rejects_mutating_child_output_before_dispatch(
         instances: ClassVar[list[RecordingSession]] = []
 
         def __init__(self, locator=None, instance_id=None, timeout=None) -> None:
+            self.handle = SimpleNamespace(instance=SimpleNamespace(idb_path=locator, exe_path=None))
             self.operations: list[str] = []
             self.closed = False
             self.__class__.instances.append(self)
@@ -253,6 +261,7 @@ def test_batch_interrupt_closes_and_writes_terminal_record_without_traceback(
         instances: ClassVar[list[InterruptingSession]] = []
 
         def __init__(self, locator=None, instance_id=None, timeout=None) -> None:
+            self.handle = SimpleNamespace(instance=SimpleNamespace(idb_path=locator, exe_path=None))
             self.close_attempts = 0
             self.closed = False
             self.__class__.instances.append(self)
@@ -301,6 +310,7 @@ def test_batch_preserves_unexpected_execution_and_close_failures(
         instances: ClassVar[list[FailingSession]] = []
 
         def __init__(self, locator=None, instance_id=None, timeout=None) -> None:
+            self.handle = SimpleNamespace(instance=SimpleNamespace(idb_path=locator, exe_path=None))
             self.close_attempts = 0
             self.closed = False
             self.__class__.instances.append(self)

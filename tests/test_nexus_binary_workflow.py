@@ -123,3 +123,20 @@ def test_binary_paths_keep_distinct_headless_nexus_targets_ready(
     rows_by_binary = {binary: _headless_rows_for(targets, binary) for binary in binaries}
     assert all(len(rows) == 1 for rows in rows_by_binary.values())
     assert len({rows[0]["record_id"] for rows in rows_by_binary.values()}) == len(binaries)
+
+
+def test_database_selected_output_preserves_original_binary(
+    idac_cmd: list[str], idac_env: dict[str, str], tmp_path: Path
+) -> None:
+    binary = _build_tiny_binary(tmp_path / "build")
+    binary_before = binary.read_bytes()
+    saved = run_cli_json(idac_cmd, idac_env, "database", "save", "-c", str(binary))
+    database = Path(saved["path"])
+    database_before = database.read_bytes()
+
+    proc = run_cli(idac_cmd, idac_env, "database", "show", "-c", str(database), "--json", "--out", str(binary))
+
+    assert proc.returncode == 1
+    assert "must not overwrite the selected input or database" in proc.stderr
+    assert binary.read_bytes() == binary_before
+    assert database.read_bytes() == database_before

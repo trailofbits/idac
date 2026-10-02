@@ -150,6 +150,11 @@ wrapped command when its first token starts with a dash.
 
 Preview-capable read-only commands are treated as no-op previews with identical `before` and `after` payloads. Commands not marked preview-capable remain rejected by the wrapper.
 
+For unfiltered type, struct, and enum lists, the preview or batch wrapper's
+`--out` satisfies the artifact requirement. File output checks protect the
+resolved Nexus database and original input, even when a GUI database was saved
+under another name.
+
 ## Batch
 
 Batch accepts one subcommand per line, without a leading `idac`. Blank lines and

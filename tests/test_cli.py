@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from importlib import metadata
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import pytest
@@ -26,6 +27,10 @@ def fake_nexus(monkeypatch):
             self.locator = locator
             self.instance_id = instance_id
             self.timeout = timeout
+            target = self.discovered[0] if self.discovered else {"idb_path": locator, "exe_path": None}
+            self.handle = SimpleNamespace(
+                instance=SimpleNamespace(idb_path=target.get("idb_path"), exe_path=target.get("exe_path"))
+            )
             self.calls: list[dict[str, Any]] = []
             self.closed = False
             self.__class__.instances.append(self)
@@ -175,6 +180,45 @@ def test_instance_output_cannot_overwrite_discovered_database(tmp_path: Path, fa
     assert database.read_bytes() == b"database sentinel"
     assert "must not overwrite the selected input or database" in capsys.readouterr().err
     assert all(not session.calls and session.closed for session in fake_nexus.instances)
+
+
+@pytest.mark.parametrize("command", ["read", "preview", "batch"])
+@pytest.mark.parametrize("selector", ["binary", "database"])
+@pytest.mark.parametrize("alias", ["direct", "symlink", "hardlink"])
+def test_output_preserves_resolved_target_database_and_input(
+    command: str, selector: str, alias: str, tmp_path: Path, fake_nexus, capsys
+) -> None:
+    binary = tmp_path / "sample.bin"
+    database = tmp_path / "relocated.i64"
+    binary.write_bytes(b"binary sentinel")
+    database.write_bytes(b"database sentinel")
+    fake_nexus.discovered = [{"record_id": "gui-42", "idb_path": str(database), "exe_path": str(binary)}]
+    context_path, protected_path = (binary, database) if selector == "binary" else (database, binary)
+    out_path = protected_path
+    if alias != "direct":
+        out_path = tmp_path / "output.json"
+        if alias == "symlink":
+            out_path.symlink_to(protected_path)
+        else:
+            out_path.hardlink_to(protected_path)
+
+    if command == "read":
+        argv = ["database", "show"]
+    elif command == "preview":
+        argv = ["preview", "--out", str(out_path), "database", "show"]
+    else:
+        batch_path = tmp_path / "read.idac"
+        batch_path.write_text("database show\n", encoding="utf-8")
+        argv = ["batch", str(batch_path)]
+    if command != "preview":
+        argv.extend(["--out", str(out_path)])
+
+    assert main(["-c", str(context_path), *argv]) == 1
+
+    assert binary.read_bytes() == b"binary sentinel"
+    assert database.read_bytes() == b"database sentinel"
+    assert all(not session.calls and session.closed for session in fake_nexus.instances)
+    assert "must not overwrite the selected input or database" in capsys.readouterr().err
 
 
 def test_output_cannot_overwrite_command_input_file(tmp_path: Path, fake_nexus, capsys) -> None:
@@ -368,6 +412,102 @@ def test_preview_reuses_wrapper_session_and_never_commits_mutation(tmp_path: Pat
     assert payload["before"] == {"text": None}
     assert payload["after"] == {"text": "entry"}
     assert payload["undo"] == {"mode": "rollback", "persisted": False, "status": "ok"}
+
+
+@pytest.mark.parametrize("family", [[], ["struct"], ["enum"]])
+@pytest.mark.parametrize("wrapper", ["preview", "batch", "batch_preview", "lint"])
+def test_unfiltered_type_lists_use_wrapper_artifact(
+    family: list[str], wrapper: str, tmp_path: Path, fake_nexus, capsys
+) -> None:
+    database = tmp_path / "sample.i64"
+    artifact = tmp_path / "wrapper.json"
+    database.touch()
+    list_command = ["type", *family, "list"]
+    if wrapper == "preview":
+        argv = ["preview", "--out", str(artifact), *list_command]
+    else:
+        batch_path = tmp_path / "read.idac"
+        command = " ".join(list_command)
+        if wrapper == "batch_preview":
+            command = f"preview {command}"
+        batch_path.write_text(f"{command}\n", encoding="utf-8")
+        argv = ["batch", str(batch_path), "--out", str(artifact)]
+        if wrapper == "lint":
+            argv.append("--lint")
+
+    assert main(["-c", str(database), *argv]) == 0
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    if wrapper == "preview":
+        assert payload["status"] == "ok"
+        assert payload["undo"] == {"status": "noop", "mode": "read_only", "persisted": False}
+    else:
+        assert payload["ok"] is True
+        assert payload["results"][0]["status"] == "ok"
+    if wrapper != "lint":
+        calls = fake_nexus.instances[0].calls
+        expected_op = f"{family[0]}_list" if family else "type_list"
+        assert calls[0]["op"] == expected_op
+        assert calls[0]["preview"] is False
+    else:
+        assert all(not session.calls for session in fake_nexus.instances)
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("wrapper", ["preview", "batch"])
+def test_unfiltered_type_lists_without_artifact_are_rejected(wrapper: str, tmp_path: Path, fake_nexus, capsys) -> None:
+    database = tmp_path / "sample.i64"
+    database.touch()
+    if wrapper == "preview":
+        argv = ["preview", "type", "struct", "list"]
+    else:
+        batch_path = tmp_path / "read.idac"
+        batch_path.write_text("type struct list\n", encoding="utf-8")
+        argv = ["batch", str(batch_path)]
+    assert main(["-c", str(database), *argv]) == 1
+    assert all(not session.calls for session in fake_nexus.instances)
+    captured = capsys.readouterr()
+    if wrapper == "preview":
+        assert "preview requires" in captured.err
+    else:
+        payload = json.loads(captured.out)
+        assert "this list can be very large" in payload["results"][0]["stderr"]
+
+
+@pytest.mark.parametrize("lint", [False, True])
+def test_batch_journals_do_not_require_a_database_for_local_commands(
+    lint: bool, tmp_path: Path, monkeypatch, capsys
+) -> None:
+    class UnavailableSession:
+        @property
+        def handle(self):
+            raise NexusSessionError("no READY Nexus database instance found", kind="no_ready_instance")
+
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def list_targets(self) -> list[dict[str, object]]:
+            return []
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("idac.nexus.NexusSession", UnavailableSession)
+    batch_path = tmp_path / "local.idac"
+    workspace = tmp_path / "workspace"
+    artifact = tmp_path / "batch.json"
+    batch_path.write_text(f"workspace init {workspace}\n", encoding="utf-8")
+    argv = ["batch", str(batch_path), "--out", str(artifact)]
+    if lint:
+        argv.append("--lint")
+
+    assert main(argv) == 0
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    assert payload["ok"] is True
+    assert payload["results"][0]["status"] == "ok"
+    assert (workspace / "AGENTS.md").exists() is not lint
+    assert capsys.readouterr().out == ""
 
 
 def test_preview_does_not_publish_success_artifact_before_session_closes(

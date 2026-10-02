@@ -279,6 +279,10 @@ also rejected when they alias the selected binary/database or any command input.
 Put `-c`, `--instance`, and `--timeout` on the wrapper too; child commands cannot
 override them.
 
+Unfiltered type, struct, and enum lists can use the preview or batch wrapper's
+`--out` to preserve their full results. File output checks use the selected
+Nexus database and input paths, including GUI databases saved under another name.
+
 ### Recover C++ class hierarchies
 
 Walk vtables, flattened layouts, and inheritance straight from the database:

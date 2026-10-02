@@ -15,7 +15,7 @@ from ..output import write_output_result
 from .argparse_utils import add_command, add_context_options, bind_root_handler
 from .context import merge_parent_context, require_timeout_if_needed
 from .errors import CliUserError
-from .execute import execute_parsed, reject_unsupported_forwarded_context
+from .execute import execute_parsed, protect_output_context, reject_unsupported_forwarded_context
 from .path_resolution import reject_output_aliases, resolve_relative_paths
 from .preview import normalize_wrapped_command_tokens
 from .renderers import TEXT_RENDERERS
@@ -536,6 +536,12 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
         ],
         option_label="batch --out",
     )
+    if args.out is not None:
+        uses_context = any(
+            isinstance(line.parsed, argparse.Namespace) and line.parsed.allow_batch and line.parsed._uses_context
+            for line in command_lines
+        )
+        protect_output_context(args, discover_only=args.lint or not uses_context)
     if args.lint:
         payload = _lint_batch(
             command_lines=command_lines,

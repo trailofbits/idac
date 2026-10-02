@@ -64,7 +64,7 @@ def _enum_member_set_params(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _large_list_params(args: argparse.Namespace) -> dict[str, object]:
-    if args.pattern in (None, "") and args.out is None:
+    if args.pattern in (None, "") and args.out is None and not getattr(args, "_wrapper_has_output", False):
         raise CliUserError("this list can be very large; rerun with a pattern or `--out <path>`")
     return _pattern_params(args)
 

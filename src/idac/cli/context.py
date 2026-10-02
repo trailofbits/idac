@@ -54,6 +54,9 @@ def merge_parent_context(inner_args: argparse.Namespace, outer_args: argparse.Na
     protected_paths = getattr(outer_args, "_protected_context_paths", None)
     if protected_paths is not None:
         inner_args._protected_context_paths = protected_paths
+    inner_args._wrapper_has_output = bool(
+        getattr(outer_args, "out", None) or getattr(outer_args, "_wrapper_has_output", False)
+    )
 
 
 def reject_output_context_aliases(args: argparse.Namespace, protected_paths: tuple[str, ...]) -> None:

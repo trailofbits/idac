@@ -37,6 +37,35 @@ def prepare_args(args: argparse.Namespace) -> None:
             reject_output_context_aliases(args, inherited_paths)
 
 
+def protect_output_context(args: argparse.Namespace, *, discover_only: bool = False) -> None:
+    """Validate artifacts against the resolved target before any file is written."""
+
+    session = args._nexus_session
+    assert session is not None
+    if discover_only:
+        # Lint and context-free batches must not open a database just to write
+        # their journal. Protect known live files without acquiring a lease.
+        targets = session.list_targets()
+        instance_id = vars(args).get("instance")
+        if instance_id is not None:
+            targets = [target for target in targets if target.get("record_id") == instance_id]
+    else:
+        instance = session.handle.instance
+        targets = [{"idb_path": instance.idb_path, "exe_path": instance.exe_path}]
+
+    protected_paths: list[str] = list(getattr(args, "_protected_context_paths", ()))
+    for target in targets:
+        for key in ("idb_path", "exe_path"):
+            value = target.get(key)
+            if not isinstance(value, str) or not value:
+                continue
+            protected_paths.append(value)
+            if key == "exe_path" and not value.lower().endswith(".i64"):
+                protected_paths.append(f"{value}.i64")
+    args._protected_context_paths = tuple(dict.fromkeys(protected_paths))
+    reject_output_context_aliases(args, args._protected_context_paths)
+
+
 def execute_parsed(args: argparse.Namespace):
     handler = args.run
     if handler is None:
@@ -60,21 +89,6 @@ def execute_parsed(args: argparse.Namespace):
             args._nexus_session = session
             session_context.push(_NexusSession.__exit__.__get__(session))
         output_requested = getattr(args, "out", None) is not None or getattr(args, "out_file", None) is not None
-        if args._uses_context and not getattr(args, "_protected_context_paths", ()) and output_requested:
-            assert session is not None
-            targets = session.list_targets()
-            instance_id = getattr(args, "instance", None)
-            if instance_id is not None:
-                targets = [target for target in targets if target.get("record_id") == instance_id]
-            protected_paths: list[str] = []
-            for target in targets:
-                for key in ("idb_path", "exe_path"):
-                    value = target.get(key)
-                    if not isinstance(value, str) or not value:
-                        continue
-                    protected_paths.append(value)
-                    if key == "exe_path" and not value.lower().endswith(".i64"):
-                        protected_paths.append(f"{value}.i64")
-            args._protected_context_paths = tuple(dict.fromkeys(protected_paths))
-            reject_output_context_aliases(args, args._protected_context_paths)
+        if args._uses_context and output_requested and args.command != "batch":
+            protect_output_context(args)
         return handler(args)
