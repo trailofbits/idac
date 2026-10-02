@@ -184,8 +184,14 @@ gh workflow run prepare-release.yml --ref main
 
 This bumps the minor version by default; add `-f version=X.Y.Z` to choose an
 explicit version. The workflow updates the Python package and Agent Plugin
-versions, turns the `Unreleased` changelog into a versioned entry, creates a
-`release/vX.Y.Z` branch, and opens its PR. Review the generated changelog and
+versions, uses Codex to turn the `Unreleased` changelog into a versioned entry,
+creates a `release/vX.Y.Z` branch, and opens its PR. Review the generated changelog and
 merge that PR through the merge queue. The publish workflow then tags the merge
 commit, creates the GitHub release from that changelog section, and publishes to
 PyPI. Do not create release tags or publish manually.
+
+Changelog generation uses the
+[Codex GitHub Action](https://learn.chatgpt.com/docs/github-action) with the
+`OPENAI_CODEX_API_KEY` Actions secret. Make that secret available to the repository
+before preparing a release. Codex edits `CHANGELOG.md` in the checkout; review the
+generated entry in the release PR.

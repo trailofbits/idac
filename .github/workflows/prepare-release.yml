@@ -60,10 +60,10 @@ jobs:
           echo "PREVIOUS_TAG=$(printf '%s\n' "$release_tags" | sort -V | tail -1)" >> "$GITHUB_ENV"
 
       - name: Write changelog entry
-        uses: anthropics/claude-code-action@1f291e1cfe0f5fc21db2aef19af844591600ade7 # v1.0.206
+        uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1.12
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ github.token }}
+          openai-api-key: ${{ secrets.OPENAI_CODEX_API_KEY }}
+          permission-profile: ":workspace"
           prompt: |
             Write the CHANGELOG.md entry for idac ${{ env.RELEASE_VERSION }}.
             Publishing the release copies this section verbatim into the
@@ -95,8 +95,6 @@ jobs:
             the release theme, then short bullets in the user's language, no
             PR numbers or commit hashes. Do not modify already-released
             sections or any other file.
-          claude_args: |
-            --allowedTools "Read,Edit,Write,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git tag:*)"
 
       - name: Create release branch
         id: commit

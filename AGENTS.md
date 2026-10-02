@@ -234,11 +234,10 @@ To cut a release:
    git ls-remote origin 'refs/heads/release/*'
    ```
 
-3. Open a pull request from the release branch:
+3. Review the pull request opened automatically from the release branch:
 
    ```bash
-   gh pr create --head release/vX.Y.Z --title "Prepare release vX.Y.Z" \
-     --body "Merging this pull request publishes vX.Y.Z automatically."
+   gh pr view release/vX.Y.Z
    ```
 
 4. Merge the PR through the merge queue like any other PR. Once a `release/*`
@@ -248,8 +247,8 @@ To cut a release:
 
 Notes:
 
-- The prepare workflow has Claude draft the `CHANGELOG.md` section for the new
-  version on the release branch (requires the `ANTHROPIC_API_KEY` actions
+- The prepare workflow has Codex draft the `CHANGELOG.md` section for the new
+  version on the release branch (requires the `OPENAI_CODEX_API_KEY` Actions
   secret); review and edit that entry as part of the release PR. The changelog
   covers user-facing changes only, so CI, release tooling, tests, and internal
   refactoring stay out of it even when they dominate the release.
