@@ -26,7 +26,7 @@ Fixture notes:
   and vtable flows.
 - Tests open copied databases or temporary fixture binaries so each case can mutate
   safely.
-- Headless integration requires Python 3.11+, IDA 9.4+, `ida-nexus>=0.7.0`,
+- Headless integration requires Python 3.11+, IDA 9.4+, `ida-nexus>=0.13.2`,
   and `ida-domain>=0.5.1`.
 
 Optional live Nexus GUI tests are skipped by default. Start a matching IDA session and

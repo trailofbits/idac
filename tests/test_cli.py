@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from importlib import metadata
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -604,7 +605,7 @@ def test_setup_gui_command_forwards_timeout_and_renders_result(monkeypatch, caps
 
     def setup_gui(*, timeout: float | None = None) -> dict[str, Any]:
         timeouts.append(timeout)
-        return {"installed": True, "plugin": "ida-nexus", "version": "0.7.0"}
+        return {"installed": True, "plugin": "ida-nexus", "version": metadata.version("ida-nexus")}
 
     monkeypatch.setattr("idac.cli.commands.setup.setup_gui", setup_gui)
 

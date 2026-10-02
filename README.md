@@ -149,7 +149,7 @@ To run from a checkout without installing globally, use `uv run idac --help`.
 - **IDA Pro 9.4+** with the **Hex-Rays decompiler** for `decompile`, `ctree`,
   and class recovery.
 - A valid IDA license and an IDA Python environment on Python 3.11 or newer.
-- `ida-nexus>=0.7.0` and `ida-domain>=0.5.1`, installed as dependencies of `idac`.
+- `ida-nexus>=0.13.2` and `ida-domain>=0.5.1`, installed as dependencies of `idac`.
   Install the matching GUI component with
   `idac setup gui`.
 

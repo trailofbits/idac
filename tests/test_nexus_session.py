@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -82,8 +83,8 @@ class FakeHandle:
         self.shutdown_observer: Callable[[FakeInstance, bool], None] | None = None
         self.save_result: dict[str, object] = {"saved": True, "idb_path": self.instance.idb_path}
         self.remote_environment: dict[str, object] = {
-            "ida_nexus": "0.7.0",
-            "ida_domain": "0.5.1",
+            "ida_nexus": metadata.version("ida-nexus"),
+            "ida_domain": metadata.version("ida-domain"),
             "ida": "9.4",
             "python": "3.11.9",
         }

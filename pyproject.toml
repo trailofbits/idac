@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 dependencies = [
     "ida-domain>=0.5.1",
     "ida-hcli>=0.24.0",
-    "ida-nexus>=0.7.0",
+    "ida-nexus>=0.13.2",
     "packaging",
 ]
 

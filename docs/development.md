@@ -2,7 +2,7 @@
 
 ## Local setup
 
-`idac` requires Python 3.11 or newer, `ida-nexus>=0.7.0`, and
+`idac` requires Python 3.11 or newer, `ida-nexus>=0.13.2`, and
 `ida-domain>=0.5.1`. `uv.lock` records the resolved development dependencies.
 
 ```bash
