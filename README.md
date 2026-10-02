@@ -261,6 +261,10 @@ idac decompilemany --functions-file "funcs.txt" --out-dir "decomp-exact/"
 
 Pass `--f5` after type or prototype changes so each function reflects the latest state. With `--out-dir`, the manifest records each function's `name`, exact `address`, and artifact paths.
 
+For prototype edits that must retain the existing calling convention, use
+`function prototype set --preserve-cc`. This preserves IDA's stored convention
+when the declaration parser would otherwise normalize it.
+
 ### Run an ordered mutation pass with batch
 
 Run many subcommands against one shared context, leaving behind a stable ordered log. Batch files use one subcommand per line (drop the leading `idac`) and inherit `-c` and `--timeout` from the `batch` call. Child commands cannot set their own target or timeout because the wrapper owns one Nexus session for the entire run:

@@ -196,6 +196,36 @@ def test_proto_set_preview_then_persist_updates_proto_get(
     assert after_persist["prototype"] == preview["result"]["prototype"]
 
 
+def test_proto_set_preserves_calling_convention_in_preview_and_saved_type(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    result = preview_round_trip(
+        idac_cmd,
+        idac_env,
+        copy_database(tiny_database),
+        tmp_path,
+        read_args=["function", "prototype", "show", "add"],
+        persist_args=[
+            "function",
+            "prototype",
+            "set",
+            "add",
+            "--preserve-cc",
+            "--decl",
+            "int __cdecl add(int left, int right);",
+        ],
+    )
+    assert "__cdecl" in result["before"]["prototype"]
+    assert result["after_preview"] == result["before"]
+    expected = "int __cdecl add(int left, int right)"
+    assert result["preview"]["after"]["prototype"] == expected
+    assert result["after_persist"]["prototype"] == expected
+
+
 def test_proto_check_accepts_valid_fixture_declaration(
     idac_cmd: list[str],
     idac_env: dict[str, str],

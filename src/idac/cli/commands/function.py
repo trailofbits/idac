@@ -84,6 +84,8 @@ def _prototype_set_params(args: argparse.Namespace) -> dict[str, object]:
     }
     if args.propagate_callers:
         params["propagate_callers"] = True
+    if args.preserve_cc:
+        params["preserve_cc"] = True
     if args._preview_wrapper:
         params["preview_decompile"] = True
     return params
@@ -349,6 +351,11 @@ def register(
         "--propagate-callers",
         action="store_true",
         help="Also apply the new callee type at matching caller call sites",
+    )
+    child.add_argument(
+        "--preserve-cc",
+        action="store_true",
+        help="Keep the existing calling convention when editing parameter names or types and the return type",
     )
     child.set_defaults(
         run=run_bound_operation,

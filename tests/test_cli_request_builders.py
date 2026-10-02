@@ -49,6 +49,21 @@ def capture_nexus(monkeypatch: pytest.MonkeyPatch):
     return CaptureSession
 
 
+def test_prototype_set_can_preserve_existing_calling_convention(database: Path, capture_nexus, capsys) -> None:
+    assert (
+        main(
+            ["function", "prototype", "set", "main", "--preserve-cc", "--decl", "int main(void);", "-c", str(database)]
+        )
+        == 0
+    )
+    assert capture_nexus.instances[0].calls[0]["params"] == {
+        "identifier": "main",
+        "decl": "int main(void);",
+        "preserve_cc": True,
+    }
+    capsys.readouterr()
+
+
 def test_local_update_uses_stable_selector_on_the_wire(database: Path, capture_nexus, capsys) -> None:
     assert (
         main(

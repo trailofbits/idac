@@ -3464,6 +3464,7 @@ class _prototypes_PrototypeSetRequest:
     decl: str
     preview_decompile: bool = False
     propagate_callers: bool = False
+    preserve_cc: bool = False
 
 
 @dataclass(frozen=True)
@@ -3529,6 +3530,7 @@ def _prototypes_parse_proto_set(params: Mapping[str, Any]) -> _prototypes_Protot
         decl=decl,
         preview_decompile=bool(params.get("preview_decompile")),
         propagate_callers=bool(params.get("propagate_callers")),
+        preserve_cc=bool(params.get("preserve_cc")),
     )
 
 
@@ -3709,6 +3711,17 @@ def _prototypes_proto_set(
             "check declaration syntax, parser limitations, missing support types, and retry after "
             "`function prototype show`"
         )
+    if request.preserve_cc:
+        original = runtime.ida_typeinf.tinfo_t()
+        original_details = runtime.ida_typeinf.func_type_data_t()
+        updated_details = runtime.ida_typeinf.func_type_data_t()
+        if not runtime.mod("ida_nalt").get_tinfo(original, ea) or not original.get_func_details(original_details):
+            raise IdaOperationError(f"cannot preserve calling convention at {hex(ea)}: no existing function type")
+        if not tif.get_func_details(updated_details):
+            raise IdaOperationError(f"cannot preserve calling convention at {hex(ea)}: declaration is not a function")
+        updated_details.set_cc(original_details.get_cc())
+        if not tif.create_func(updated_details):
+            raise IdaOperationError(f"failed to preserve calling convention at {hex(ea)}")
     if not runtime.ida_typeinf.apply_tinfo(ea, tif, runtime.ida_typeinf.TINFO_DEFINITE):
         current_prototype = runtime.ida_typeinf.print_type(ea, runtime.ida_typeinf.PRTYPE_1LINE) or ""
         raise IdaOperationError(
