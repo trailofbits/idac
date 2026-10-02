@@ -4,6 +4,12 @@ IDA extends standard C/C++ type declarations with specialized annotations that p
 
 For a complete list of all type system keywords, see [ida-set-types.md](ida-set-types.md).
 
+## Contents
+
+- [Shifted pointers](#shifted-pointers)
+- [Scattered argument locations](#scattered-argument-locations)
+- [Data representation annotations](#data-representation-annotations)
+
 ## Shifted Pointers
 
 Sometimes in binary code we can encounter a pointer to the middle of a structure. Such pointers usually do not exist in the source code but an optimizing compiler may introduce them to make the code shorter or faster.

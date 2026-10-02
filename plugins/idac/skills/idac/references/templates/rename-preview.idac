@@ -1,7 +1,7 @@
 # Generic local rename preview pass
 #
 # Run only after prototype fixes and reanalysis. Copy this file, rename-pass.idac, and
-# locals-plan.json into the recovery workspace, then refresh locals:
+# locals-plan.json into the chosen artifact directory, then refresh locals:
 #   idac function locals list <function> --json --out /tmp/locals.json
 # Replace the sample selectors in locals-plan.json with exact index or local_id values
 # from that fresh output. Then run:

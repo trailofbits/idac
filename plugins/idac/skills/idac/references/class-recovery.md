@@ -1,216 +1,161 @@
 # Class Recovery
 
-Read this for C++ class recovery, vtable evidence, class-layout imports, prototype propagation, and verification.
-
-Use `type class` as the primary entry point for C++ recovery work.
-If the local type system is still opaque, start with `type list`, then use `type class candidates` before importing recovered types. After a local class/vtable type exists, use `type class vtable --runtime` for the combined local/runtime view.
+Read this for C++ layouts, inheritance, vtables, and virtual-target prototypes.
+Match the work to the request: a hierarchy report can use symbols and RTTI without
+importing types or renaming locals. For database edits, use the
+[mutation workflow](workflows.md#safe-mutation-loop).
 
 ## Contents
 
-- [Recommended command order](#recommended-command-order)
-- [What each command is for](#what-each-command-is-for)
-- [Adjacent-class workflow](#adjacent-class-workflow)
+- [Discover the family](#discover-the-family)
+- [Recover a layout](#recover-a-layout)
 - [Vtable guidance](#vtable-guidance)
-- [C++ declaration guidance](#c-declaration-guidance)
-- [Stop conditions](#stop-conditions)
-- [Verification checklist](#verification-checklist)
-- [Practical caveat](#practical-caveat)
+- [Apply types to runtime functions](#apply-types-to-runtime-functions)
+- [Verification and completion](#verification-and-completion)
 
-## Recommended command order
+## Discover the family
 
-```bash
-idac type list "Example"
-idac function list "Example_" --json --out "/tmp/class_family_functions.json"
-idac decompilemany "Example_" --f5 --out-dir "/tmp/class_family_decompile_discovery"
-idac type class candidates "Example" --json --out "/tmp/class_candidates.json"
-idac type check --decl-file "support_types.h"
-idac preview -o "/tmp/support_types_preview.json" type declare --replace --decl-file "support_types.h"
-```
-
-Inspect `/tmp/support_types_preview.json`. Only if its before/after data confirms the intended import, continue:
+Start with the strongest available evidence: demangled symbols, RTTI, constructor
+vtable stores, existing local types, and field accesses. Scope discovery to the
+requested family; widen to callers or adjacent classes when evidence requires it.
 
 ```bash
-idac type declare --replace --decl-file "support_types.h"
-idac type check --decl-file "recovered_classes.h"
-idac preview -o "/tmp/recovered_classes_preview.json" type declare --replace --decl-file "recovered_classes.h"
+idac function list "Example" --demangle --json --out "family.functions.json"
+idac type list "Example" --json --out "family.types.json"
+idac type class candidates "Example" --json --out "class_candidates.json"
 ```
 
-Inspect `/tmp/recovered_classes_preview.json` before continuing:
+Choose the reads that address a gap:
+
+- `type list` finds local types even when they are opaque structs.
+- `type class candidates` finds local types and symbol evidence before concrete
+  class layouts exist. Its rows mix `local_type`, `symbol`, `vtable_symbol`,
+  `typeinfo_symbol`, `typeinfo_name_symbol`, and `function_symbol`; use `--kind`
+  to select a category. Skip it when symbols and RTTI already identify the family.
+- `type class show` and `type class vtable` inspect materialized local layouts.
+  If a type exists but is not class-materialized, inspect `type show` and runtime
+  evidence; repeating class queries on the opaque type will not recover it.
+- Use addresses, mangled names, or full signatures for overloaded functions.
+  Candidate, type, and function JSON lists are top-level arrays.
+
+Decompile representative constructors, destructors, accessors, or parsers with
+`--f5` until the relevant offsets and relationships are justified. For a broad
+family capture, use `decompilemany` and its manifest as described in
+[broad discovery](workflows.md#broad-discovery-defaults). Avoid a family-wide dump
+when a few representatives answer the question.
+
+## Recover a layout
+
+When the task requires recovered declarations, read
+[C++ type details](ida-cpp-type-details.md) for IDA parser and vtable conventions.
+Declare support structs and directly referenced neighbors before dependent classes.
+Reuse existing, evidence-consistent layouts and inheritance instead of recovering
+their fields again. Read only the declarations needed for the requested family.
+For local-type imports, flatten namespace names consistently in the header (for
+example `Group__Item`) and record the mapping; avoid namespace blocks in the default
+parser. Keep original demangled names in the evidence report.
+
+Start with minimal plain `struct` declarations: observed vtable pointer, directly
+evidenced fields, and blob padding for unknown regions. Preserve existing opaque
+types unless replacing them is needed for the requested layout; record a deliberate
+size-only replacement as a loss of type detail.
+
+- Use neutral offset-based names such as `field_8`; mark inferred semantics in
+  notes or provisional names, such as `count_maybe`.
+- Use one byte array for a contiguous unknown region instead of guessed scalars.
+- Add `__attribute__((packed))` only when observed offsets prove packed layout.
+  Keep real gaps explicit. `__cppobj` is an optional refinement whose effect on
+  layout must be checked.
+- A derived class may reuse base tail padding. Field accesses and constructor
+  evidence take precedence over assuming derived fields start after base size.
+- Keep a derived class empty unless field accesses or constructor evidence prove
+  additional state. Estimate embedded opaque-member sizes from neighboring
+  offsets, then corroborate them in constructors.
+
+For a recovered header replacing existing types, preview the replacement itself:
+
+```bash
+idac preview -o "classes.preview.json" type declare --replace --decl-file "recovered_classes.h"
+jq . classes.preview.json
+```
+
+After inspecting the intended layout changes, commit and read back:
 
 ```bash
 idac type declare --replace --decl-file "recovered_classes.h"
 idac type deps "ExampleDerived"
-idac type class list "Example"
 idac type class show "ExampleDerived"
 idac type class fields "ExampleDerived" --derived-only
 idac type class hierarchy "ExampleBase"
-idac type class vtable "ExampleDerived" --runtime
-idac function prototype show "0x100012340"
-idac function prototype check "0x100012340" --decl "bool __fastcall ExampleDerived__method_1(ExampleDerived *__hidden this, const unsigned char *buf, u64 len, const char *arg3, u32 flags)"
-idac preview -o "/tmp/proto_preview.json" function prototype set "0x100012340" --decl "bool __fastcall ExampleDerived__method_1(ExampleDerived *__hidden this, const unsigned char *buf, u64 len, const char *arg3, u32 flags)"
 ```
 
-Inspect `/tmp/proto_preview.json`, including the pseudocode before/after data, before committing:
-
-```bash
-idac function prototype set "0x100012340" --decl "bool __fastcall ExampleDerived__method_1(ExampleDerived *__hidden this, const unsigned char *buf, u64 len, const char *arg3, u32 flags)"
-idac misc reanalyze "ExampleDerived__method_1"
-idac decompile "CreateExampleDerived" --f5
-idac decompile "ExampleDerived__method_1" --f5
-```
-
-Use the safe mutation loop from [workflows.md](workflows.md#safe-mutation-loop). For class-recovery work on one target, keep the phases distinct and leave local renames or retypes until after prototype/type changes and reanalysis.
-
-Start narrow from confirmed family members, then widen to callers or adjacent helpers only when readback or propagation requires it.
-
-Raw runtime slot inspection is not exposed as a first-class CLI command. Use `type class vtable --runtime` once the class is materialized, or fall back to `py exec` only when no first-class command covers the task.
-
-## What each command is for
-
-- `type list`: find named local types even when they are still opaque structs.
-  Use `type list [TYPE_FILTER]`, and remember that an unfiltered run requires `--out`.
-- `type class candidates`: find likely class names, vtables, RTTI, and helpers before local classes exist.
-- `type class candidates` mixes `local_type`, `symbol`, `vtable_symbol`, `typeinfo_symbol`, `typeinfo_name_symbol`, and `function_symbol` rows in one flat result set.
-  Use `--kind` when you want only one subset, such as `--kind function_symbol`.
-- Skip `type class candidates` when clean demangled symbols and RTTI already identify the family. It is most useful for opaque targets.
-- `type declare --replace`: re-import a recovered class header without leaving stale local types behind.
-- `type check`: validate recovered declaration text without importing it. Run it before large class headers or parser-risky C++ syntax.
-- `type deps`: print an existing local type with IDA dependency expansion when available; use it for audit artifacts after import.
-- `type class list`: find the classes materialized in local types.
-  Use the positional class-filter form `type class list [CLASS_FILTER]`.
-- `type class show`: read the flattened object layout, including inherited fields.
-  If it says a type exists but is not class-materialized yet, use `type show` or re-import a concrete class layout first.
-- `type class hierarchy`: confirm direct and transitive relationships after the recovered class layout has been imported.
-- `type class fields --derived-only`: isolate the fields owned by one derived class.
-- `type class vtable --runtime`: inspect both the local-type vtable layout and the raw runtime targets when symbols are available.
-- `decompilemany "<function-filter>" --out-dir ...`: capture pseudocode artifacts for every function matching a class-family name filter before narrowing to representative callers and overrides.
-  For capture strategy, `--functions-file`, `manifest.json` handling, and the `--f5` policy, read [workflows.md](workflows.md#safe-mutation-loop).
-  During discovery, stop decompiling once constructor, destructor, one accessor, and one serializer or parser have already proven the layout.
-- `function prototype set`: apply corrected function types to the runtime virtual targets after the class layout is in place.
-  Use `function prototype show` first so the current signature is recorded before the update.
-  Use `function prototype check` before applying signatures with custom calling conventions or newly imported types.
-  Use `preview -o /tmp/proto_preview.json function prototype set ...`; the command-specific preview readback carries richer before/after data when supported.
-- `decompile`: spot-check representative constructors, factories, and overrides after type changes.
-
-Confidence and naming conventions:
-
-- Mark plausible-but-unconfirmed variable or parameter names with `_maybe`
-- Keep placeholder field names neutral and offset-based, such as `field_8` or `field_20`
-- Prefer one byte array or blob field for a long contiguous unknown region, such as `unsigned char _unk_14[136]`, instead of inventing many guessed scalar fields.
-- Do not present inferred vtable slots, members, or helper names as if they were confirmed
-- When semantics are inferred rather than proven, note that explicitly in the issue log
-- Apply the same rule to field and member names. If a recovered member name is only probable, keep it explicitly inferred until stronger proof appears.
-
-## Adjacent-class workflow
-
-- recover support structs first
-- recover directly referenced neighbor classes next
-- fix function prototypes
-- inspect the current signature with `function prototype show` before applying `function prototype set`
-- if a missing enum or support type such as `ExampleEnum` blocks a prototype, create the placeholder type before retrying
-- reanalyze touched callers, not just the callee whose prototype changed
-- rename locals last
-- recover support types before cosmetic renames; early support-type recovery usually improves output more than local-name cleanup
-
-For selector calibration and the local-rename rules, read [workflows.md](workflows.md#selector-calibration).
+Keep the selected target on every invocation. Separate imports when a later header
+depends on support types; an earlier preview does not retain imported types.
+Use [import troubleshooting](troubleshooting.md) for `--bisect`, parser changes
+with `--clang`, or namespace flattening with `--alias OLD=NEW`.
+For isolated member corrections, use [narrow type edits](workflows.md#narrow-type-edits).
 
 ## Vtable guidance
 
-- Prefer `type class vtable` once the local vtable type exists
-- If you need raw slot evidence before a local type exists, use `type class candidates --kind vtable_symbol` to find the symbol first, then use `py exec` as the escape hatch for one-off raw slot inspection
-- Treat raw-vtable lookup failures as evidence about symbol availability, not as proof that the class family is unrecoverable
-- Before writing or importing C++ declarations, review [ida-cpp-type-details.md](ida-cpp-type-details.md) so the local type text matches IDA's naming and layout rules
-- When you want the class helpers to recognize the layout reliably, prefer IDA-friendly naming and formatting:
-  - name the vtable type `ClassName_vtbl`
-  - declare it as `struct /*VFT*/ ClassName_vtbl { ... };`
-  - attach it to the object as `ClassName_vtbl *__vftable;`
-- For Itanium-style ABIs, address-point offsets, or `ClassName_vtbl_layout` scratch wrappers, read [ida-cpp-type-details.md](ida-cpp-type-details.md).
-- For multiple inheritance or secondary-base overrides, use the IDA-specific `ClassName_XXXX_vtbl` pattern described in [ida-cpp-type-details.md](ida-cpp-type-details.md) instead of inventing an ad hoc secondary vtable name
-- Avoid alternate suffixes or ad hoc member spellings when helper compatibility matters
-
-Helpful scratch artifacts for long passes:
-
-- a scratch recovery header such as `recovered_classes.hpp`
-- an issue log such as `recovery_issues.md`
-- a machine-readable mutation artifact such as `recovery.idac` plus its `batch --out` log
-
-For batch syntax and `.idac` file format, read [workflows.md](workflows.md#batch).
-
-For large recovered families, use `idac py exec` with an explicit local script when first-class commands are not enough, and keep the script with the rest of your recovery artifacts so the pass stays reviewable and reproducible.
-
-Inspect JSON artifacts with portable shell tools such as `jq` and `sed` instead of assuming bare `python` exists. `type list`, `type class candidates`, and `function list` artifacts are top-level JSON arrays, so start filters with `.[]`; `function locals list` wraps rows under `.locals[]`.
+Add vtable declarations only with virtual-dispatch evidence: a constructor store,
+runtime vtable symbol, or confirmed `__vftable` member. For class-helper compatibility,
+name the callable-slot type `ClassName_vtbl`, declare it as
+`struct /*VFT*/ ClassName_vtbl`, and attach it as `ClassName_vtbl *__vftable;`.
 
 ```bash
-jq '.functions_succeeded' /tmp/class_family_decompile_discovery/manifest.json
-jq -r '.functions[] | select(.ok) | [.name, .artifact_path] | @tsv' /tmp/class_family_decompile_discovery/manifest.json
-jq -r '.results[] | select(.exit_code != 0) | [.line, .command] | @tsv' /tmp/recovery_batch.json
-jq -r '.[].name' /tmp/class_types.json
-jq -r '.[] | select(.kind == "function_symbol") | .name' /tmp/class_candidates.json
-jq -r '.[] | [.kind, .name] | @tsv' /tmp/class_candidates.json
-jq -r '.[].name' /tmp/class_family_functions.json
-sed -n '1,80p' /tmp/recovery_batch.json
+idac type class vtable "ExampleDerived" --runtime
 ```
 
-## C++ declaration guidance
+This combines local slot types and runtime targets once a class is materialized.
+Before then, `type class candidates --kind vtable_symbol` can locate a symbol;
+raw slot reads need `py exec` if no first-class command covers them. A missing
+runtime symbol limits that lookup rather than disproving the class family.
 
-Prefer plain `struct` declarations first when the target database is still rough or diagnostics flag parser trouble.
-Before finalizing class or vtable declaration text, read [ida-cpp-type-details.md](ida-cpp-type-details.md) for IDA parser syntax, naming patterns, and multiple-inheritance edge cases.
+For Itanium-style ABIs, distinguish emitted vtable data from its address point:
+header words can precede the callable slots. Keep those words in a separate scratch
+layout instead of treating them as functions. For multiple inheritance, use the
+IDA `ClassName_XXXX_vtbl` convention for secondary-base overrides. Offset and
+declaration examples are in [C++ type details](ida-cpp-type-details.md).
+Confirm the target ABI from database metadata and binary evidence before relying
+on its layout rules. If the compiler ID itself is needed, use the verified
+[IDAPython recipe](workflows.md#idapython-escape-hatch).
 
-Practical rules:
+## Apply types to runtime functions
 
-- keep the first import minimal: plain `struct`, direct field declarations, and no preprocessor wrappers or comment noise
-- only add vtable-specific forms when there is direct evidence of virtual dispatch on that class, such as a constructor storing a vtable pointer, a recovered runtime vtable symbol, or an already-confirmed `__vftable` member
-- keep helper-compatible names such as `ClassName_vtbl` and `__vftable`
-- use `__attribute__((packed))` when constructor, accessor, serializer, or field-offset evidence proves the compiler packed the layout
-- do not use `packed` to hide uncertainty; keep explicit blob padding for true gaps and reread `type struct show` or `type class show` after import
-- treat `__cppobj` as optional refinement, not a requirement for the first successful import
-- for secondary-base virtual tables, use the IDA-specific `ClassName_XXXX_vtbl` pattern
-- use `--alias old=new` during import when namespace-qualified names need flattening for local-type parsing
-- if the import fails and the error does not name the culprit, rerun it once with `--bisect` before hand-editing the header; it isolates the first rejected declaration and names opaque by-value members
-- if import errors suggest parser trouble, simplify the declaration and retry with preview first
-- run `type check --decl-file ...` before importing the simplified declaration
-- once the layout is close, correct single members with `type struct field set/rename` and `type enum member set/rename` instead of re-importing the whole header; see [workflows.md](workflows.md#narrow-type-edits)
+Local vtable-slot types and runtime function prototypes are separate. Apply
+evidence-backed signatures to the actual virtual targets when the task requires
+better caller decompilation. An inherited slot can retain a base `this` type while
+the implementation belongs to a derived class; use the implementation's evidence
+when choosing its prototype.
 
-## Stop conditions
+Read the current signature with `function prototype show`, validate custom
+conventions with `function prototype check` when needed, then preview
+and commit as described in [the mutation loop](workflows.md#safe-mutation-loop).
+Use `prototype set --preserve-cc` when retyping a factory return or parameter while
+retaining the existing calling convention.
+Reanalyze affected functions and callers before fresh `--f5` readback. Calibrate
+[local cleanup](workflows.md#selector-calibration) only after that phase.
 
-Stop a recovery pass when:
+Destructor bodies often restore a vtable pointer and then lose precise derived
+type propagation in Hex-Rays. A function-local retype may help after prototype
+cleanup and reanalysis; avoid forcing broader type changes solely to improve
+presentation.
 
-- the object layout is structurally readable and the important offsets are justified by constructor, accessor, serializer, or caller evidence
-- the key helper and virtual-target prototypes are corrected enough that callers read coherently after reanalysis
-- the remaining confusion is mostly Hex-Rays presentation noise rather than uncertainty about the actual data flow or type relationships
+## Verification and completion
 
-Do not keep pushing for cosmetic pseudocode perfection when:
+Verify the aspects the request depends on:
 
-- large-stack AArch64 prologues still show odd top-of-function value flow after prototype cleanup and reanalysis
-- destructor or cleanup paths still lose precise derived-type propagation even though the recovered class layout is already consistent
-- the remaining unnamed locals are mostly spill state, scratch temporaries, or compiler artifacts that do not change the safety argument
+- Object size, bases, and important field offsets agree with binary evidence;
+  `type class fields --derived-only` distinguishes subclass fields.
+- Local vtable slots and runtime targets agree where runtime evidence is available.
+- Changed runtime prototypes have the expected `this` type in fresh pseudocode,
+  and an affected caller reflects the intended propagation.
+- Committed local plans match fresh locals readback.
+- Reports or recovered headers identify supporting addresses and unresolved
+  hypotheses; workspace audit notes record actual changes and failures.
 
-## Verification checklist
-
-- class size matches the recovered declaration
-- base list matches the intended hierarchy
-- `type class fields --derived-only` contains the expected subclass fields
-- `type class vtable` shows the expected slot names
-- runtime virtual targets have function prototypes applied, not just local vtable slot types
-- at least one representative base implementation and one representative override decompile with the expected `this` type
-- at least one caller of a newly fixed prototype reflects the intended type cleanup
-- stale caller casts or bad `this` propagation triggered targeted `misc reanalyze` on those callers before final readback
-- each committed local rename was confirmed against fresh `function locals list --json` output, per the rules in [workflows.md](workflows.md#selector-calibration)
-
-Representative readback set:
-
-- one constructor or destructor
-- one accessor
-- one parser/helper
-- one caller of a newly fixed prototype
-- one function whose locals were renamed
-
-## Practical caveat
-
-Do not assume every derived field appears strictly after the base size. Real targets can reuse tail padding, so constructor evidence and `this+offset` access patterns still matter.
-Treat empty derived classes as the default unless constructor evidence or `this+offset` access proves extra state.
-For embedded opaque members, estimate size from neighboring field offsets first, then use constructor evidence as confirmation.
-Inherited vtable slot types often keep the base-class `this` type even when the runtime target is a derived override. When improving decompiler quality, prefer the owning implementation class from the runtime target symbol when setting the function prototype.
-Prefer preserving existing opaque local types unless replacing them is intentionally required for layout recovery.
-If you replace an opaque type with a size-only blob or placeholder, record that tradeoff explicitly in the issue log.
-Destructor bodies often start by restoring a vtable pointer and then lose precise derived-type propagation in Hex-Rays. When that happens, use function-local retypes on the derived locals after the prototype and reanalysis pass instead of forcing the whole type system harder.
+Choose representative readbacks based on the changes, such as a constructor, an
+override, and an affected caller. Stop when the requested layout or relationships
+are supported and relevant callers are readable. Large-stack AArch64 prologue
+noise, cleanup casts, and unnamed spill temporaries warrant more work only when
+they obscure the requested result.

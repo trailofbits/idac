@@ -12,10 +12,10 @@ idac doctor
 idac targets list --json
 ```
 
-For a live GUI, run `idac setup gui` when `doctor` reports that the matching Nexus
-component is missing, then restart IDA or load the component as required by IDA. The
-supported versions are ida-nexus 0.7.0, ida-domain 0.5.1, IDA 9.4+, and Python 3.11+.
-Any mismatch is an error.
+For a live GUI, `idac setup gui` installs the matching Nexus component. Use it when
+installation or repair is part of the task, then restart IDA or load the component
+as required by IDA. See [runtime requirements](targets-and-backends.md) for supported
+versions. For an inspection-only request, report a missing component after diagnosis.
 
 For headless work, pass the `.i64` or binary path directly:
 
@@ -54,9 +54,10 @@ timeout when its defaults are too short. Live GUI attachment never forces analys
 
 ## Changes did not reach disk
 
-Successful headless mutations are checkpointed when the command releases its Nexus
-lease; the managed worker then remains warm for five idle minutes. If a save fails, the
-command reports the failure.
+Successful headless mutations are checkpointed before the next remote request or
+lease release; the managed worker remains warm for five idle minutes. A later batch
+failure does not undo earlier checkpoints. If a save fails, reread the database from
+a fresh worker before deciding what persisted; see [save behavior](targets-and-backends.md#saves-and-worker-lifetime).
 
 Live GUI mutations deliberately remain unsaved. Checkpoint them explicitly with
 `idac database save`, using `--instance RECORD_ID` or `-c PATH` when selection would
@@ -88,6 +89,10 @@ idac type declare --replace --bisect --decl-file "recovered_classes.h"
 It reports the first declaration IDA rejects by line range, says whether that declaration imports on its own, and names by-value members whose types are still opaque. If it imports alone, the problem is ordering: move or add the missing support type earlier in the file. If it fails alone too, simplify that one declaration — plain `struct`, blob padding for unknown regions — and retry. `--bisect` needs IDA undo support and is rejected by `type check`.
 
 For template-heavy or newer C++ syntax, retry the import with `--clang`. For namespace-qualified names that the local-type parser will not take, use `--alias old=new`.
+Namespace blocks should be normalized to flat local-type identifiers before using
+the default parser. When replacing existing types, preview `type declare --replace`
+to inspect the actual changes; a separate `type check` repeats validation without
+providing replacement readback.
 
 ## Preview did not persist
 
@@ -126,7 +131,6 @@ Run:
 
 ```bash
 idac misc reanalyze "sub_08041337"
-idac decompile "sub_08041337"
 idac decompile "sub_08041337" --f5
 idac function locals list "sub_08041337" --json --out "/tmp/sub_08041337.locals.json"
 ```

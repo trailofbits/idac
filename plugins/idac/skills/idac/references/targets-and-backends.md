@@ -4,7 +4,7 @@ Read this when choosing a live GUI or headless context, opening a binary, or res
 Nexus discovery state.
 
 Every `idac` operation uses the public ida-nexus API. The supported stack is Python
-3.11+, IDA 9.4+, `ida-nexus>=0.7.0`, and `ida-domain>=0.5.1`.
+3.11+, IDA 9.4+, `ida-nexus>=0.13.2`, and `ida-domain>=0.5.1`.
 There is no alternate execution path when discovery, startup, analysis, or execution
 fails.
 
@@ -110,15 +110,15 @@ including commands that require an explicit timeout.
 
 ## Setup and diagnosis
 
-Install the matching GUI integration and inspect the stack with:
+Inspect the stack and discover targets with:
 
 ```bash
-idac setup gui
 idac doctor
 idac targets list --json
 ```
 
-`setup gui` uses HCLI to install the GUI release matching the installed Nexus
+When GUI installation or repair is part of the task, use `idac setup gui`.
+It uses HCLI to install the GUI release matching the installed Nexus
 client and passes the declared ida-domain requirement to the installer. Restart
 IDA or load the installed Nexus component as required by IDA, then rerun discovery.
 `doctor` reports local package versions and checks the independently installed GUI

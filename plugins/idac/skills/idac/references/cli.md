@@ -1,6 +1,8 @@
 # idac Quick Reference
 
-The command grammar for the `idac` CLI.
+Use targeted `idac <command> --help` for the installed command's exact grammar.
+This reference highlights useful reads and non-obvious CLI behavior. For persistent
+edits, follow [mutation workflows](workflows.md#safe-mutation-loop).
 
 ## Conventions
 
@@ -24,7 +26,8 @@ The command grammar for the `idac` CLI.
   must exist.
 - Context options may be placed before the command or on a context-aware subcommand.
 - Headless opens wait for analysis and use a five-minute idle keepalive. Successful
-  headless mutations save on release; live GUI saves are explicit.
+  headless mutations are checkpointed before the next remote request or lease
+  release; live GUI saves are explicit.
 - Discovery, timeout, connection, and version failures have no fallback or automatic
   retry.
 
@@ -70,7 +73,10 @@ idac bookmark list
 
 `xrefs` is a top-level command; there is no `function xrefs` command.
 For broad function discovery, prefer `function list "name1|name2" --regex -i` so IDA filters before rendering. Add `--demangle` when the filter should match demangled display names. Avoid producing a full function list just to pipe it into `rg`; add `--out <path>` if the filtered result is still too large for inline output.
-`search strings` and `search bytes` require both `--timeout` and `--segment`. On dyld shared caches, `search strings` only allows `--scan` with explicit `--start` / `--end` bounds up to 16 MiB.
+`search strings` and `search bytes` require both `--timeout` and `--segment`.
+String listing reads already-defined strings; `--scan` reads string-like bytes
+without defining them. On dyld shared caches, string listing is disabled: use
+`--scan` with explicit `--start` / `--end` bounds totaling at most 16 MiB.
 
 ## Comments and bookmarks
 
@@ -121,6 +127,12 @@ idac type enum member delete "ExampleEnum" "member_3"
 
 ## Preview
 
+`function prototype set --preserve-cc` retains the current database calling
+convention when editing a return type, parameter type, or parameter name. IDA's
+parser can otherwise normalize the convention even when the declaration repeats
+the displayed keyword. Use the flag for ABI-preserving edits; omit it for a
+deliberate calling-convention change.
+
 `idac` preview is always a wrapper and always writes JSON or JSONL.
 The payload includes `command`, `status`, `before`, `after`, `result`, `readback`, `undo`, `artifacts`, and `stderr`.
 
@@ -140,39 +152,17 @@ Preview-capable read-only commands are treated as no-op previews with identical 
 
 ## Batch
 
-Batch accepts one command per line and writes structured JSON or JSONL.
-It allows `preview ...` lines, but commands that are not batch-safe are rejected.
-If a batch contains persistent mutating commands, `batch --out` is required so the ordered result log is preserved before any changes run.
-The wrapper writes an initial `pending` journal before dispatch, checkpoints after every line, and writes the terminal result only after the shared Nexus session closes. An interrupted batch records `interrupted` and exits 130. Mutating child commands cannot set `--out`; reserve child artifacts for read-only commands.
+Batch accepts one subcommand per line, without a leading `idac`. Blank lines and
+`#` comments are allowed. Put target and timeout options on the wrapper. Persistent
+mutations require wrapper `--out`; mutating children cannot set their own output
+paths. Read-only children may write artifacts, whose relative paths resolve from
+the batch file's directory.
 
-```bash
-idac batch "recovery-preview.idac" --lint --out "/tmp/recovery-preview.lint.json"
-idac batch "recovery-preview.idac" --fail-fast --out "/tmp/recovery-preview.json"
-jq . "/tmp/recovery-preview.json"
-idac batch "recovery-commit.idac" --lint --out "/tmp/recovery-commit.lint.json"
-idac batch "recovery-commit.idac" --fail-fast --out "/tmp/recovery-commit.json"
-```
-
-Inspect every preview's `before` and `after` data before launching the commit batch. Batch files may include blank lines and `#` comments. Keep preview and commit in separate files:
-
-```text
-# recovery-preview.idac
-type check --decl-file "recovered_types.h"
-preview type declare --replace --decl-file "recovered_types.h"
-function prototype show "sub_08041337"
-function prototype check "sub_08041337" --decl "int __fastcall sub_08041337(void *ctx, const unsigned char *buf, unsigned int len)"
-preview function prototype set "sub_08041337" --decl "int __fastcall sub_08041337(void *ctx, const unsigned char *buf, unsigned int len)"
-```
-
-```text
-# recovery-commit.idac -- run only after inspecting recovery-preview.json
-type declare --replace --decl-file "recovered_types.h"
-function prototype set "sub_08041337" --decl "int __fastcall sub_08041337(void *ctx, const unsigned char *buf, unsigned int len)"
-misc reanalyze "sub_08041337"
-function locals list "sub_08041337" --json --out "sub_08041337.locals.json"
-```
-
-For a full recovery-pass example and the batch authoring rules, read [workflows.md](workflows.md#batch).
+Use `--lint --out <lint.json>` before mutation batches, and `--fail-fast` when later
+steps depend on earlier success or local selectors must stop on the first miss.
+Keep previews and matching commits in separate runs so you can inspect the preview
+journal between them. See [batch workflows](workflows.md#batch) for complete
+examples, supported commands, and journal lifecycle.
 
 ## Setup and misc commands
 
@@ -183,15 +173,16 @@ Installation commands live under `setup` and are rejected from `batch`:
 
 IDA maintenance commands live under `misc`:
 
-- `misc rename` — rename a function or global symbol. Preview-capable but not available in `batch`; commit symbol renames one-off.
+- `misc rename` — rename a function or global symbol. Preview-capable and
+  batch-safe; use an address when later batch steps must survive the rename.
 - `misc reanalyze` — re-run IDA analysis on a function or range. Batch-safe, not preview-capable; place it between type/prototype mutations and local cleanup. Add `--end` for a range instead of a single function.
 
 Workspace scaffolding lives under `workspace`:
 
 - `workspace init [DEST]` — create a recovery workspace with `audit/`, `headers/`,
-  `scripts/`, `prompts/`, and `.idac/tmp/`. Add `--force` to overwrite
-  user-tunable config in an existing workspace. Follow the conventions installed in
-  the generated workspace.
+  `scripts/`, `prompts/`, and `.idac/tmp/`. Reuse existing workspace conventions.
+  `--force` overwrites user-tunable config; use it only when replacing that config
+  is intended.
 
 ## Output notes
 
@@ -200,7 +191,10 @@ Workspace scaffolding lives under `workspace`:
 - `type declare --clang` uses IDA's clang parser for more complex C/C++ declarations
 - `type declare --bisect` isolates the first declaration IDA rejects when a multi-declaration import fails; it reports the failing line range, whether that declaration imports on its own, and any by-value members whose types are still opaque. It needs IDA undo support and is rejected by `type check`.
 - `type declare --alias OLD=NEW` rewrites identifiers before import; use it to flatten namespace-qualified names
-- `type check` validates declarations without importing them; use it before large or parser-risky `type declare` runs
+- `type check` validates the whole header in a temporary type library, resolving
+  dependencies between declarations and existing local types without importing
+  or replacing database types. For an import replacing existing layouts, preview
+  `type declare --replace` directly to inspect the actual replacement.
 - `function prototype check` validates a function declaration without applying it
 - `type deps NAME` prints an existing type with IDA dependency expansion when available
 - `type list`, `type struct list`, and `type enum list` require `--out` when no pattern is given
