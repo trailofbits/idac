@@ -274,6 +274,77 @@ def test_decompilemany_writes_requested_artifacts_and_manifest(
     capsys.readouterr()
 
 
+@pytest.mark.parametrize("alias", ["direct", "normalized", "symlink", "hardlink"])
+def test_decompilemany_rejects_combined_output_aliasing_summary(
+    alias: str,
+    database: Path,
+    capture_nexus,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    combined_path = tmp_path / "dump.c"
+    combined_path.write_text("previous pseudocode\n", encoding="utf-8")
+    summary_path = combined_path
+    if alias == "normalized":
+        (tmp_path / "nested").mkdir()
+        summary_path = tmp_path / "nested" / ".." / "dump.c"
+    elif alias in {"symlink", "hardlink"}:
+        summary_path = tmp_path / "summary.json"
+        if alias == "symlink":
+            summary_path.symlink_to(combined_path)
+        else:
+            summary_path.hardlink_to(combined_path)
+
+    assert (
+        main(
+            [
+                "decompilemany",
+                "demo",
+                "--out-file",
+                str(combined_path),
+                "--out",
+                str(summary_path),
+                "-c",
+                str(database),
+            ]
+        )
+        == 1
+    )
+
+    assert "--out-file must not overwrite the command --out output" in capsys.readouterr().err
+    assert combined_path.read_text(encoding="utf-8") == "previous pseudocode\n"
+    assert all(not session.calls for session in capture_nexus.instances)
+
+
+def test_decompilemany_writes_combined_output_and_separate_summary(
+    database: Path, capture_nexus, tmp_path: Path, capsys
+) -> None:
+    combined_path = tmp_path / "dump.c"
+    summary_path = tmp_path / "summary.json"
+
+    assert (
+        main(
+            [
+                "decompilemany",
+                "demo",
+                "--out-file",
+                str(combined_path),
+                "--out",
+                str(summary_path),
+                "-c",
+                str(database),
+            ]
+        )
+        == 0
+    )
+
+    assert combined_path.read_text(encoding="utf-8") == "decompile output\n"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["functions_succeeded"] == 1
+    assert summary["out_file"] == str(combined_path)
+    capsys.readouterr()
+
+
 @pytest.mark.parametrize(
     ("filename", "hardlink"),
     [

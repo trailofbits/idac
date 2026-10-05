@@ -330,6 +330,9 @@ idac decompilemany --functions-file "funcs.txt" --out-dir "decomp-exact/"
 
 Pass `--f5` after type or prototype changes so each function reflects the latest state. With `--out-dir`, the manifest records each function's `name`, exact `address`, and artifact paths.
 
+If you also write the command summary with `--out`, choose a different path from
+the combined pseudocode file or any generated directory artifact.
+
 For prototype edits that must retain the existing calling convention, use
 `function prototype set --preserve-cc`. This preserves IDA's stored convention
 when the declaration parser would otherwise normalize it. `type check` validates

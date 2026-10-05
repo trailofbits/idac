@@ -69,6 +69,11 @@ def _decompilemany_request(args: argparse.Namespace) -> DecompileManyRequest:
         raise CliUserError("decompilemany requires either FUNCTION_FILTER or --functions-file/--file")
     if request.out_file is not None and (request.include_disasm or request.include_ctree):
         raise CliUserError("decompilemany --disasm/--ctree require --out-dir")
+    reject_output_aliases(
+        request.out_file,
+        [("command --out output", args.out)],
+        option_label="--out-file",
+    )
     return request
 
 

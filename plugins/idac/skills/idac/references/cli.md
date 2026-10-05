@@ -216,5 +216,6 @@ Workspace scaffolding lives under `workspace`:
 - for multiple explicit functions, write one function name or address per line and pass `decompilemany --functions-file <path>`
 - `decompilemany --out-file` writes combined text
 - `decompilemany --out-dir` writes one file per function plus `manifest.json`
+- `decompilemany --out` writes a separate summary; its path must differ from the bulk artifact paths
 - `decompilemany --disasm` and `--ctree` require `--out-dir` and add per-function `.asm` and `.ctree` artifacts to the manifest
 - long `decompilemany --out-dir` artifact names are shortened with a stable digest; use `manifest.json` `.functions[].address` as the stable exact lookup key, and `.functions[].artifact_path` / `.functions[].artifacts` for file paths
