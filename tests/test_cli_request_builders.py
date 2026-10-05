@@ -21,9 +21,13 @@ def database(tmp_path: Path) -> Path:
 def capture_nexus(monkeypatch: pytest.MonkeyPatch):
     class CaptureSession:
         instances: ClassVar[list[CaptureSession]] = []
+        target: ClassVar[SimpleNamespace | None] = None
+        functions: ClassVar[list[dict[str, str]]] = [{"name": "demo", "address": "0x1000"}]
 
         def __init__(self, **_kwargs: object) -> None:
-            self.handle = SimpleNamespace(instance=SimpleNamespace(idb_path=_kwargs.get("locator"), exe_path=None))
+            self.handle = SimpleNamespace(
+                instance=self.target or SimpleNamespace(idb_path=_kwargs.get("locator"), exe_path=None)
+            )
             self.calls: list[dict[str, Any]] = []
             self.__class__.instances.append(self)
 
@@ -37,7 +41,9 @@ def capture_nexus(monkeypatch: pytest.MonkeyPatch):
         ) -> Any:
             self.calls.append({"op": op, "params": params})
             if op == "function_list":
-                return [{"name": "demo", "address": "0x1000"}]
+                return self.functions
+            if op == "function_show":
+                return next(item for item in self.functions if item["name"] == params["identifier"])
             if op in {"decompile", "disasm", "disasm_range", "ctree"}:
                 return {"text": f"{op} output\n"}
             if op in {"type_declare", "type_declare_check"}:
@@ -212,13 +218,16 @@ def test_local_selector_conflicts_fail_before_dispatch(
     assert all(not session.calls for session in capture_nexus.instances)
 
 
+@pytest.mark.parametrize("write_summary", [False, True])
 def test_decompilemany_writes_requested_artifacts_and_manifest(
+    write_summary: bool,
     database: Path,
     capture_nexus,
     tmp_path: Path,
     capsys,
 ) -> None:
     out_dir = tmp_path / "out"
+    summary_path = tmp_path / "summary.json"
 
     assert (
         main(
@@ -233,6 +242,7 @@ def test_decompilemany_writes_requested_artifacts_and_manifest(
                 "--ctree",
                 "-c",
                 str(database),
+                *(["--out", str(summary_path)] if write_summary else []),
             ]
         )
         == 0
@@ -257,7 +267,139 @@ def test_decompilemany_writes_requested_artifacts_and_manifest(
         "params": {"pattern": "demo", "regex": True, "ignore_case": False},
     } in calls
     assert {"op": "decompile", "params": {"identifier": "demo", "no_cache": True}} in calls
+    if write_summary:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        assert summary["manifest_path"] == str(out_dir / "manifest.json")
+        assert summary["functions_succeeded"] == 1
     capsys.readouterr()
+
+
+@pytest.mark.parametrize(
+    ("filename", "hardlink"),
+    [
+        ("manifest.json", False),
+        ("manifest.json", True),
+        ("demo_0x1000.c", False),
+        ("demo_0x1000.asm", False),
+        ("demo_0x1000.ctree", False),
+    ],
+)
+def test_decompilemany_rejects_generated_artifacts_aliasing_database(
+    filename: str,
+    hardlink: bool,
+    database: Path,
+    capture_nexus,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    database.write_bytes(b"original database")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    artifact = out_dir / filename
+    if hardlink:
+        artifact.hardlink_to(database)
+    else:
+        artifact.symlink_to(database)
+
+    assert (
+        main(
+            [
+                "decompilemany",
+                "demo",
+                "--out-dir",
+                str(out_dir),
+                "--disasm",
+                "--ctree",
+                "-c",
+                str(database),
+            ]
+        )
+        == 1
+    )
+
+    assert "--out-dir artifact must not overwrite" in capsys.readouterr().err
+    assert database.read_bytes() == b"original database"
+    assert list(out_dir.iterdir()) == [artifact]
+
+
+@pytest.mark.parametrize("protected_key", ["idb_path", "exe_path"])
+def test_decompilemany_protects_resolved_instance_files(
+    protected_key: str,
+    database: Path,
+    capture_nexus,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    binary = tmp_path / "sample"
+    database.write_bytes(b"original database")
+    binary.write_bytes(b"original executable")
+    capture_nexus.target = SimpleNamespace(idb_path=str(database), exe_path=str(binary))
+    selected_file = database if protected_key == "idb_path" else binary
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "manifest.json").symlink_to(selected_file)
+
+    assert main(["decompilemany", "demo", "--out-dir", str(out_dir), "--instance", "ready-record"]) == 1
+
+    assert "--out-dir artifact must not overwrite" in capsys.readouterr().err
+    assert database.read_bytes() == b"original database"
+    assert binary.read_bytes() == b"original executable"
+    assert not (out_dir / "demo_0x1000.c").exists()
+
+
+def test_decompilemany_protects_function_selection_file(
+    database: Path,
+    capture_nexus,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    selection = tmp_path / "functions.txt"
+    selection.write_text("demo\n", encoding="utf-8")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    artifact = out_dir / "demo_0x1000.c"
+    artifact.symlink_to(selection)
+
+    assert (
+        main(
+            [
+                "decompilemany",
+                "--functions-file",
+                str(selection),
+                "--out-dir",
+                str(out_dir),
+                "-c",
+                str(database),
+            ]
+        )
+        == 1
+    )
+
+    assert "--file input" in capsys.readouterr().err
+    assert selection.read_text(encoding="utf-8") == "demo\n"
+    assert list(out_dir.iterdir()) == [artifact]
+
+
+def test_decompilemany_checks_all_generated_paths_before_writing(
+    database: Path,
+    capture_nexus,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    capture_nexus.functions.append({"name": "later", "address": "0x2000"})
+    database.write_bytes(b"original database")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    existing_output = out_dir / "demo_0x1000.c"
+    existing_output.write_text("previous output\n", encoding="utf-8")
+    (out_dir / "later_0x2000.c").symlink_to(database)
+
+    assert main(["decompilemany", "*", "--out-dir", str(out_dir), "-c", str(database)]) == 1
+
+    assert "--out-dir artifact must not overwrite" in capsys.readouterr().err
+    assert database.read_bytes() == b"original database"
+    assert existing_output.read_text(encoding="utf-8") == "previous output\n"
+    assert not (out_dir / "manifest.json").exists()
 
 
 def test_decompilemany_rejects_extra_positional_filters(database: Path, capture_nexus, tmp_path: Path, capsys) -> None:

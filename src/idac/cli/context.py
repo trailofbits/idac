@@ -57,6 +57,9 @@ def merge_parent_context(inner_args: argparse.Namespace, outer_args: argparse.Na
     batch_paths = getattr(outer_args, "_protected_batch_paths", None)
     if batch_paths is not None:
         inner_args._protected_batch_paths = batch_paths
+    protected_outputs = getattr(outer_args, "_protected_output_paths", None)
+    if protected_outputs is not None:
+        inner_args._protected_output_paths = protected_outputs
     inner_args._wrapper_has_output = bool(
         getattr(outer_args, "out", None) or getattr(outer_args, "_wrapper_has_output", False)
     )

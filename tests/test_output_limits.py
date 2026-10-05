@@ -9,6 +9,33 @@ import pytest
 OVERSIZED_RESULT_CHARS = 1_000_000
 
 
+def test_decompilemany_output_directory_preserves_selected_database(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    before = database.read_bytes()
+    out_dir = tmp_path / "artifacts"
+    out_dir.mkdir()
+    (out_dir / "manifest.json").symlink_to(database)
+
+    proc = subprocess.run(
+        [*idac_cmd, "decompilemany", "main", "--out-dir", str(out_dir), "-c", str(database)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=idac_env,
+    )
+
+    assert proc.returncode == 1
+    assert "must not overwrite" in proc.stderr
+    assert database.read_bytes() == before
+    assert not list(out_dir.glob("*.c"))
+
+
 @pytest.mark.parametrize("output_format", ["json", "jsonl"])
 def test_large_json_output_requires_out_flag(
     idac_cmd: list[str],

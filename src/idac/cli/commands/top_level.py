@@ -11,8 +11,8 @@ from ...nexus import NexusSessionError
 from ...output import write_output_result
 from ..argparse_utils import add_standard_command
 from ..commands.common import OperationBinding, bind_operation, run_bound_operation, send_op
-from ..context import reject_output_context_aliases
 from ..errors import CliUserError
+from ..path_resolution import reject_output_aliases
 from ..result import CommandResult
 
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -193,24 +193,37 @@ def run_decompilemany(args: argparse.Namespace) -> CommandResult:
     succeeded = 0
     failed = 0
     combined_sections: list[str] = []
-    out_dir = None
-    if request.out_dir is not None:
-        out_dir = request.out_dir
-        artifact_paths = [out_dir / "manifest.json"]
-        for item in targets:
-            stem = _stem_for_function(str(item["name"]), str(item["address"]), str(item["identifier"])).stem
-            artifact_paths.append(out_dir / f"{stem}.c")
-            if request.include_disasm:
-                artifact_paths.append(out_dir / f"{stem}.asm")
-            if request.include_ctree:
-                artifact_paths.append(out_dir / f"{stem}.ctree")
-        reject_output_context_aliases(
-            args,
-            args._protected_context_paths,
-            artifact_paths=tuple(artifact_paths),
+    out_dir = request.out_dir
+    artifact_plan: list[tuple[ArtifactStem, dict[str, Path]]] = []
+    if out_dir is not None:
+        protected: list[tuple[str, Path | None]] = [
+            ("selected input or database", Path(value)) for value in getattr(args, "_protected_context_paths", ())
+        ]
+        protected.extend(getattr(args, "_protected_batch_paths", ()))
+        protected.extend(getattr(args, "_protected_output_paths", ()))
+        protected.extend(
+            (f"--{key.replace('_', '-')} input", value)
+            for key, value in vars(args).items()
+            if isinstance(value, Path) and key not in {"out", "out_file", "out_dir"}
         )
+        protected.append(("command --out output", args.out))
+        reject_output_aliases(out_dir / "manifest.json", protected, option_label="--out-dir artifact")
+        for item in targets:
+            stem_info = _stem_for_function(str(item["name"]), str(item["address"]), str(item["identifier"]))
+            paths = {
+                kind: out_dir / f"{stem_info.stem}.{suffix}"
+                for kind, suffix, enabled in (
+                    ("decompile", "c", True),
+                    ("disasm", "asm", request.include_disasm),
+                    ("ctree", "ctree", request.include_ctree),
+                )
+                if enabled
+            }
+            for path in paths.values():
+                reject_output_aliases(path, protected, option_label="--out-dir artifact")
+            artifact_plan.append((stem_info, paths))
         out_dir.mkdir(parents=True, exist_ok=True)
-    for item in targets:
+    for target_index, item in enumerate(targets):
         identifier = str(item["identifier"])
         try:
             payload = _run_text_operation(
@@ -250,10 +263,10 @@ def run_decompilemany(args: argparse.Namespace) -> CommandResult:
         if out_dir is None:
             combined_sections.append(text)
         else:
-            stem_info = _stem_for_function(str(item["name"]), str(item["address"]), identifier)
+            stem_info, artifact_paths = artifact_plan[target_index]
             stem = stem_info.stem
             entry_artifacts: dict[str, str] = {}
-            artifact_path = out_dir / f"{stem}.c"
+            artifact_path = artifact_paths["decompile"]
             output = write_output_result(text, fmt="text", out_path=artifact_path, stem="decompile")
             artifact = dict(output.artifact or {})
             artifact.update({"kind": "decompile", "identifier": identifier, "chars": len(text)})
@@ -263,12 +276,12 @@ def run_decompilemany(args: argparse.Namespace) -> CommandResult:
             entry["artifact_stem"] = stem
             if stem_info.truncated:
                 entry["filename_truncated"] = True
-            for kind, suffix in (("disasm", "asm"), ("ctree", "ctree")):
+            for kind in ("disasm", "ctree"):
                 extra_payload = extra_payloads.get(kind)
                 if extra_payload is None:
                     continue
                 extra_text = str(extra_payload["text"])
-                extra_path = out_dir / f"{stem}.{suffix}"
+                extra_path = artifact_paths[kind]
                 output = write_output_result(extra_text, fmt="text", out_path=extra_path, stem=kind)
                 artifact = dict(output.artifact or {})
                 artifact.update({"kind": kind, "identifier": identifier, "chars": len(extra_text)})

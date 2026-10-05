@@ -225,6 +225,7 @@ def _prepare_batch_command(line: PreparedBatchLine, parent_args: argparse.Namesp
         *parsed._protected_batch_paths,
         ("Nexus context", Path(context_value) if context_value is not None else None),
     ]
+    parsed._protected_output_paths = tuple(protected_outputs)
     for output_key in ("out", "out_file"):
         child_output = parsed_map.get(output_key)
         if child_output is not None:

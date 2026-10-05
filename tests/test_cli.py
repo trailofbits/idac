@@ -163,6 +163,41 @@ def test_output_cannot_overwrite_database_created_for_binary(tmp_path: Path, fak
     assert fake_nexus.instances == []
 
 
+@pytest.mark.parametrize("protected_target", ["batch_file", "journal"])
+def test_decompilemany_batch_artifacts_preserve_wrapper_files(
+    protected_target: str, tmp_path: Path, fake_nexus, monkeypatch, capsys
+) -> None:
+    database = tmp_path / "sample.i64"
+    database.write_bytes(b"database sentinel")
+    batch_file = tmp_path / "commands.idac"
+    journal = tmp_path / "journal.json"
+    out_dir = tmp_path / "artifacts"
+    out_dir.mkdir()
+    batch_text = "decompilemany demo --out-dir artifacts\n"
+    batch_file.write_text(batch_text, encoding="utf-8")
+    (out_dir / "manifest.json").symlink_to(batch_file if protected_target == "batch_file" else journal)
+
+    def decompile_operation(self, op, params, *, preview, operation_label):
+        if op == "function_list":
+            return [{"name": "demo", "address": "0x1000"}]
+        if op == "decompile":
+            return {"text": "int demo(void) { return 0; }\n"}
+        raise AssertionError(f"unexpected operation: {op}")
+
+    monkeypatch.setattr(fake_nexus, "execute_operation", decompile_operation)
+
+    assert main(["batch", "-c", str(database), str(batch_file), "--out", str(journal)]) == 1
+
+    payload = json.loads(journal.read_text(encoding="utf-8"))
+    assert payload["ok"] is False
+    assert payload["results"][0]["status"] == "failed"
+    assert "must not overwrite" in payload["results"][0]["stderr"]
+    assert batch_file.read_text(encoding="utf-8") == batch_text
+    assert database.read_bytes() == b"database sentinel"
+    assert not list(out_dir.glob("*.c"))
+    assert "must not overwrite" in capsys.readouterr().err
+
+
 def test_instance_output_cannot_overwrite_discovered_database(tmp_path: Path, fake_nexus, capsys) -> None:
     database = tmp_path / "selected.i64"
     database.write_bytes(b"database sentinel")
