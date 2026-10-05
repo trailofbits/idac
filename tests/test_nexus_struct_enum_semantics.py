@@ -190,6 +190,97 @@ def test_enum_member_mutations_preview_then_persist_round_trip(
     assert _member_names(delete_result["after_persist"]) == {"CLI_ENUM_A"}
 
 
+def test_union_field_set_updates_by_name_and_preserves_other_members(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    declared = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "declare",
+        "--decl",
+        "union test_cli_union { int first; float second; };",
+    )
+    assert declared["success"] is True
+
+    for field_name, declaration, expected_sizes in (
+        ("second", "double second;", {"first": 4, "second": 8}),
+        ("third", "short third;", {"first": 4, "second": 8, "third": 2}),
+    ):
+        result = preview_round_trip(
+            idac_cmd,
+            idac_env,
+            database,
+            tmp_path,
+            read_args=["type", "struct", "show", "test_cli_union"],
+            persist_args=[
+                "type",
+                "struct",
+                "field",
+                "set",
+                "test_cli_union",
+                field_name,
+                "--offset",
+                "0",
+                "--decl",
+                declaration,
+            ],
+        )
+        _assert_preview_result(result, result["before"])
+        for payload in (result["preview"]["after"], result["persisted"], result["after_persist"]):
+            assert payload["kind"] == "union"
+            members = {member["name"]: member for member in payload["members"]}
+            assert {name: member["size"] for name, member in members.items()} == expected_sizes
+            assert all(member["offset"] == 0 for member in members.values())
+
+
+def test_struct_field_set_replaces_member_at_requested_offset(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "declare",
+        "--decl",
+        "struct test_cli_offset { int first; int second; };",
+    )
+    run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "struct",
+        "field",
+        "set",
+        "test_cli_offset",
+        "renamed",
+        "--offset",
+        "4",
+        "--decl",
+        "float renamed;",
+    )
+    payload = run_nexus_json(idac_cmd, idac_env, database, "type", "struct", "show", "test_cli_offset")
+    members = {member["name"]: member for member in payload["members"]}
+    assert set(members) == {"first", "renamed"}
+    assert members["first"]["offset"] == 0
+    assert members["first"]["size"] == 4
+    assert members["renamed"]["offset"] == 4
+    assert members["renamed"]["size"] == 4
+    assert "float" in members["renamed"]["type"]
+
+
 def test_enum_member_set_uses_sdk_default_mask_when_unspecified(
     idac_cmd: list[str],
     idac_env: dict[str, str],

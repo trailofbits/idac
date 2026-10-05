@@ -4213,7 +4213,10 @@ def _named_types_struct_field_set(
     tif = runtime.get_struct_or_union(request.struct_name)
     offset_bits = request.offset * 8
     member_tif = _named_types_parse_member_type(runtime, request.decl, request.field_name)
-    idx, udm = tif.get_udm_by_offset(offset_bits)
+    if tif.is_union():
+        idx, udm = tif.get_udm(request.field_name)
+    else:
+        idx, udm = tif.get_udm_by_offset(offset_bits)
     if idx >= 0 and udm is not None and (udm.offset == offset_bits):
         _named_types_ensure_terr_ok(runtime, tif.set_udm_type(idx, member_tif), "failed to set field type")
         if udm.name != request.field_name:
