@@ -4369,7 +4369,14 @@ _type_declare_FORWARD_DECL_RE = re.compile(
     re.DOTALL,
 )
 _type_declare_CONCRETE_TYPE_RE = re.compile(
-    "\\b(?:struct|class|union|enum)\\s+(?P<name>[A-Za-z_][A-Za-z0-9_:]*)\\s*\\{", re.DOTALL
+    r"""
+    \b(?:struct|class|union|enum(?:\s+(?:class|struct))?)\s+
+    (?:(?:__cppobj|__packed|__unaligned)\s+)*
+    (?P<name>[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)
+    (?:\s+final)?\s*
+    (?::(?!:)[^;{}]+)?\s*\{
+    """,
+    re.DOTALL | re.VERBOSE,
 )
 _type_declare_TYPEDEF_ALIAS_RE = re.compile(
     "^\\s*typedef\\s+(?:struct|class|union|enum)\\s+(?:(?P<tag>[A-Za-z_][A-Za-z0-9_:]*)\\s*)?\\{.*\\}\\s*(?P<alias>[A-Za-z_][A-Za-z0-9_:]*)\\s*;\\s*$",
@@ -4995,6 +5002,14 @@ def _type_declare_forward_declared_type_names(text: str) -> set[str]:
 
 
 def _type_declare_concrete_type_names(text: str) -> set[str]:
+    # Attributes may precede or follow the tag name. Ignore their arguments
+    # while recognizing names, without changing the declaration sent to IDA.
+    text = re.sub(
+        r"\b(?:__declspec|__attribute__|alignas)\s*\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)",
+        " ",
+        text,
+    )
+    text = re.sub(r"\[\[.*?\]\]", " ", text, flags=re.DOTALL)
     names = {match.group("name") for match in _type_declare_CONCRETE_TYPE_RE.finditer(text)}
     alias_match = _type_declare_TYPEDEF_ALIAS_RE.match(text)
     if alias_match:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers import run_nexus, run_nexus_json
+from tests.helpers import run_nexus, run_nexus_json, run_preview_json
 
 SHARED_TYPE_DECL = (
     "typedef enum test_cli_mode { CLI_MODE_A = 0, CLI_MODE_B = 1 } test_cli_mode;"
@@ -188,6 +188,49 @@ def test_nexus_type_declare_replace_updates_existing_type(
     show_payload = run_nexus_json(idac_cmd, idac_env, database, ["type", "show", "test_cli_replace"])
     member_names = {member.get("name") for member in show_payload.get("members") or []}
     assert {"value", "extra"} <= member_names
+
+
+@pytest.mark.parametrize(
+    "record_head",
+    [
+        "struct __cppobj test_cli_preview_record",
+        "struct test_cli_preview_record : test_cli_preview_base",
+        "struct __cppobj test_cli_preview_record:test_cli_preview_base",
+        "struct __cppobj __declspec(align(8)) test_cli_preview_record",
+    ],
+    ids=["cppobj", "inheritance", "cppobj-inheritance", "alignment-attribute"],
+)
+def test_nexus_type_declare_cpp_replacement_preview_reports_layout_and_restores_type(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+    record_head: str,
+) -> None:
+    database = copy_database(tiny_database)
+    name = "test_cli_preview_record"
+    initial_decl = f"struct test_cli_preview_base {{ int base; }}; {record_head} {{ int value; }};"
+    run_nexus_json(idac_cmd, idac_env, database, ["type", "declare", "--decl", initial_decl])
+    before = run_nexus_json(idac_cmd, idac_env, database, ["type", "show", name])
+    before_decl = run_nexus_json(idac_cmd, idac_env, database, ["type", "list", name])[0]["decl"]
+    args = ["type", "declare", "--replace", "--decl", f"{record_head} {{ long long value; }};"]
+
+    proc, preview = run_preview_json(idac_cmd, idac_env, database, tmp_path / "cpp-type-preview.json", args)
+
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    assert preview["result"]["success"] is True
+    assert preview["result"]["replaced_types"] == [name]
+    assert preview["before"]["declarations"] == {name: before_decl}
+    assert preview["after"]["declarations"][name] != before_decl
+    assert preview["undo"]["persisted"] is False
+    assert run_nexus_json(idac_cmd, idac_env, database, ["type", "show", name]) == before
+
+    run_nexus_json(idac_cmd, idac_env, database, args)
+    after_decl = run_nexus_json(idac_cmd, idac_env, database, ["type", "list", name])[0]["decl"]
+    assert preview["after"]["declarations"] == {name: after_decl}
+    after = run_nexus_json(idac_cmd, idac_env, database, ["type", "show", name])
+    assert next(member for member in after["members"] if member["name"] == "value")["size"] == 8
 
 
 def test_nexus_type_declare_clang_replace_preserves_dependent_types_and_prototypes(
