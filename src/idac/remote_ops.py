@@ -1359,7 +1359,7 @@ def _functions_function_list(
                 render_name=display_name if request.demangle else name,
                 address=hex(ea),
                 section=runtime.ida_segment.get_segment_name(ea, runtime.ida_name.GN_VISIBLE),
-                size=0 if func is None else func.end_ea - func.start_ea,
+                size=0 if func is None else runtime.ida_funcs.calc_func_size(func),
             )
         )
         if request.limit is not None and len(rows) >= request.limit:
@@ -1392,7 +1392,7 @@ def _functions_function_show(
         name=name,
         display_name=runtime.display_function_name(ea, demangle=True),
         address=address,
-        size=func.end_ea - func.start_ea,
+        size=runtime.ida_funcs.calc_func_size(func),
         prototype=ida_typeinf.print_type(ea, ida_typeinf.PRTYPE_1LINE) or "",
         flags=hex(func.flags),
     )

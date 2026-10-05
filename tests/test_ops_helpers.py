@@ -69,6 +69,10 @@ def test_function_list_honors_limit() -> None:
             flags = FakeIdaFuncs.FUNC_THUNK if ea == 0x2000 else 0
             return FakeFunc(ea, flags=flags)
 
+        @staticmethod
+        def calc_func_size(func: FakeFunc) -> int:
+            return func.end_ea - func.start_ea
+
     class FakeIdaSegment:
         @staticmethod
         def get_segment_name(_ea: int, _flags: int) -> str:
@@ -114,6 +118,10 @@ def test_function_list_reports_section_name() -> None:
         def get_func(_ea: int) -> FakeFunc:
             return FakeFunc()
 
+        @staticmethod
+        def calc_func_size(func: FakeFunc) -> int:
+            return func.end_ea - func.start_ea
+
     class FakeIdaSegment:
         @staticmethod
         def get_segment_name(_ea: int, _flags: int) -> str:
@@ -155,6 +163,10 @@ def test_function_list_demangle_controls_matching_and_rendering() -> None:
         @staticmethod
         def get_func(_ea: int) -> FakeFunc:
             return FakeFunc()
+
+        @staticmethod
+        def calc_func_size(func: FakeFunc) -> int:
+            return func.end_ea - func.start_ea
 
     class FakeIdaSegment:
         @staticmethod

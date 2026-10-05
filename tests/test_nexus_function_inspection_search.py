@@ -5,6 +5,46 @@ from pathlib import Path
 from tests.helpers import run_nexus_json
 
 
+def test_nexus_function_size_includes_tail_chunks(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    appended = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "py",
+        "exec",
+        "--code",
+        "import ida_funcs\n"
+        "ea = idc.get_name_ea_simple('add')\n"
+        "func = ida_funcs.get_func(ea)\n"
+        "tail = ida_funcs.get_next_func(ea)\n"
+        "start, end = tail.start_ea, tail.end_ea\n"
+        "assert ida_funcs.del_func(start)\n"
+        "assert ida_funcs.append_func_tail(func, start, end)\n"
+        "result = {'main_size': func.end_ea - func.start_ea,\n"
+        "          'tail_size': end - start,\n"
+        "          'chunk_count': len(list(idautils.Chunks(ea)))}",
+    )
+    chunks = appended["result"]
+    assert chunks["chunk_count"] == 2
+    assert chunks["main_size"] > 0
+    assert chunks["tail_size"] > 0
+    expected_size = chunks["main_size"] + chunks["tail_size"]
+
+    metadata = run_nexus_json(idac_cmd, idac_env, database, "function", "metadata", "add")
+    listed = run_nexus_json(idac_cmd, idac_env, database, "function", "list", "add")
+
+    assert metadata["size"] == expected_size
+    assert len(listed) == 1
+    assert listed[0]["name"] == "add"
+    assert listed[0]["size"] == expected_size
+
+
 def test_nexus_function_frame(
     idac_cmd: list[str],
     idac_env: dict[str, str],
