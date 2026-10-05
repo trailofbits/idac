@@ -4853,9 +4853,8 @@ def _type_declare_parse_type_declarations(runtime: IdaRuntime, decl: str, *, rep
     if not clang:
         flags = ida_typeinf.PT_REPLACE if replace else 0
         return ida_typeinf.idc_parse_types(decl, flags)
-    if replace:
-        type_names = _type_declare_declared_type_names(_type_declare_parse_declaration_chunks(decl)[0])
-        _type_declare_delete_named_types(runtime, type_names)
+    # HTI_DCL lets Clang replace definitions in place. Deleting them first
+    # removes their ordinals and breaks existing type and prototype references.
     return _type_declare_parse_type_declarations_with_clang(runtime, decl)
 
 
@@ -4940,17 +4939,6 @@ def _type_declare_declared_type_names(chunks: list[_type_declare_DeclarationChun
         names.update(_type_declare_forward_declared_type_names(chunk.text))
         names.update(_type_declare_typedef_alias_names(chunk.text))
     return {name for name in names if name}
-
-
-def _type_declare_delete_named_types(runtime: IdaRuntime, type_names: set[str]) -> None:
-    if not type_names:
-        return
-    ida_typeinf = runtime.mod("ida_typeinf")
-    for name in sorted(type_names):
-        if runtime.find_named_type(name) is None:
-            continue
-        if not ida_typeinf.del_named_type(None, name, ida_typeinf.NTF_TYPE):
-            raise IdaOperationError(f"failed to replace existing local type: {name}")
 
 
 def _type_declare_apply_type_declarations(

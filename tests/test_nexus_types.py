@@ -170,8 +170,9 @@ def test_nexus_enum_list_and_show(
     assert any(member.get("name") == "CLI_ENUM_A" for member in show_payload.get("members") or [])
 
 
+@pytest.mark.parametrize("clang", [False, True])
 def test_nexus_type_declare_replace_updates_existing_type(
-    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path
+    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, clang: bool
 ) -> None:
     database = copy_database(tiny_database)
     first = run_nexus_json(idac_cmd, idac_env, database, ["type", "declare", "--decl", REPLACE_STRUCT_DECL_V1])
@@ -180,13 +181,113 @@ def test_nexus_type_declare_replace_updates_existing_type(
         idac_cmd,
         idac_env,
         database,
-        ["type", "declare", "--replace", "--decl", REPLACE_STRUCT_DECL_V2],
+        ["type", "declare", "--replace", "--decl", REPLACE_STRUCT_DECL_V2, *(["--clang"] if clang else [])],
     )
     assert second.get("success") is True
     assert "test_cli_replace" in set(second.get("replaced_types") or [])
     show_payload = run_nexus_json(idac_cmd, idac_env, database, ["type", "show", "test_cli_replace"])
     member_names = {member.get("name") for member in show_payload.get("members") or []}
     assert {"value", "extra"} <= member_names
+
+
+def test_nexus_type_declare_clang_replace_preserves_dependent_types_and_prototypes(
+    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path
+) -> None:
+    database = copy_database(tiny_database)
+    run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        [
+            "type",
+            "declare",
+            "--decl",
+            "struct test_cli_replace { int value; };struct test_cli_dependent { struct test_cli_replace record; };",
+        ],
+    )
+    run_nexus_json(idac_cmd, idac_env, database, ["function", "prototype", "show", "main"])
+    run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        ["function", "prototype", "set", "main", "--decl", "int main(struct test_cli_replace *record);"],
+    )
+    reference_snapshot_code = """
+import ida_nalt
+import ida_typeinf
+import idc
+result = {}
+for name in ("test_cli_replace", "test_cli_dependent"):
+    tif = ida_typeinf.tinfo_t()
+    assert tif.get_named_type(None, name)
+    result[name] = {"ordinal": tif.get_ordinal(), "size": tif.get_size()}
+prototype = ida_typeinf.tinfo_t()
+assert ida_nalt.get_tinfo(prototype, idc.get_name_ea_simple("main"))
+details = ida_typeinf.func_type_data_t()
+assert prototype.get_func_details(details)
+record = details[0].type.get_pointed_object()
+result["prototype_record"] = {"ordinal": record.get_ordinal(), "size": record.get_size()}
+"""
+    before = run_nexus_json(idac_cmd, idac_env, database, ["py", "exec", "--code", reference_snapshot_code])["result"]
+    replaced = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        ["type", "declare", "--clang", "--replace", "--decl", "struct test_cli_replace { long long value; };"],
+    )
+    assert replaced["success"] is True
+    after = run_nexus_json(idac_cmd, idac_env, database, ["py", "exec", "--code", reference_snapshot_code])["result"]
+    for name, reference in before.items():
+        assert reference["ordinal"] > 0
+        assert reference["size"] == 4
+        assert after[name] == {"ordinal": reference["ordinal"], "size": 8}
+    dependent = run_nexus_json(idac_cmd, idac_env, database, ["type", "show", "test_cli_dependent"])
+    assert dependent["size_known"] is True
+    assert dependent["size"] == 8
+    assert dependent["members"][0]["name"] == "record"
+    assert dependent["members"][0]["size"] == 8
+    assert "test_cli_replace" in dependent["members"][0]["type"]
+
+
+@pytest.mark.parametrize("bisect", [False, True])
+def test_nexus_type_declare_clang_replace_failure_restores_existing_and_new_types(
+    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, bisect: bool
+) -> None:
+    database = copy_database(tiny_database)
+    run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        [
+            "type",
+            "declare",
+            "--decl",
+            "struct test_cli_replace { int value; };struct test_cli_dependent { struct test_cli_replace record; };",
+        ],
+    )
+    before = run_nexus_json(idac_cmd, idac_env, database, ["type", "list", "test_cli_"])
+    dependent_before = run_nexus_json(idac_cmd, idac_env, database, ["type", "show", "test_cli_dependent"])
+    failed = run_nexus(
+        idac_cmd,
+        idac_env,
+        database,
+        [
+            "type",
+            "declare",
+            "--clang",
+            "--replace",
+            "--decl",
+            "struct test_cli_replace { long long value; };"
+            "struct test_cli_new { int value; };"
+            "struct test_cli_invalid { Missing value; };",
+            *(["--bisect"] if bisect else []),
+        ],
+        use_json=True,
+    )
+    assert failed.returncode == 1
+    assert json.loads(failed.stdout)["success"] is False
+    assert run_nexus_json(idac_cmd, idac_env, database, ["type", "list", "test_cli_"]) == before
+    assert run_nexus_json(idac_cmd, idac_env, database, ["type", "show", "test_cli_dependent"]) == dependent_before
 
 
 def test_nexus_type_declare_supports_alias_rewrites(
