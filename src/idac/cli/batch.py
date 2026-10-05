@@ -224,6 +224,7 @@ def _prepare_batch_command(line: PreparedBatchLine, parent_args: argparse.Namesp
     protected_outputs = [
         *parsed._protected_batch_paths,
         ("Nexus context", Path(context_value) if context_value is not None else None),
+        *getattr(parent_args, "_protected_output_paths", ()),
     ]
     parsed._protected_output_paths = tuple(protected_outputs)
     for output_key in ("out", "out_file"):
@@ -531,15 +532,21 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
     batch_dir = batch_path.parent.resolve(strict=False)
     command_lines = _prepare_batch_lines(root_parser, batch_path)
     context_value = vars(args).get("context")
+    input_paths = _batch_input_paths(command_lines, batch_dir=batch_dir)
+    # Missing inputs may be produced by an earlier child command in this batch.
+    args._protected_output_paths = tuple(
+        (label, path) for label, path in input_paths if path is not None and path.exists()
+    )
     args._protected_batch_paths = (
         ("batch file", batch_path),
-        *_batch_input_paths(command_lines, batch_dir=batch_dir),
+        *args._protected_output_paths,
     )
     reject_output_aliases(
         args.out,
         [
             *args._protected_batch_paths,
             ("Nexus context", Path(context_value) if context_value is not None else None),
+            *input_paths,
         ],
         option_label="batch --out",
     )

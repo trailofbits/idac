@@ -402,6 +402,108 @@ def test_read_only_child_output_cannot_overwrite_journal_or_context(
     capsys.readouterr()
 
 
+@pytest.mark.parametrize("lint", [False, True])
+@pytest.mark.parametrize("alias", ["direct", "normalized", "symlink", "hardlink"])
+@pytest.mark.parametrize(
+    ("producer", "consumer"),
+    [
+        ("function list --out", "type declare --decl-file types.h"),
+        ("decompilemany demo --out-file", "type declare --decl-file types.h"),
+        ("preview --out", "preview type declare --decl-file types.h"),
+    ],
+)
+def test_batch_child_outputs_preserve_preexisting_inputs(
+    lint: bool,
+    alias: str,
+    producer: str,
+    consumer: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    RecordingSession.instances.clear()
+    database = tmp_path / "sample.i64"
+    database.touch()
+    declarations = tmp_path / "types.h"
+    declarations.write_text("typedef int preserved_type;\n", encoding="utf-8")
+    output_name = "types.h"
+    if alias == "normalized":
+        (tmp_path / "nested").mkdir()
+        output_name = "nested/../types.h"
+    elif alias in {"symlink", "hardlink"}:
+        output_name = "aliased.h"
+        alias_path = tmp_path / output_name
+        if alias == "symlink":
+            alias_path.symlink_to(declarations)
+        else:
+            alias_path.hardlink_to(declarations)
+    producer_line = f"{producer} {output_name}"
+    if producer == "preview --out":
+        producer_line += " function list"
+    batch_file = tmp_path / "commands.idac"
+    batch_file.write_text(f"{producer_line}\n{consumer}\n", encoding="utf-8")
+    journal = tmp_path / "batch.json"
+    monkeypatch.setattr("idac.nexus.NexusSession", RecordingSession)
+
+    assert (
+        main(
+            [
+                "batch",
+                "-c",
+                str(database),
+                str(batch_file),
+                "--out",
+                str(journal),
+                "--fail-fast",
+                *(["--lint"] if lint else []),
+            ]
+        )
+        == 1
+    )
+
+    payload = json.loads(journal.read_text(encoding="utf-8"))
+    assert payload["results"][0]["status"] == "failed"
+    assert "line 2 --decl-file input" in payload["results"][0]["stderr"]
+    assert declarations.read_text(encoding="utf-8") == "typedef int preserved_type;\n"
+    assert all(not session.operations for session in RecordingSession.instances)
+    capsys.readouterr()
+
+
+def test_batch_can_generate_a_missing_input_for_a_later_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    database = tmp_path / "sample.i64"
+    database.touch()
+    batch_file = tmp_path / "commands.idac"
+    batch_file.write_text(
+        "function prototype show demo --out generated.h\nfunction prototype set demo --decl-file generated.h\n",
+        encoding="utf-8",
+    )
+    journal = tmp_path / "batch.json"
+
+    class PrototypeSession(RecordingSession):
+        def execute_operation(self, op, params, *, preview, operation_label):
+            self.operations.append(op)
+            if op == "proto_get":
+                return {"prototype": "int demo(void);"}
+            assert op == "proto_set"
+            assert params["decl"] == "int demo(void);\n"
+            return {"changed": True}
+
+    PrototypeSession.instances.clear()
+    monkeypatch.setattr("idac.nexus.NexusSession", PrototypeSession)
+
+    assert main(["batch", "-c", str(database), str(batch_file), "--out", str(journal)]) == 0
+
+    assert (tmp_path / "generated.h").read_text(encoding="utf-8") == "int demo(void);\n"
+    payload = json.loads(journal.read_text(encoding="utf-8"))
+    assert payload["ok"] is True
+    assert payload["commands_succeeded"] == 2
+    capsys.readouterr()
+
+
 def test_batch_preserves_close_failure_notes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

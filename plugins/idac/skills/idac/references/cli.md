@@ -165,6 +165,10 @@ mutations require wrapper `--out`; mutating children cannot set their own output
 paths. Read-only children may write artifacts, whose relative paths resolve from
 the batch file's directory.
 
+Child outputs cannot overwrite input files that existed before the batch started,
+including inputs used by other lines. New files may be generated for later lines
+to consume; remove previously generated inputs or choose new paths before reruns.
+
 Use `--lint --out <lint.json>` before mutation batches, and `--fail-fast` when later
 steps depend on earlier success or local selectors must stop on the first miss.
 Keep previews and matching commits in separate runs so you can inspect the preview

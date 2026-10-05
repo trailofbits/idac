@@ -423,6 +423,50 @@ def test_decompilemany_rejects_extra_positional_filters(database: Path, capture_
 
 
 @pytest.mark.parametrize(
+    ("filename", "alias"),
+    [
+        ("demo_0x1000.c", "direct"),
+        ("manifest.json", "symlink"),
+        ("demo_0x1000.asm", "hardlink"),
+        ("demo_0x1000.ctree", "symlink"),
+    ],
+)
+def test_decompilemany_batch_artifacts_preserve_later_input(
+    filename: str,
+    alias: str,
+    database: Path,
+    capture_nexus,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    out_dir = tmp_path / "artifacts"
+    out_dir.mkdir()
+    artifact = out_dir / filename
+    declarations = artifact if alias == "direct" else tmp_path / "types.h"
+    declarations.write_text("typedef int preserved_type;\n", encoding="utf-8")
+    if alias == "symlink":
+        artifact.symlink_to(declarations)
+    elif alias == "hardlink":
+        artifact.hardlink_to(declarations)
+    batch_file = tmp_path / "commands.idac"
+    source_path = declarations.relative_to(tmp_path)
+    batch_file.write_text(
+        f"decompilemany demo --out-dir artifacts --disasm --ctree\ntype declare --decl-file {source_path}\n",
+        encoding="utf-8",
+    )
+    journal = tmp_path / "batch.json"
+
+    assert main(["batch", "-c", str(database), str(batch_file), "--out", str(journal), "--fail-fast"]) == 1
+
+    payload = json.loads(journal.read_text(encoding="utf-8"))
+    assert payload["results"][0]["status"] == "failed"
+    assert "line 2 --decl-file input" in payload["results"][0]["stderr"]
+    assert declarations.read_text(encoding="utf-8") == "typedef int preserved_type;\n"
+    assert list(out_dir.iterdir()) == [artifact]
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize(
     ("selector_args", "expected_op", "expected_params"),
     [
         (["main"], "disasm", {"identifier": "main"}),

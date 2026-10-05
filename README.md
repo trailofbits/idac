@@ -361,6 +361,11 @@ function locals rename "0x100000000" 6 --new-name record_type
 Mutating batches require `--out` so the result log is preserved before any change runs. `batch --lint` parses child commands, resolves relative input paths, rejects unsupported batch commands, and warns on risky local selectors before execution. Setup commands are intentionally rejected from `batch`; `misc reanalyze` is batch-safe and belongs between type/prototype changes and local cleanup.
 Before dispatching the first command, `batch` writes a `pending` journal and checkpoints it after every line. It closes the shared Nexus session before replacing that journal with a terminal `ok`, `failed`, or `interrupted` record; Ctrl-C returns 130 without discarding the lifecycle record. Mutating child commands cannot set their own `--out`—the wrapper artifact is the mutation log—while read-only children may still write separate artifacts.
 
+Child output paths cannot replace existing input files referenced by any batch
+line. A read-only child can generate a new file for a later child to consume when
+that file did not exist before the batch started. On subsequent runs, remove that
+generated file or choose a new path before regenerating it.
+
 Use `--fail-fast` when later steps depend on earlier ones or local selectors must
 stop on the first miss. A batch does not roll back earlier successful mutations;
 headless checkpoints survive a later failure or interruption.
