@@ -2,7 +2,7 @@
 
 IDA's default type parser can handle simple C++ class declarations but not templates and some other complex constructs. For `idac type declare`, use `--clang` when the default parser rejects template-heavy or newer C++ syntax.
 
-For `idac type declare`, treat the forms in this file as IDA-specific details, not as the mandatory first pass. In practice, a minimal plain-`struct` import with `ClassName_vtbl` and `__vftable` is often the safest starting point; add `__cppobj` and other refinements only after the minimal form imports cleanly.
+For `idac type declare`, keep declarations minimal while preserving known layout semantics. Plain structs suffice for simple layouts; preserve existing `__cppobj` markers on C++ classes. For inheritance with base tail-padding reuse, `__cppobj` can be necessary to retain observed derived-field offsets. Verify sizes and offsets after import rather than removing the marker or forcing packing to make a declaration parse.
 
 If a C++ class contains virtual functions, IDA will try to rebuild the virtual function table (VFT) for the class. The VFT will be linked to the class by the name: if the class is called "A", the VFT type will be "A\_vtbl".
 

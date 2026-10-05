@@ -55,8 +55,10 @@ For local-type imports, flatten namespace names consistently in the header (for
 example `Group__Item`) and record the mapping; avoid namespace blocks in the default
 parser. Keep original demangled names in the evidence report.
 
-Start with minimal plain `struct` declarations: observed vtable pointer, directly
-evidenced fields, and blob padding for unknown regions. Preserve existing opaque
+Start with minimal declarations: observed vtable pointer, directly evidenced fields,
+and blob padding for unknown regions. Preserve existing `__cppobj` markers and
+evidence-consistent inheritance; removing them can change base tail-padding reuse.
+Preserve existing opaque
 types unless replacing them is needed for the requested layout; record a deliberate
 size-only replacement as a loss of type detail.
 
@@ -64,8 +66,8 @@ size-only replacement as a loss of type detail.
   notes or provisional names, such as `count_maybe`.
 - Use one byte array for a contiguous unknown region instead of guessed scalars.
 - Add `__attribute__((packed))` only when observed offsets prove packed layout.
-  Keep real gaps explicit. `__cppobj` is an optional refinement whose effect on
-  layout must be checked.
+  Keep real gaps explicit. For C++ inheritance, check `__cppobj` and the target
+  compiler's layout before changing packing to force an offset.
 - A derived class may reuse base tail padding. Field accesses and constructor
   evidence take precedence over assuming derived fields start after base size.
 - Keep a derived class empty unless field accesses or constructor evidence prove
@@ -101,12 +103,17 @@ Add vtable declarations only with virtual-dispatch evidence: a constructor store
 runtime vtable symbol, or confirmed `__vftable` member. For class-helper compatibility,
 name the callable-slot type `ClassName_vtbl`, declare it as
 `struct /*VFT*/ ClassName_vtbl`, and attach it as `ClassName_vtbl *__vftable;`.
+Each slot needs an explicit receiver and the arguments and return type supported
+by its target's current prototype and call sites. Preserve known signatures when
+replacing types; `void (*slot)(void)` discards that evidence. Keep overloads distinct.
 
 ```bash
 idac type class vtable "ExampleDerived" --runtime
 ```
 
 This combines local slot types and runtime targets once a class is materialized.
+An anonymous function-pointer member is not a named vtable layout; read `type show`
+and materialize the callable-slot type before asking the helper for typed slots.
 Before then, `type class candidates --kind vtable_symbol` can locate a symbol;
 raw slot reads need `py exec` if no first-class command covers them. A missing
 runtime symbol limits that lookup rather than disproving the class family.
@@ -119,6 +126,8 @@ declaration examples are in [C++ type details](ida-cpp-type-details.md).
 Confirm the target ABI from database metadata and binary evidence before relying
 on its layout rules. If the compiler ID itself is needed, use the verified
 [IDAPython recipe](workflows.md#idapython-escape-hatch).
+Bound raw reads by symbol extent and validate each target; an adjacent RTTI object
+or another table's header is not an extra callable slot.
 
 ## Apply types to runtime functions
 
