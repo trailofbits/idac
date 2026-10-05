@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.helpers import (
     normalize_pseudocode_call_arguments,
     preview_round_trip,
     run_nexus,
     run_nexus_json,
     run_nexus_text,
+    shutdown_nexus_worker_without_save,
 )
 
 
@@ -224,6 +227,118 @@ def test_proto_set_preserves_calling_convention_in_preview_and_saved_type(
     expected = "int __cdecl add(int left, int right)"
     assert result["preview"]["after"]["prototype"] == expected
     assert result["after_persist"]["prototype"] == expected
+
+
+@pytest.mark.parametrize("convention", ["__usercall", "__userpurge"])
+@pytest.mark.parametrize("return_type", ["int", "void"])
+def test_proto_set_preserves_custom_locations_in_preview_and_saved_type(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+    convention: str,
+    return_type: str,
+) -> None:
+    database = copy_database(tiny_database)
+    run_nexus_json(idac_cmd, idac_env, database, "function", "prototype", "show", "add")
+    return_location = "@<W3>" if return_type == "int" else ""
+    original = f"{return_type} {convention} add{return_location}(int a@<W1>, int b@<W2>)"
+    seeded = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "function",
+        "prototype",
+        "set",
+        "add",
+        "--decl",
+        original + ";",
+    )
+    updated_return = "unsigned int" if return_type == "int" else "void"
+    result = preview_round_trip(
+        idac_cmd,
+        idac_env,
+        database,
+        tmp_path,
+        read_args=["function", "prototype", "show", "add"],
+        persist_args=[
+            "function",
+            "prototype",
+            "set",
+            "add",
+            "--preserve-cc",
+            "--decl",
+            f"{updated_return} add(unsigned int left, unsigned int right);",
+        ],
+    )
+
+    assert seeded["prototype"] == original
+    assert result["before"]["prototype"] == original
+    assert result["after_preview"] == result["before"]
+    expected = f"{updated_return} {convention} add{return_location}(unsigned int left@<W1>, unsigned int right@<W2>)"
+    assert result["preview"]["after"]["prototype"] == expected
+    assert result["persisted"]["prototype"] == expected
+    assert result["after_persist"]["prototype"] == expected
+
+    shutdown_nexus_worker_without_save(database, idac_env)
+    reopened = run_nexus_json(idac_cmd, idac_env, database, "function", "prototype", "show", "add")
+    assert reopened == result["after_persist"]
+
+
+@pytest.mark.parametrize(
+    ("return_type", "declaration", "diagnostic"),
+    [
+        ("int", "int add(int left);", "same parameter count"),
+        ("int", "int add(long long left, int right);", "parameter 1 requires the same type size"),
+        ("int", "long long add(int left, int right);", "same return type size"),
+        ("int", "void add(int left, int right);", "same return type size"),
+        ("void", "int add(int left, int right);", "same return type size"),
+    ],
+)
+def test_proto_set_rejects_incompatible_custom_locations_without_mutation(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    return_type: str,
+    declaration: str,
+    diagnostic: str,
+) -> None:
+    database = copy_database(tiny_database)
+    run_nexus_json(idac_cmd, idac_env, database, "function", "prototype", "show", "add")
+    return_location = "@<W3>" if return_type == "int" else ""
+    run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "function",
+        "prototype",
+        "set",
+        "add",
+        "--decl",
+        f"{return_type} __usercall add{return_location}(int a@<W1>, int b@<W2>);",
+    )
+    before = run_nexus_json(idac_cmd, idac_env, database, "function", "prototype", "show", "add")
+    rejected = run_nexus(
+        idac_cmd,
+        idac_env,
+        database,
+        "function",
+        "prototype",
+        "set",
+        "add",
+        "--preserve-cc",
+        "--decl",
+        declaration,
+    )
+    after = run_nexus_json(idac_cmd, idac_env, database, "function", "prototype", "show", "add")
+
+    assert rejected.returncode == 1
+    assert "cannot preserve calling convention" in rejected.stderr
+    assert diagnostic in rejected.stderr
+    assert "without --preserve-cc" in rejected.stderr
+    assert after == before
 
 
 def test_proto_check_accepts_valid_fixture_declaration(

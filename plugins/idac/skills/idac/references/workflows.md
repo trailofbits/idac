@@ -80,7 +80,10 @@ Use `function prototype set --preserve-cc` for a parameter-name or return-type e
 that must keep the current ABI. IDA can normalize a parsed `__cdecl` declaration
 to `__fastcall`; this flag copies the existing convention into the parsed type
 before applying it, avoiding a scripted type edit. Omit it when changing the
-calling convention is part of the request.
+calling convention is part of the request. For `__usercall` and `__userpurge`, the
+flag also retains explicit argument locations by parameter position and the return
+location. Keep the parameter count and parameter/return type sizes unchanged;
+otherwise, supply explicit locations without the flag.
 
 ## Selector calibration
 

@@ -3719,7 +3719,38 @@ def _prototypes_proto_set(
             raise IdaOperationError(f"cannot preserve calling convention at {hex(ea)}: no existing function type")
         if not tif.get_func_details(updated_details):
             raise IdaOperationError(f"cannot preserve calling convention at {hex(ea)}: declaration is not a function")
-        updated_details.set_cc(original_details.get_cc())
+        original_cc = original_details.get_cc()
+        if runtime.ida_typeinf.is_user_cc(original_cc):
+            if len(updated_details) != len(original_details):
+                raise IdaOperationError(
+                    f"cannot preserve calling convention at {hex(ea)}: explicit argument locations "
+                    "require the same parameter count; supply explicit locations without --preserve-cc"
+                )
+            original_return_size = original_details.rettype.get_size()
+            if original_details.rettype.is_void():
+                return_location_compatible = updated_details.rettype.is_void()
+            else:
+                return_location_compatible = (
+                    not updated_details.rettype.is_void()
+                    and original_return_size != runtime.ida_typeinf.BADSIZE
+                    and updated_details.rettype.get_size() == original_return_size
+                )
+            if not return_location_compatible:
+                raise IdaOperationError(
+                    f"cannot preserve calling convention at {hex(ea)}: explicit return location "
+                    "requires the same return type size; supply explicit locations without --preserve-cc"
+                )
+            for index, argument in enumerate(updated_details):
+                original_argument = original_details[index]
+                original_size = original_argument.type.get_size()
+                if original_size == runtime.ida_typeinf.BADSIZE or argument.type.get_size() != original_size:
+                    raise IdaOperationError(
+                        f"cannot preserve calling convention at {hex(ea)}: explicit location for parameter "
+                        f"{index + 1} requires the same type size; supply explicit locations without --preserve-cc"
+                    )
+                argument.argloc = original_argument.argloc
+            updated_details.retloc = original_details.retloc
+        updated_details.set_cc(original_cc)
         if not tif.create_func(updated_details):
             raise IdaOperationError(f"failed to preserve calling convention at {hex(ea)}")
     if not runtime.ida_typeinf.apply_tinfo(ea, tif, runtime.ida_typeinf.TINFO_DEFINITE):

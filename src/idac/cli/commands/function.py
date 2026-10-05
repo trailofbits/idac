@@ -355,7 +355,10 @@ def register(
     child.add_argument(
         "--preserve-cc",
         action="store_true",
-        help="Keep the existing calling convention when editing parameter names or types and the return type",
+        help=(
+            "Keep the existing calling convention and explicit argument/return locations; "
+            "custom locations require unchanged parameter count and type sizes"
+        ),
     )
     child.set_defaults(
         run=run_bound_operation,

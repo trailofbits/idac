@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 _PSEUDOCODE_STRING_OR_NAMED_CALL_ARGUMENT_RE = re.compile(
@@ -128,6 +129,50 @@ def run_preview_json(
     return proc, json.loads(out_path.read_text(encoding="utf-8"))
 
 
+def shutdown_nexus_worker_without_save(database: Path, env: dict[str, str]) -> dict[str, object]:
+    """Release the exact managed worker without another save checkpoint."""
+
+    code = r"""
+import json
+import sys
+
+from ida_nexus import DatabaseHandle, find_database_owner, wait_database_released
+
+database = sys.argv[1]
+instance = find_database_owner(database, timeout=5.0)
+if instance is None:
+    raise RuntimeError(f"no Nexus worker owns {database}")
+
+handle = DatabaseHandle.attach(instance, keepalive=0.0)
+try:
+    shutdown = handle.shutdown_database(save=False)
+finally:
+    handle.close()
+
+if not wait_database_released(instance, timeout=30.0):
+    raise TimeoutError(f"Nexus worker did not release {instance.record_id}")
+
+print(json.dumps({
+    "record_id": instance.record_id,
+    "shutting_down": shutdown["shutting_down"],
+    "save": shutdown["save"],
+}))
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", code, str(database)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=45,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    result = json.loads(proc.stdout)
+    assert result["shutting_down"] is True
+    assert result["save"] is False
+    return result
+
+
 def preview_snapshot(
     idac_cmd: list[str],
     idac_env: dict[str, str],
@@ -194,4 +239,5 @@ __all__ = [
     "run_nexus_json",
     "run_nexus_text",
     "run_preview_json",
+    "shutdown_nexus_worker_without_save",
 ]

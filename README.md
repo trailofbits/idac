@@ -335,7 +335,11 @@ the combined pseudocode file or any generated directory artifact.
 
 For prototype edits that must retain the existing calling convention, use
 `function prototype set --preserve-cc`. This preserves IDA's stored convention
-when the declaration parser would otherwise normalize it. `type check` validates
+when the declaration parser would otherwise normalize it. For `__usercall` and
+`__userpurge`, it also preserves explicit argument locations by parameter position
+and the return location. These custom-convention edits require the same parameter
+count and parameter/return type sizes; supply explicit locations without the flag
+when changing those. `type check` validates
 dependent declarations together in a temporary type library, without importing
 or replacing database types.
 `misc rename` is batch-safe, so related renames, prototype edits, comments, and

@@ -89,7 +89,10 @@ type declare --replace --decl-file types.h
 For parameter names or a return type, edit the declaration from `function
 prototype show` and use `set`, preserving the other types, parameters, and calling
 convention. Add `--preserve-cc` to keep IDA's existing calling convention even when
-its parser normalizes the declaration to another convention. This does not require
+its parser normalizes the declaration to another convention. For `__usercall` and
+`__userpurge`, the flag retains explicit argument locations by parameter position
+and the return location, requiring unchanged parameter count and type sizes.
+Supply explicit locations without the flag when changing those. This does not require
 an IDAPython script. Use the known paths directly;
 consult targeted `--help` for unfamiliar flags or subcommands. Use `--full-help`
 when the command family is unclear. Read only the relevant reference sections.

@@ -133,7 +133,10 @@ idac type enum member delete "ExampleEnum" "member_3"
 convention when editing a return type, parameter type, or parameter name. IDA's
 parser can otherwise normalize the convention even when the declaration repeats
 the displayed keyword. Use the flag for ABI-preserving edits; omit it for a
-deliberate calling-convention change.
+deliberate calling-convention change. For `__usercall` and `__userpurge`, it retains
+explicit argument locations by parameter position and the return location.
+Those edits require unchanged parameter count and parameter/return type sizes;
+otherwise, supply explicit locations without the flag.
 
 `idac` preview is always a wrapper and always writes JSON or JSONL.
 The payload includes `command`, `status`, `before`, `after`, `result`, `readback`, `undo`, `artifacts`, and `stderr`.
