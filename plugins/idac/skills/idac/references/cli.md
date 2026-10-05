@@ -25,7 +25,9 @@ edits, follow [mutation workflows](workflows.md#safe-mutation-loop).
 - The selectors are mutually exclusive. With neither, exactly one READY Nexus instance
   must exist.
 - Context options may be placed before the command or on a context-aware subcommand.
-- Headless opens wait for analysis and use a five-minute idle keepalive. Successful
+- Headless opens wait for analysis and use a five-minute idle keepalive. For Linux
+  per-command sandboxes, run `database open PATH` outside the sandbox and select
+  its exact instance; see [hosted sessions](targets-and-backends.md#shared-hosted-sessions-linux). Successful
   headless mutations are checkpointed before the next remote request or lease
   release; live GUI saves are explicit.
 - Discovery, timeout, connection, and version failures have no fallback or automatic

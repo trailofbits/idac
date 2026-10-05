@@ -66,6 +66,12 @@ def render_target_list(value: Any) -> str:
         pid = item.get("pid")
         if pid not in (None, ""):
             details.append(f"pid={pid}")
+        session_status = item.get("session_status")
+        if session_status:
+            details.append(f"session={session_status}")
+        session_error = item.get("session_error")
+        if session_error:
+            details.append(str(session_error))
         detail = item.get("detail")
         if detail not in (None, ""):
             details.append(str(detail))

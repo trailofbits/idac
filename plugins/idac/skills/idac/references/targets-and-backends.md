@@ -77,16 +77,20 @@ deadline; headless analysis alone falls back to 120 seconds.
 One top-level invocation owns one Nexus lease. `batch`, previews, and
 `decompilemany` reuse that context for all child work.
 
-Selecting a path opens or attaches automatically; there are no `database open`
-or `database close` commands. `database save` checkpoints the selected database
-and accepts no destination path.
+Selecting a path opens or attaches automatically. For a persistent shared session,
+use `database open PATH` outside the command sandbox, then use its record ID for
+ordinary commands and `database close --instance RECORD_ID` when all agents finish.
+Closing an individual command releases its lease; it does not close the shared
+database. `database save` checkpoints the selected database and accepts no destination.
 
 `batch` and `preview` own the target and timeout for that lease. Put `-c`,
 `--instance`, and `--timeout` on the wrapper; child commands that specify any of
 those options are rejected. The wrapper timeout is inherited for child validation,
 including commands that require an explicit timeout.
 
-- A released managed headless worker remains available for five idle minutes.
+- An ordinary released managed headless worker remains available for five idle
+  minutes, provided its hosting process environment survives the command. This
+  does not protect a worker launched inside a per-command sandbox.
 - A successful headless mutation is checkpointed before the next remote request or
   before the lease is released. If a later batch step fails or is interrupted,
   earlier successful mutations remain on disk.
@@ -113,6 +117,73 @@ including commands that require an explicit timeout.
   changed IDA before the error arrived. idac does not retry it. Remote failures such as
   a Nexus timeout are checkpointed once for headless sessions; a local Ctrl-C follows
   the discard rule above. Reread the affected state before continuing.
+
+## Shared hosted sessions (Linux)
+
+Use a host-owned session when several agents need the same headless database, or
+when the agent runner kills child processes at the end of each tool call. Even a
+read-only `-c PATH` command may launch a worker. `nohup`, `&`, and a new process
+session do not establish a lifetime outside a Linux command sandbox.
+
+1. Run `idac database open /path/to/database.i64 --json` **outside** the command
+   sandbox. In Codex, first check existing trusted rules in `~/.codex/rules/`
+   (or `$CODEX_HOME/rules/`) and the project's trusted `.codex/rules/` layer.
+   An `allow` rule matching `idac database open` already authorizes execution
+   outside the sandbox. Invoke that exact prefix directly as a standalone command,
+   without shell assignments, substitutions, or redirections that prevent rule
+   matching. Check `$CODEX_HOME/rules/` (default `~/.codex/rules/`) as well as the
+   repository's `.codex/rules/`; a rule can be loaded from either location.
+   No new escalation request is needed, even when interactive approvals
+   are unavailable. See [Codex command rules](https://developers.openai.com/codex/rules/).
+   Without an existing rule, request `sandbox_permissions="require_escalated"`
+   when the command tool supports it, explaining that IDA must survive individual
+   tool calls. Follow the configured approval policy; do not create permission
+   rules yourself. This skill does not grant execution permission. When neither
+   route is available, use a user-started session or GUI. Do not repeatedly open
+   the database inside the sandbox.
+2. Keep the returned `record_id`. In a **separate tool call**, run
+   `idac targets list --json`. Confirm the same record is READY and its
+   `session_status` is `ready` before proceeding. Startup success
+   in the original call alone does not prove that the worker survived.
+3. Give every participating agent `--instance RECORD_ID` and the same IDA user
+   directory / `IDA_NEXUS_STATE_DIR`. Exact selection fails if the worker dies;
+   do not fall back to `-c` to create a replacement inside the sandbox. Normal
+   attached commands can run sandboxed when local Nexus connectivity and state
+   directory access are available.
+4. On completion, run `idac database close --instance RECORD_ID --json`. It waits for the active
+   idac command, checkpoints the database, and waits for database ownership to
+   be released. Keep the host running while any agent still needs the session.
+
+The host pins its worker with an active lease, so five-minute idle expiry does
+not apply until the owner releases it. `database open` reuses an existing healthy
+idac host, but refuses to adopt another worker: an external attachment cannot
+relocate a worker created inside a sandbox.
+
+Hosted idac commands serialize the **whole command**, including batch children,
+checkpointing, and finalization. Agents can submit commands concurrently; each
+waits up to `--timeout` (120 seconds by default) for its turn. Use a single batch
+for a sequence of related reads and edits that must not interleave. This
+coordination applies to cooperating idac clients using the same state directory;
+raw Nexus clients and GUI activity do not participate in the idac command lock.
+
+A failed preview, interrupted request, failed save, or abandoned client marks
+the host `recovery_required`. Subsequent idac database operations, including saves,
+are blocked. Inspect `targets list --json`, preserve diagnostic artifacts, and stop with
+`idac database close --instance RECORD_ID --discard --json` to close without saving uncertain state.
+Earlier acknowledged checkpoints remain on disk. Start a fresh host outside the
+sandbox and reread the affected state before continuing. Do not change a failed
+discard into a save or terminate the worker process as a recovery shortcut.
+
+If the host process exits while its worker survives, use the same explicit
+`database close --instance RECORD_ID --discard --json` command promptly. It
+verifies the exact worker's identity and host token before taking over discard;
+it never saves dead-host state. The worker's ordinary keepalive can expire and
+save in-memory changes, so waiting for idle shutdown is not a discard workflow.
+
+`targets list --json` reads lifecycle state without taking a database lease. Host files
+and `host.log` live under the public Nexus state directory in `idac-hosts/`.
+Host sessions currently require Linux. Skills coordinate the workflow; the
+launcher and command lock enforce these lifecycle rules.
 
 ## Setup and diagnosis
 

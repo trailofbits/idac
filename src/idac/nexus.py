@@ -52,6 +52,7 @@ class NexusApi:
     NexusError: type[BaseException]
     discover_databases: Callable[..., list[Any]]
     wait_database_released: Callable[..., bool]
+    find_database_owner: Callable[..., Any]
 
 
 def load_nexus_api() -> NexusApi:
@@ -64,6 +65,7 @@ def load_nexus_api() -> NexusApi:
         NexusError,
         RemoteModule,
         discover_databases,
+        find_database_owner,
         wait_database_released,
     )
 
@@ -75,6 +77,7 @@ def load_nexus_api() -> NexusApi:
         NexusError=NexusError,
         discover_databases=discover_databases,
         wait_database_released=wait_database_released,
+        find_database_owner=find_database_owner,
     )
 
 
@@ -127,8 +130,10 @@ def _error_kind(class_name: str) -> str:
 
 
 def _target_row(discovered: Any) -> dict[str, object]:
+    from .host import HostedCommand, host_status
+
     instance = discovered.instance
-    return {
+    row = {
         "record_id": instance.record_id,
         "state": discovered.state.value,
         "detail": discovered.detail,
@@ -139,12 +144,49 @@ def _target_row(discovered: Any) -> dict[str, object]:
         "managed": instance.managed,
         "started_at": instance.started_at,
     }
+    command = HostedCommand.for_instance(instance.record_id)
+    if command is not None:
+        state = host_status(command.directory.name)
+        row["session_status"] = state["status"]
+        if state.get("error"):
+            row["session_error"] = state["error"]
+    return row
 
 
 def dispatch(db: Any, op: str, params: dict[str, object], preview: bool) -> object:
     """Import-safe declaration matched to ``remote_ops.dispatch`` by Nexus."""
 
     ...
+
+
+def read_remote_environment(handle: Any, *, timeout: float | None = None) -> dict[str, Any]:
+    """Read runtime versions and host identity before any database operation."""
+
+    execution = handle.execute_python(
+        REMOTE_ENVIRONMENT_CODE,
+        timeout=timeout,
+        operation_label="idac: compatibility check",
+        persist_globals=False,
+        filename="<idac-compatibility>",
+    )
+    environment = execution.get("result") if isinstance(execution, dict) else None
+    if not isinstance(environment, dict):
+        raise NexusSessionError(
+            "Nexus returned an invalid remote environment response",
+            kind="unsupported_remote_environment",
+        )
+    return environment
+
+
+def validate_remote_environment(environment: dict[str, Any]) -> None:
+    """Validate a client or persistent owner's remote runtime before use."""
+    mismatches = compatibility_mismatches(environment)
+    if mismatches:
+        raise NexusSessionError(
+            "unsupported remote IDA environment: " + "; ".join(mismatches),
+            kind="unsupported_remote_environment",
+            details={"environment": environment, "mismatches": mismatches},
+        )
 
 
 class NexusSession:
@@ -196,6 +238,7 @@ class NexusSession:
         self._closed = False
         self._terminal_error: BaseException | None = None
         self._save_error: BaseException | None = None
+        self._host_command: Any | None = None
 
     @property
     def handle(self) -> Any:
@@ -357,6 +400,24 @@ class NexusSession:
         self._handle = None
         self._dispatch = None
 
+        error: BaseException | None = None
+        try:
+            self._finalize_handle(handle)
+        except BaseException as exc:
+            error = exc
+            raise
+        finally:
+            if self._host_command is not None:
+                try:
+                    self._host_command.finish(uncertain=self._discard_required or error is not None)
+                except BaseException as exc:
+                    if error is None:
+                        raise
+                    _note_secondary_error(error, exc, "finalizing hosted command state also failed")
+
+    def _finalize_handle(self, handle: Any) -> None:
+        """Checkpoint or discard while retaining any shared command lock."""
+
         if self._discard_required and handle.instance.backend == "idalib":
             discard_error: BaseException | None = None
             try:
@@ -412,6 +473,12 @@ class NexusSession:
     def _discard_headless_handle(self, handle: Any) -> None:
         """Release one poisoned lease and retire that exact worker without saving."""
 
+        if self._host_command is not None:
+            # The host owns shutdown. close()/initialization cleanup records
+            # recovery_required before releasing the command lock, so no other
+            # cooperating client can checkpoint the uncertain database.
+            self._call_nexus(handle.close)
+            return
         instance = handle.instance
         release_error: BaseException | None = None
         try:
@@ -513,9 +580,29 @@ class NexusSession:
             handle = self._call_nexus(self._open_handle)
         except BaseException as exc:
             self._terminal_error = exc
+            if self._host_command is not None:
+                try:
+                    self._host_command.finish(uncertain=True)
+                except BaseException as state_error:
+                    _note_secondary_error(exc, state_error, "recording hosted attachment failure also failed")
             raise
         self._handle = handle
+        host_checked = False
         try:
+            from .host import HostedCommand
+
+            if self._host_command is None:
+                self._host_command = HostedCommand.for_instance(handle.instance.record_id)
+            host_checked = True
+            if self._host_command is not None and self._host_command.lock.fd is None:
+                self._host_command.acquire(self.timeout or DEFAULT_ANALYSIS_TIMEOUT_SECONDS)
+            environment = self._call_nexus(lambda: read_remote_environment(handle, timeout=self.timeout))
+            if self._host_command is None and environment.get("idac_host_id"):
+                # A worker is publicly discoverable before its owner can write
+                # the record mapping. Its spawn-time identity closes that gap.
+                self._host_command = HostedCommand(environment["idac_host_id"])
+                self._host_command.acquire(self.timeout or DEFAULT_ANALYSIS_TIMEOUT_SECONDS)
+            validate_remote_environment(environment)
             if handle.instance.backend == "idalib":
                 analysis_timeout = self.timeout if self.timeout is not None else DEFAULT_ANALYSIS_TIMEOUT_SECONDS
                 analysis = self._call_nexus(lambda: handle.wait_autoanalysis(timeout=analysis_timeout))
@@ -524,10 +611,9 @@ class NexusSession:
                         "Nexus did not confirm that headless autoanalysis completed",
                         kind="analysis_incomplete",
                     )
-            self._validate_remote_environment(handle)
         except BaseException as exc:
             try:
-                if handle.instance.backend == "idalib":
+                if host_checked and handle.instance.backend == "idalib":
                     self._discard_headless_handle(handle)
                 else:
                     self._call_nexus(handle.close)
@@ -541,35 +627,25 @@ class NexusSession:
                 self._handle = None
                 self._dispatch = None
                 self._terminal_error = exc
+                if self._host_command is not None:
+                    try:
+                        self._host_command.finish(uncertain=True)
+                    except BaseException as state_error:
+                        _note_secondary_error(exc, state_error, "recording hosted initialization failure also failed")
             raise
         return handle
 
-    def _validate_remote_environment(self, handle: Any) -> None:
-        execution = self._call_nexus(
-            lambda: handle.execute_python(
-                REMOTE_ENVIRONMENT_CODE,
-                timeout=self.timeout,
-                operation_label="idac: compatibility check",
-                persist_globals=False,
-                filename="<idac-compatibility>",
-            )
-        )
-        environment = execution.get("result") if isinstance(execution, dict) else None
-        if not isinstance(environment, dict):
-            raise NexusSessionError(
-                "Nexus returned an invalid remote environment response",
-                kind="unsupported_remote_environment",
-            )
-        mismatches = compatibility_mismatches(environment)
-        if mismatches:
-            raise NexusSessionError(
-                "unsupported remote IDA environment: " + "; ".join(mismatches),
-                kind="unsupported_remote_environment",
-                details={"environment": environment, "mismatches": mismatches},
-            )
-
     def _open_handle(self) -> Any:
         if self.locator is not None:
+            # Locate a hosted worker before taking a lease. Queued idac
+            # clients must not keep extra leases alive while the owner drains.
+            instance = (
+                self._nexus.find_database_owner(self.locator)
+                if self.timeout is None
+                else self._nexus.find_database_owner(self.locator, timeout=self.timeout)
+            )
+            if instance is not None and self._acquire_host_command(instance):
+                return self._nexus.DatabaseHandle.attach(instance, keepalive=KEEPALIVE_SECONDS)
             option_values: dict[str, object] = {
                 "keepalive": KEEPALIVE_SECONDS,
                 "auto_analysis": True,
@@ -580,7 +656,18 @@ class NexusSession:
             return self._nexus.DatabaseHandle.open(self.locator, options=options)
 
         instance = self._select_instance()
+        self._acquire_host_command(instance)
         return self._nexus.DatabaseHandle.attach(instance, keepalive=KEEPALIVE_SECONDS)
+
+    def _acquire_host_command(self, instance: Any) -> bool:
+        """Reserve a hosted command before attaching its short-lived lease."""
+        from .host import HostedCommand
+
+        self._host_command = HostedCommand.for_instance(instance.record_id)
+        if self._host_command is None:
+            return False
+        self._host_command.acquire(self.timeout or DEFAULT_ANALYSIS_TIMEOUT_SECONDS)
+        return True
 
     def _select_instance(self) -> Any:
         discovered = self._discover_databases()

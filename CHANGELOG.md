@@ -5,6 +5,13 @@
 This release moves live and headless execution to ida-nexus and changes how users
 select databases, install integrations, and run mutation passes.
 
+- Added Linux `database open/close` for shared headless sessions launched outside
+  agent command sandboxes. Hosted commands serialize through finalization and block
+  further saves after uncertain failures until the owner discards the session.
+  The agent skill verifies worker survival across tool calls before using it.
+  Explicit discard can recover a surviving worker after its host exits. Startup
+  compatibility failures discard verified workers, and lifecycle output protection
+  covers original inputs when sessions are reopened through their database paths.
 - Replaced the bundled GUI bridge and headless daemon with ida-nexus. The supported
   stack now requires Python 3.11+, IDA Pro 9.4+, `ida-nexus>=0.13.2`, and
   `ida-domain>=0.5.1`. Run `idac setup gui` to install the Nexus GUI component
@@ -15,8 +22,8 @@ select databases, install integrations, and run mutation passes.
   READY instance; without a selector, exactly one READY instance is required.
   Paths can attach to a matching live GUI or reuse or start a managed headless
   worker. Legacy `.idb` databases must be converted to `.i64`.
-- Removed `database open`, `database close`, and `targets cleanup`; Nexus manages
-  opening and worker lifetime. `database save` checkpoints the selected database
+- Removed `targets cleanup`; use `database close --instance RECORD_ID` for
+  persistent sessions. `database save` checkpoints the selected database
   and no longer accepts a destination path. `targets list --json` now reports Nexus
   records with `record_id` and discovery `state`; update scripts using old selectors.
 - Headless opens wait for auto-analysis, and workers remain warm for five idle

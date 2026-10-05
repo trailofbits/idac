@@ -28,7 +28,8 @@ session or a headless database.
 
 ## Why idac
 
-- **Not an MCP server** — compose with the shell you already have: pipes, `xargs`, `jq`, and your agent's existing tool-use loop. No server to run, no protocol to babysit.
+- **Shell-native** — compose with pipes, `xargs`, `jq`, and your agent's existing
+  tool-use loop. The CLI connects through Nexus; no separate MCP server is required.
 - **Agent-native by default** — every command can emit structured JSON (`-j`), and the
   `idac` Agent Plugin teaches compatible agents to drive `idac` instead of guessing at
   raw IDAPython.
@@ -42,7 +43,8 @@ session or a headless database.
 
 ## Demo
 
-Run this against the fixture committed in this repo:
+Run this from a regular shell against the fixture committed in this repo. Agents
+using a per-command sandbox should first follow [Agent sandbox setup](#agent-sandbox-setup):
 
 ```bash
 idac decompilemany "CreateHandler_" --out-dir decomp/ \
@@ -112,8 +114,10 @@ idac doctor                  # report local versions and check the IDA environme
 ```
 
 Restart IDA or load the installed Nexus component, then rerun `idac doctor` and
-`idac targets list --json`. Headless work does not require the GUI component;
-select an existing database or binary with `-c` to start a managed worker.
+`idac targets list --json`. Headless work does not require the GUI component.
+From a regular shell, select an existing database or binary with `-c` to start a
+managed worker. For Linux agents with per-command sandboxes, follow
+[Agent sandbox setup](#agent-sandbox-setup) before any database read or edit.
 
 For the agent guidance, install the Agent Plugin (see [Agent plugin](#agent-plugin)).
 
@@ -139,7 +143,7 @@ idac decompile "sub_08041337" --f5        # force a fresh Hex-Rays pass
 idac decompile "sub_08041337" --instance "<record-id>"
 ```
 
-Work headless against an existing database:
+Work headless against an existing database from a regular shell:
 
 ```bash
 idac database show -c sample.i64
@@ -156,7 +160,8 @@ To run from a checkout without installing globally, use `uv run idac --help`.
 - A valid IDA license and an IDA Python environment on Python 3.11 or newer.
 - `ida-nexus>=0.13.2` and `ida-domain>=0.5.1`, installed as dependencies of `idac`.
   Install the matching GUI component with
-  `idac setup gui`.
+  `idac setup gui` when using a live GUI.
+- Linux for persistent shared sessions opened with `idac database open`.
 
 Run `idac doctor` to report CLI package versions, check the configured IDA version
 through HCLI without starting IDA, and check the installed GUI
@@ -188,13 +193,14 @@ Update existing commands and scripts as follows:
 | `misc plugin install` | `setup gui`, followed by restarting IDA or loading the Nexus component |
 | `misc skill install` | Install the [Agent Plugin](#agent-plugin) through your client's marketplace |
 | `idac docs` | Subcommand `--help`, `--full-help`, and the installed skill's references |
-| `database open`, `database close`, or `targets cleanup` | Select the database with `-c`; Nexus manages workers and their lifetime |
+| `targets cleanup` | Use `database close --instance RECORD_ID` for a persistent database opened by idac |
 | `database save DESTINATION` | `database save` checkpoints the selected database; it accepts no destination path |
 | `py exec --persist` | Combine dependent Python work in one invocation; each execution has a fresh namespace |
 
 `targets list --json` returns Nexus records with `record_id`, `state`, `detail`,
-`backend`, `pid`, `idb_path`, `exe_path`, `managed`, and `started_at`. Update scripts
-that read the old target fields. Omitted selectors require exactly one READY
+`backend`, `pid`, `idb_path`, `exe_path`, `managed`, and `started_at`. Databases opened
+with `database open` also report `session_status` and, when present, `session_error`.
+Update scripts that read the old target fields. Omitted selectors require exactly one READY
 instance, including managed headless workers. `-c` can attach to a matching GUI
 database, so it does not guarantee headless execution.
 
@@ -215,17 +221,22 @@ With neither selector, `idac` proceeds only when discovery finds exactly one REA
 instance. Ambiguous, missing, blocked, disconnected, timed-out, or version-mismatched
 targets fail explicitly. An operation is never retried on a different instance.
 
-Headless opens enable auto-analysis and wait for it to finish. A released worker stays
-warm for five idle minutes, and successful headless mutations are checkpointed before
-another remote request or lease release. A failed preview or locally interrupted
-request retires that exact headless worker with `save=False`; the operation is never
-retried. Live GUI commands do not force analysis or save; checkpoint GUI changes
-explicitly with `idac database save`.
+Headless opens wait for auto-analysis, and successful headless mutations save
+automatically. Live GUI commands use the current analysis state and leave saving
+explicit. Persistent Linux sessions support worker reuse across commands and agents.
+See the [target and lifecycle guide](plugins/idac/skills/idac/references/targets-and-backends.md)
+for lease lifetime, command coordination, saves, and failure recovery.
 
 Use `idac targets list --json` to inspect discovery records and `idac doctor` to
 diagnose the local and remote runtime stack.
 
 ## Agent sandbox setup
+
+Linux command sandboxes can terminate detached IDA workers between tool calls.
+The [idac skill](plugins/idac/skills/idac/SKILL.md#database-lifetime-in-linux-command-sandboxes)
+covers safe startup and shutdown; its
+[hosted-session guide](plugins/idac/skills/idac/references/targets-and-backends.md#shared-hosted-sessions-linux)
+documents approvals, multi-agent coordination, and recovery.
 
 Scaffold a project-local reversing workspace for sandboxed agents:
 
@@ -262,6 +273,7 @@ Use `idac <command> --help` for one subcommand and `idac --full-help` for the co
 | Batch | `batch`, `batch --lint`, `preview` |
 | IDAPython | `py exec` |
 | Workspace | `workspace init` |
+| Persistent Linux target | `database open`, `targets list --json`, `database close` |
 | Maintenance | `misc reanalyze`, `database save`, `setup gui` |
 
 ### Output
@@ -328,7 +340,7 @@ readbacks can share one Nexus session.
 
 ### Run an ordered mutation pass with batch
 
-Run many subcommands against one shared context, leaving behind a stable ordered log. Batch files use one subcommand per line (drop the leading `idac`) and inherit `-c` and `--timeout` from the `batch` call. Child commands cannot set their own target or timeout because the wrapper owns one Nexus session for the entire run:
+Run many subcommands against one shared context, leaving behind a stable ordered log. Batch files use one subcommand per line (drop the leading `idac`) and inherit the target (`-c` or `--instance`) and `--timeout` from the `batch` call. Child commands cannot set their own target or timeout because the wrapper owns one Nexus session for the entire run:
 
 ```bash
 idac batch "recovery.idac" --out "/tmp/recovery_batch.json"
@@ -371,7 +383,7 @@ Read the canonical `local_id` with `idac function locals list --json`. Use `upda
 When no first-class command fits, drop to IDAPython against the same target:
 
 ```bash
-idac py exec --code "result = {'entry': hex(idc.get_inf_attr(idc.INF_START_EA))}"
+idac py exec --code "result = {'entry': hex(ida_ida.inf_get_start_ea())}"
 ```
 
 Each execution uses a fresh namespace; `--persist` is no longer available. Use
@@ -416,7 +428,7 @@ git clone https://github.com/trailofbits/idac.git
 cd idac
 uv sync          # project venv with an editable install; run via `uv run idac ...`
 make test        # run tests
-make check       # format + lint + test + audit
+make check       # formatting checks + lint + test + audit
 ```
 
 To put an `idac` on your PATH that tracks your checkout, install it as editable:

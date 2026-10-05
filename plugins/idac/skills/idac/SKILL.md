@@ -13,14 +13,44 @@ Follow the user's target, scope, and deliverables. Explicit user instructions ta
 precedence over this skill's defaults. Inspection requests stay read-only; recovery,
 annotations, and workspace creation belong only where the task calls for them.
 
+## Database lifetime in Linux command sandboxes
+
+Complete this setup before **any database read or edit**, including metadata and
+function lists. Opening via `-c/--context` inside a per-command sandbox can leave
+the database unclean when the command exits; repeated opens create crash backups.
+
+1. Run `idac database open PATH --json` outside the command sandbox. In Codex,
+   check both `$CODEX_HOME/rules/` (default `~/.codex/rules/`) and repository
+   `.codex/rules/`: absence of repository rules does not imply absence of global
+   rules. Inspect the rules in their own tool call. With a trusted allow rule,
+   send **only** `idac database open PATH --json` in the next command tool call;
+   do not combine it with rule checks, `cd`, assignments, pipes, or other shell
+   commands. The approved prefix runs this standalone invocation outside the
+   sandbox without a new approval. Otherwise use `sandbox_permissions="require_escalated"` when
+   supported. Follow the configured approval policy; the skill grants no permission.
+   If a shared hosted session or live GUI already exists, attach to its exact record.
+2. In a **separate tool call**, run `idac targets list --json`. Confirm the returned
+   record is READY and, for a hosted session, `session_status` is `ready`.
+3. Use `--instance RECORD_ID` on every database command, including `batch` and
+   `preview` wrappers. Share that record with participating agents. If it disappears,
+   stop and diagnose; do not replace it with a path selector or implicit startup.
+4. Before your final response, close a hosted session you opened for this task:
+   `idac database close --instance RECORD_ID --json`. Wait for successful shutdown.
+   For a shared task, the coordinating agent closes it after all participants finish;
+   agents joining someone else's session leave its lifetime to that owner.
+
+Read [hosted sessions](references/targets-and-backends.md#shared-hosted-sessions-linux)
+for coordination, recovery, and startup when neither approval route is available.
+
 ## Operating defaults
 
 - Work from the binary and database evidence. Consult the web or external source
   trees only when requested or when external correlation is part of the task.
-- Keep the selected target on subsequent commands: `-c/--context PATH` for a
-  database or binary, or `--instance RECORD_ID` for an exact READY row from
-  `targets list --json`. Omit both only when exactly one READY instance exists.
-  Put target and timeout options on the wrapper for `batch` and `preview`.
+- Keep the selected target on subsequent commands. Hosted sessions use the exact
+  `--instance RECORD_ID` above. Outside per-command sandboxes, `-c/--context PATH`
+  can open or attach to a database or binary; omitting both selectors requires
+  exactly one READY instance. Put target and timeout options on the wrapper for
+  `batch` and `preview`.
 - Run one `idac` command at a time per target. Write function/type lists and
   family reads to `--out` even with filters; a filtered list can exceed the inline
   limit. Use `decompilemany` for several functions and ordered `batch` files for
@@ -90,5 +120,7 @@ For analysis, ground findings in function names or addresses and state unresolve
 uncertainty. For edits, verify the affected database state and fresh pseudocode
 where relevant. Report artifact paths and whether changes were saved: successful
 headless mutations are checkpointed automatically; live GUI saves are explicit.
+Checkpointing does not close a hosted session: finish the shutdown step above
+before reporting completion, unless its shared owner still needs it.
 Stop when the requested result is supported by evidence; cosmetic pseudocode
 cleanup is useful only when it helps that result.

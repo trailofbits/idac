@@ -79,6 +79,24 @@ execution, and saves. Keep these invariants when changing it:
   the newly opened headless worker with `save=False`.
 - Headless leases use a 300-second keepalive. Successful headless mutations are saved
   before another remote request or release; GUI saves remain explicit.
+- Linux persistent target sessions retain a public Nexus handle in a process launched outside
+  the agent's per-command sandbox. `src/idac/host.py` owns idac's lifecycle files
+  under the public Nexus state directory's `idac-hosts/` subdirectory; it never
+  reads Nexus's private registry or introduces another database transport.
+  Cooperating commands acquire a process lock before attaching and hold it through
+  finalization. The worker's spawn-time host ID also fences commands that discover
+  it before startup registration completes. Unknown worker origins are never adopted.
+  Startup verifies worker ownership independently of runtime compatibility, so a
+  failed compatibility probe can retire the verified worker without saving.
+- Hosted failures requiring discard block subsequent database commands and saves.
+  The live owner requests shutdown after draining clients. If the owner exits,
+  explicit `database close --discard` can recover the exact surviving worker after
+  verifying its recorded identity and host token. Recovery holds the command and
+  owner locks through discard and database release. An accepted stop decision is
+  immutable, and `--discard` is required for uncertain or abandoned commands.
+  Lifecycle output files must not overwrite the original input or resolved IDB,
+  including when an existing host is reopened through another path.
+  Tests cover whole-command serialization and persisted recovery state.
 - Selection, timeout, disconnect, remote, and version failures propagate without retry,
   target switching, or alternate execution paths.
 - Retiring poisoned headless state may briefly retry only Nexus `instance_busy` or

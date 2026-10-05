@@ -302,7 +302,7 @@ def test_doctor_rejects_old_remote_python_and_ida() -> None:
     assert "Python" in mismatches
 
 
-def test_doctor_default_probe_releases_the_remote_database_handle(monkeypatch) -> None:
+def test_doctor_default_probe_releases_the_remote_database_handle(monkeypatch, tmp_path) -> None:
     calls: dict[str, object] = {}
     discovered = _discovered()
 
@@ -326,7 +326,9 @@ def test_doctor_default_probe_releases_the_remote_database_handle(monkeypatch) -
                 "stderr": "",
             }
 
-    monkeypatch.setitem(sys.modules, "ida_nexus", SimpleNamespace(DatabaseHandle=Handle))
+    monkeypatch.setitem(
+        sys.modules, "ida_nexus", SimpleNamespace(DatabaseHandle=Handle, get_state_dir=lambda: tmp_path)
+    )
 
     result = doctor.run_doctor(
         timeout=4.0,

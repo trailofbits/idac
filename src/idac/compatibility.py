@@ -13,6 +13,7 @@ MINIMUM_IDA_VERSION = (9, 4)
 
 REMOTE_ENVIRONMENT_CODE = """
 import importlib.metadata
+import os
 import platform
 import idaapi
 
@@ -21,6 +22,7 @@ result = {
     "ida_domain": importlib.metadata.version("ida-domain"),
     "ida": idaapi.get_kernel_version(),
     "python": platform.python_version(),
+    "idac_host_id": os.environ.get("IDAC_HOST_ID"),
 }
 """.strip()
 

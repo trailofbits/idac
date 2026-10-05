@@ -5,6 +5,20 @@ decompiler readback is unclear.
 
 ## No READY Nexus instances found
 
+If a headless worker disappears when the previous tool call ends, inspect its
+hosting before opening the database again. Repeated `.i64.crash-*` directories
+can mean the Linux command sandbox killed IDA before it closed its database.
+Use [hosted sessions](targets-and-backends.md#shared-hosted-sessions-linux) and
+verify the same worker in a separate tool call. Adding
+`close(wait_for_database=True)` alone does not wait through idac's ordinary
+300-second keepalive.
+
+For a hosted session in `recovery_required`, stop with `database close --instance RECORD_ID --discard`
+before starting a fresh host. Do not retry `database save`. Use the same explicit
+discard command promptly for a `dead` host whose worker still appears in discovery.
+Recovery verifies the exact surviving worker before shutting it down without saving;
+waiting for keepalive expiry can save uncertain in-memory changes.
+
 Diagnose before installing anything:
 
 ```bash
@@ -17,7 +31,7 @@ installation or repair is part of the task, then restart IDA or load the compone
 as required by IDA. See [runtime requirements](targets-and-backends.md) for supported
 versions. For an inspection-only request, report a missing component after diagnosis.
 
-For headless work, pass the `.i64` or binary path directly:
+For headless work outside a per-command sandbox, pass the `.i64` or binary path directly:
 
 ```bash
 idac database show -c /path/to/sample.i64 --json

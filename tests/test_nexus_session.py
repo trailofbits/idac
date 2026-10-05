@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -228,6 +229,7 @@ def fake_api(runtime: FakeRuntime) -> NexusApi:
         NexusError=FakeNexusError,
         discover_databases=discover_databases,
         wait_database_released=wait_database_released,
+        find_database_owner=lambda *args, **kwargs: None,
     )
 
 
@@ -893,6 +895,37 @@ def test_remote_environment_mismatch_fails_closed_and_releases_handle() -> None:
     assert handle.save_calls == 0
     assert handle.close_calls == 1
     assert_worker_retired_without_save(runtime, handle.instance)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux host sessions")
+def test_worker_host_identity_blocks_commands_before_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote_module_path: Path
+) -> None:
+    from idac.host import HostLock, _write_state, host_status
+
+    monkeypatch.setenv("IDA_NEXUS_STATE_DIR", str(tmp_path))
+    host_id = "b" * 32
+    directory = tmp_path / "idac-hosts" / host_id
+    directory.mkdir(parents=True)
+    _write_state(directory, {"host_id": host_id, "status": "starting"})
+    owner = HostLock(directory / "owner.lock")
+    assert owner.acquire()
+    handle = FakeHandle(FakeInstance("startup-worker", "idalib"))
+    handle.remote_environment["idac_host_id"] = host_id
+    runtime = FakeRuntime(open_handle=handle)
+    try:
+        with (
+            pytest.raises(NexusSessionError, match="starting"),
+            NexusSession("/tmp/sample.i64", api=fake_api(runtime), remote_module_path=remote_module_path) as session,
+        ):
+            session.execute_operation("comment_set", {})
+        assert host_status(host_id)["status"] == "starting"
+        assert runtime.dispatch_calls == []
+        assert runtime.shutdown_requests == []
+        assert handle.save_calls == 0
+        assert handle.close_calls == 1
+    finally:
+        owner.release()
 
 
 def test_list_targets_exposes_only_public_normalized_fields(monkeypatch: pytest.MonkeyPatch) -> None:

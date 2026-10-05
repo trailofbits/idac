@@ -24,6 +24,14 @@ exactly one READY Nexus instance exists. Otherwise ask instead of guessing.
 
 ## Conventions
 
+- For Linux per-command sandboxes, launch `idac database open PATH --json` outside
+  the sandbox through the client's approved execution mechanism. If the generated
+  Codex allow rule is trusted and loaded, invoke that standalone command directly;
+  it already has permission to run outside the sandbox. In a separate tool call,
+  verify the returned record is READY with `session_status=ready` in `targets list --json`.
+  Use `--instance RECORD_ID` for all agents and run `database close --instance RECORD_ID`
+  after the shared session finishes. Follow the skill's recovery instructions if
+  a command leaves the host in `recovery_required`.
 - Start each pass from `prompts/recovery-pass.md`. Target, Scope, and Objective are
   required — ask when they are missing.
 - Follow the skill's mutation workflow for database edits. Preview parser-risky

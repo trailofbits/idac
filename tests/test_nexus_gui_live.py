@@ -58,6 +58,10 @@ def test_gui_attach_preview_save_close_and_reattach_lifecycle(tmp_path: Path) ->
         "the disposable GUI target must be a saved .i64 database"
     )
 
+    if sys.platform == "linux":
+        hosted = run_cli(idac_cmd, cli_env, "database", "open", gui_database)
+        assert hosted.returncode == 1 and "cannot relocate" in hosted.stderr
+
     address: str | None = None
     original_comment: str | None = None
     original_captured = False
