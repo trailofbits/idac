@@ -71,11 +71,12 @@ def _large_list_params(args: argparse.Namespace) -> dict[str, object]:
 
 def run_type_declare(args: argparse.Namespace) -> CommandResult:
     result = run_bound_operation(args)
-    if isinstance(result.value, dict) and (
-        result.value.get("success") is False or int(result.value.get("errors") or 0) > 0
-    ):
+    payload = result.value
+    if args._preview_wrapper and isinstance(payload, dict):
+        payload = payload.get("result")
+    if isinstance(payload, dict) and (payload.get("success") is False or int(payload.get("errors") or 0) > 0):
         result.exit_code = 1
-        result.stderr_lines = _type_declare_failure_lines(result.value, action="type declare")
+        result.stderr_lines = _type_declare_failure_lines(payload, action="type declare")
     return result
 
 
