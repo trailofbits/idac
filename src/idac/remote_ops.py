@@ -1688,8 +1688,7 @@ def _functions_microcode_lines(runtime: IdaRuntime, func, maturity: str) -> tupl
             self.lines.append(f"{prefix}{rendered}".rstrip())
             return 0
 
-    mbr = ida_hexrays.mba_ranges_t()
-    mbr.ranges.push_back(runtime.ida_range.range_t(func.start_ea, func.end_ea))
+    mbr = ida_hexrays.mba_ranges_t(func)
     hf = ida_hexrays.hexrays_failure_t()
     mba = ida_hexrays.gen_microcode(
         mbr, hf, None, ida_hexrays.DECOMP_WARNINGS | ida_hexrays.DECOMP_NO_CACHE, maturity_value
