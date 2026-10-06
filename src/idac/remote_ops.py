@@ -4508,6 +4508,7 @@ class _type_declare_DeclarationChunk:
     start_line: int
     end_line: int
     terminated: bool
+    directive_context: str = ""
 
     def to_dict(self) -> _type_declare_DeclarationChunkDict:
         return {
@@ -4602,10 +4603,12 @@ def _type_declare_strip_comments_preserve_lines(text: str) -> str:
             i += 1
             continue
         if ch == "/" and nxt == "/":
+            out.append(" ")
             in_line_comment = True
             i += 2
             continue
         if ch == "/" and nxt == "*":
+            out.append(" ")
             in_block_comment = True
             i += 2
             continue
@@ -4616,16 +4619,19 @@ def _type_declare_strip_comments_preserve_lines(text: str) -> str:
     return "".join(out)
 
 
-def _type_declare_strip_preprocessor_lines(text: str) -> str:
+def _type_declare_strip_preprocessor_lines(text: str, *, preserve_pragmas: bool = False) -> str:
     lines = text.splitlines(keepends=True)
     out: list[str] = []
     in_directive_continuation = False
+    retain_directive = False
     for line in lines:
         stripped = line.lstrip()
         is_directive = stripped.startswith("#") or in_directive_continuation
         if is_directive:
+            if not in_directive_continuation:
+                retain_directive = preserve_pragmas and bool(re.match(r"#\s*pragma\b", stripped))
             newline = "\n" if line.endswith("\n") else ""
-            out.append(newline)
+            out.append(line if retain_directive else newline)
             in_directive_continuation = line.rstrip().endswith("\\")
             continue
         in_directive_continuation = False
@@ -4635,8 +4641,8 @@ def _type_declare_strip_preprocessor_lines(text: str) -> str:
 
 def _type_declare_parse_request(params: Mapping[str, Any]) -> _type_declare_TypeDeclareRequest:
     decl = _type_declare_strip_comments_preserve_lines(str(params.get("decl") or ""))
-    decl = _type_declare_strip_preprocessor_lines(decl)
-    if not decl.strip():
+    decl = _type_declare_strip_preprocessor_lines(decl, preserve_pragmas=True)
+    if not _type_declare_strip_preprocessor_lines(decl).strip():
         raise IdaOperationError("type declarations are required via --decl or --file")
     try:
         aliases = cast("tuple[_type_declare_TypeAlias, ...]", tuple(parse_aliases(params.get("aliases") or [])))
@@ -4658,7 +4664,9 @@ def _type_declare_parse_check_request(params: Mapping[str, Any]) -> _type_declar
 
 
 def _type_declare_join_declaration_chunks(chunks: list[_type_declare_DeclarationChunk]) -> str:
-    return "\n".join(chunk.text for chunk in chunks)
+    if not chunks:
+        return ""
+    return chunks[0].directive_context + "\n".join(chunk.text for chunk in chunks)
 
 
 def _type_declare_apply_type_aliases(
@@ -4693,6 +4701,8 @@ def _type_declare_parse_declaration_chunks(text: str) -> tuple[list[_type_declar
     in_string: str | None = None
     in_line_comment = False
     in_block_comment = False
+    directives: list[str] = []
+    directive_context = ""
     i = 0
     while i < len(text):
         ch = text[i]
@@ -4735,6 +4745,23 @@ def _type_declare_parse_declaration_chunks(text: str) -> tuple[list[_type_declar
             in_block_comment = True
             i += 2
             continue
+        if ch == "#" and not text[text.rfind("\n", 0, i) + 1 : i].strip():
+            directive_end = i
+            while directive_end < len(text):
+                newline = text.find("\n", directive_end)
+                if newline < 0:
+                    directive_end = len(text)
+                    break
+                continuation = text[directive_end:newline].rstrip().endswith("\\")
+                directive_end = newline + 1
+                if not continuation:
+                    break
+            directive = text[i:directive_end]
+            current.extend(directive[1:])
+            directives.append(directive)
+            line += directive.count("\n")
+            i = directive_end
+            continue
         if ch in {"'", '"'}:
             in_string = ch
             i += 1
@@ -4751,13 +4778,23 @@ def _type_declare_parse_declaration_chunks(text: str) -> tuple[list[_type_declar
             raw = "".join(current)
             stripped = raw.strip()
             if stripped:
-                chunks.append(_type_declare_DeclarationChunk(stripped, start_line, line, True))
+                chunks.append(_type_declare_DeclarationChunk(stripped, start_line, line, True, directive_context))
             current = []
             start_line = _type_declare_next_chunk_start_line(text, i + 1, line)
+            directive_context = "".join(directives)
         i += 1
     tail = "".join(current).strip()
-    if tail:
-        chunks.append(_type_declare_DeclarationChunk(tail, start_line, line, False))
+    if _type_declare_strip_preprocessor_lines(tail).strip():
+        chunks.append(_type_declare_DeclarationChunk(tail, start_line, line, False, directive_context))
+    elif tail and chunks:
+        previous = chunks[-1]
+        chunks[-1] = _type_declare_DeclarationChunk(
+            previous.text + "\n" + tail,
+            previous.start_line,
+            previous.end_line,
+            previous.terminated,
+            previous.directive_context,
+        )
     return (chunks, brace_depth)
 
 
@@ -4797,7 +4834,7 @@ def _type_declare_append_type_diagnostic(
 def _type_declare_chunk_type_diagnostics(
     chunk: _type_declare_DeclarationChunk, *, aliases_applied: list[_type_declare_AppliedAlias]
 ) -> list[_type_declare_TypeDiagnostic]:
-    text = chunk.text
+    text = _type_declare_strip_preprocessor_lines(chunk.text)
     snippet = text[:240]
     line = chunk.start_line
     end_line = chunk.end_line
@@ -4976,7 +5013,11 @@ def _type_declare_test_type_declarations(runtime: IdaRuntime, decl: str, *, clan
         # declaration exporter so typedef names survive the transfer.
         chunks = _type_declare_parse_declaration_chunks(decl)[0]
         declared = _type_declare_declared_type_names(
-            [chunk for chunk in chunks if not _type_declare_FORWARD_DECL_RE.match(chunk.text)]
+            [
+                chunk
+                for chunk in chunks
+                if not _type_declare_FORWARD_DECL_RE.match(_type_declare_strip_preprocessor_lines(chunk.text))
+            ]
         )
         referenced = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*", decl))
         dependencies = {}
@@ -5005,6 +5046,7 @@ def _type_declare_test_type_declarations(runtime: IdaRuntime, decl: str, *, clan
 
 
 def _type_declare_typedef_alias_names(text: str) -> set[str]:
+    text = _type_declare_strip_preprocessor_lines(text)
     names: set[str] = set()
     func_alias_match = _type_declare_TYPEDEF_FUNC_ALIAS_RE.match(text)
     if func_alias_match:
@@ -5038,6 +5080,7 @@ def _type_declare_apply_type_declarations(
 
 
 def _type_declare_forward_declared_type_names(text: str) -> set[str]:
+    text = _type_declare_strip_preprocessor_lines(text)
     match = _type_declare_FORWARD_DECL_RE.match(text)
     if not match:
         return set()
@@ -5049,6 +5092,7 @@ def _type_declare_forward_declared_type_names(text: str) -> set[str]:
 
 
 def _type_declare_concrete_type_names(text: str) -> set[str]:
+    text = _type_declare_strip_preprocessor_lines(text)
     # Attributes may precede or follow the tag name. Ignore their arguments
     # while recognizing names, without changing the declaration sent to IDA.
     text = re.sub(

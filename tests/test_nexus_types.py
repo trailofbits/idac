@@ -294,6 +294,58 @@ def test_nexus_type_declare_allows_identical_types_and_existing_forward_declarat
 
 
 @pytest.mark.parametrize("clang", [False, True])
+@pytest.mark.parametrize("bisect", [False, True])
+def test_nexus_type_declare_preserves_pack_pragmas_and_comment_separators(
+    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, clang: bool, bisect: bool
+) -> None:
+    database = copy_database(tiny_database)
+    decl = (
+        "#pragma pack(push, 1)\n"
+        "typedef struct test_cli_packed { char tag; unsigned/* units */int value; } test_cli_packed;\n"
+        "#pragma pack(pop)\n"
+        "struct test_cli_aligned { char tag; unsigned int value; };\n"
+        "#pragma pack(push, 2)\n"
+        "struct test_cli_packed2 { char tag; unsigned int value; };\n"
+        "#pragma pack(pop)\n"
+    )
+    imported = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        ["type", "declare", "--decl", decl, *(["--clang"] if clang else []), *(["--bisect"] if bisect else [])],
+    )
+    assert imported["success"] is True
+    assert imported["diagnostics"] == []
+    assert imported["declaration_count"] == 3
+    for name, size, offset in (("test_cli_packed", 5, 1), ("test_cli_aligned", 8, 4), ("test_cli_packed2", 6, 2)):
+        shown = run_nexus_json(idac_cmd, idac_env, database, ["type", "show", name])
+        assert shown["size"] == size
+        assert shown["members"][1]["offset"] == offset
+        assert shown["members"][1]["size"] == 4
+
+
+@pytest.mark.parametrize("clang", [False, True])
+def test_nexus_type_check_preserves_pack_pragmas_for_layout_validation(
+    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, clang: bool
+) -> None:
+    database = copy_database(tiny_database)
+    # The array bound is valid only if the preceding structure has the requested packing.
+    decl = (
+        "#pragma pack(push, 1)\n"
+        "struct test_cli_checked_packed { char tag; unsigned/* units */int value; };\n"
+        "#pragma pack(pop)\n"
+        "typedef char test_cli_pack_assert[sizeof(struct test_cli_checked_packed) == 5 ? 1 : -1];\n"
+    )
+    checked = run_nexus_json(
+        idac_cmd, idac_env, database, ["type", "check", "--decl", decl, *(["--clang"] if clang else [])]
+    )
+    assert checked["success"] is True
+    assert checked["diagnostics"] == []
+    assert checked["declaration_count"] == 2
+    assert run_nexus_json(idac_cmd, idac_env, database, ["type", "list", "test_cli_"]) == []
+
+
+@pytest.mark.parametrize("clang", [False, True])
 def test_nexus_type_declare_replace_preserves_dependent_types_and_prototypes(
     idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, clang: bool
 ) -> None:
@@ -501,3 +553,32 @@ def test_nexus_type_declare_bisect_reports_first_failing_declaration(
     assert any(item.get("kind") == "bisect_culprit" for item in diagnostics)
     assert {"type_name": "Missing", "member_name": "value"} in blocking
     assert any(item.get("kind") == "opaque_by_value_member_hint" for item in diagnostics)
+
+
+@pytest.mark.parametrize("clang", [False, True])
+def test_nexus_type_declare_bisect_handles_failure_with_inherited_pack_context(
+    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, clang: bool
+) -> None:
+    database = copy_database(tiny_database)
+    decl = (
+        "#pragma pack(push, 1)\n"
+        "struct test_cli_packed_good { char tag; int value; };\n"
+        "struct test_cli_packed_bad { Missing value; };\n"
+        "#pragma pack(pop)\n"
+    )
+    proc = run_nexus(
+        idac_cmd,
+        idac_env,
+        database,
+        ["type", "declare", "--bisect", "--decl", decl, *(["--clang"] if clang else [])],
+        use_json=True,
+    )
+    assert proc.returncode == 1
+    payload = json.loads(proc.stdout)
+    assert payload["declaration_count"] == 2
+    bisect = payload["bisect"]
+    assert bisect["supported"] is True
+    assert bisect["failing_declaration"]["index"] == 2
+    assert bisect["failing_declaration"]["line"] == 3
+    assert bisect["failing_declaration"]["standalone_success"] is False
+    assert run_nexus_json(idac_cmd, idac_env, database, ["type", "list", "test_cli_packed"]) == []
