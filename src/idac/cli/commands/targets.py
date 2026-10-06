@@ -15,7 +15,9 @@ def register(
 
     child = add_command(parser, targets_subparsers, "list", help_text="List discovered Nexus instances")
     add_output_options(child, default_format="text")
-    child.add_argument("--timeout", type=positive_timeout, help="Discovery probe timeout in seconds")
+    child.add_argument(
+        "--timeout", type=positive_timeout, default=argparse.SUPPRESS, help="Discovery probe timeout in seconds"
+    )
     child.set_defaults(
         run=run_bound_local_command,
         _local_command_binding=LocalCommandBinding(

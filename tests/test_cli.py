@@ -747,7 +747,18 @@ def test_python_exec_renders_json_and_rejects_removed_persist_option(tmp_path: P
     assert exc.value.code == 2
 
 
-def test_targets_list_uses_public_discovery_seam(monkeypatch, capsys) -> None:
+@pytest.mark.parametrize(
+    ("root_options", "command_options", "expected_timeout"),
+    [
+        ([], [], None),
+        (["--timeout", "0.5"], [], 0.5),
+        ([], ["--timeout", "3"], 3.0),
+        (["--timeout", "0.5"], ["--timeout", "3"], 3.0),
+    ],
+)
+def test_targets_list_uses_public_discovery_seam(
+    root_options: list[str], command_options: list[str], expected_timeout: float | None, monkeypatch, capsys
+) -> None:
     calls: list[float | None] = []
 
     def list_targets(*, timeout: float | None = None) -> list[dict[str, Any]]:
@@ -768,12 +779,23 @@ def test_targets_list_uses_public_discovery_seam(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr("idac.nexus.list_targets", list_targets)
 
-    assert main(["targets", "list", "--timeout", "3", "--json"]) == 0
-    assert calls == [3.0]
+    assert main([*root_options, "targets", "list", *command_options, "--json"]) == 0
+    assert calls == [expected_timeout]
     assert json.loads(capsys.readouterr().out)[0]["record_id"] == "gui-1"
 
 
-def test_setup_gui_command_forwards_timeout_and_renders_result(monkeypatch, capsys) -> None:
+@pytest.mark.parametrize(
+    ("root_options", "command_options", "expected_timeout"),
+    [
+        ([], [], None),
+        (["--timeout", "0.5"], [], 0.5),
+        ([], ["--timeout", "9"], 9.0),
+        (["--timeout", "0.5"], ["--timeout", "9"], 9.0),
+    ],
+)
+def test_setup_gui_command_forwards_timeout_and_renders_result(
+    root_options: list[str], command_options: list[str], expected_timeout: float | None, monkeypatch, capsys
+) -> None:
     timeouts: list[float | None] = []
 
     def setup_gui(*, timeout: float | None = None) -> dict[str, Any]:
@@ -782,8 +804,8 @@ def test_setup_gui_command_forwards_timeout_and_renders_result(monkeypatch, caps
 
     monkeypatch.setattr("idac.cli.commands.setup.setup_gui", setup_gui)
 
-    assert main(["setup", "gui", "--timeout", "9", "--json"]) == 0
-    assert timeouts == [9.0]
+    assert main([*root_options, "setup", "gui", *command_options, "--json"]) == 0
+    assert timeouts == [expected_timeout]
     assert json.loads(capsys.readouterr().out)["plugin"] == "ida-nexus"
 
 

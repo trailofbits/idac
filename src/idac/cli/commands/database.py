@@ -72,18 +72,25 @@ def register(
 
     child = add_command(parser, db_subparsers, "open", help_text="Open or reuse a persistent shared database (Linux)")
     child.add_argument("database", type=Path, help="Database or binary to open outside the command sandbox")
-    child.add_argument("--timeout", type=positive_timeout, default=120.0, help="Startup timeout in seconds")
+    child.add_argument(
+        "--timeout", type=positive_timeout, default=argparse.SUPPRESS, help="Startup timeout in seconds (default: 120)"
+    )
     add_output_options(child, default_format="json")
-    child.set_defaults(run=_lifecycle, _accepts_timeout=True)
+    child.set_defaults(run=_lifecycle, _accepts_timeout=True, _default_timeout=120.0)
 
     child = add_command(
         parser, db_subparsers, "close", help_text="Drain commands, save, and wait for database shutdown"
     )
     child.add_argument("--instance", default=argparse.SUPPRESS, help="Exact record ID returned by database open")
     child.add_argument("--discard", action="store_true", help="Close without saving; required after uncertain failures")
-    child.add_argument("--timeout", type=positive_timeout, default=120.0, help="Drain and shutdown timeout in seconds")
+    child.add_argument(
+        "--timeout",
+        type=positive_timeout,
+        default=argparse.SUPPRESS,
+        help="Drain and shutdown timeout in seconds (default: 120)",
+    )
     add_output_options(child, default_format="json")
-    child.set_defaults(run=_lifecycle, _accepts_timeout=True)
+    child.set_defaults(run=_lifecycle, _accepts_timeout=True, _default_timeout=120.0)
 
     child = add_command(parser, db_subparsers, "show", help_text="Show database info")
     add_context_options(child)

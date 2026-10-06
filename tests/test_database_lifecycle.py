@@ -10,6 +10,49 @@ from idac.cli import main
 from idac.cli.commands import database as database_commands
 
 
+@pytest.mark.parametrize("command", ["open", "close"])
+@pytest.mark.parametrize(
+    ("root_options", "command_options", "expected_timeout"),
+    [
+        ([], [], 120.0),
+        (["--timeout", "0.5"], [], 0.5),
+        ([], ["--timeout", "3"], 3.0),
+        (["--timeout", "0.5"], ["--timeout", "3"], 3.0),
+    ],
+)
+def test_lifecycle_forwards_timeout(
+    command: str,
+    root_options: list[str],
+    command_options: list[str],
+    expected_timeout: float,
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    database = tmp_path / "sample.i64"
+    database.write_bytes(b"database sentinel")
+    state = {"host_id": "a" * 32, "record_id": "host-record", "database": str(database), "status": "ready"}
+    timeouts: list[float] = []
+
+    def lifecycle_host(*args, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return state
+
+    monkeypatch.setattr(database_commands, "start_host", lifecycle_host)
+    monkeypatch.setattr(database_commands, "stop_host", lifecycle_host)
+    monkeypatch.setattr(database_commands, "host_status", lambda host_id: state)
+    monkeypatch.setattr(
+        database_commands,
+        "HostedCommand",
+        SimpleNamespace(for_instance=lambda record_id: SimpleNamespace(directory=tmp_path / state["host_id"])),
+    )
+    selector = [str(database)] if command == "open" else ["--instance", state["record_id"]]
+
+    assert main([*root_options, "database", command, *selector, *command_options]) == 0
+    assert timeouts == [expected_timeout]
+    assert json.loads(capsys.readouterr().out)["record_id"] == state["record_id"]
+
+
 @pytest.mark.parametrize("protected", ["input", "sidecar"])
 @pytest.mark.parametrize("alias", ["direct", "symlink", "hardlink"])
 def test_open_rejects_known_output_alias_before_starting_host(

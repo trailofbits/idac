@@ -17,7 +17,9 @@ def register(
         parser, setup_subparsers, "gui", help_text="Install the matching ida-nexus plugin through ida-hcli"
     )
     add_output_options(child, default_format="json")
-    child.add_argument("--timeout", type=positive_timeout, help="Installer timeout in seconds")
+    child.add_argument(
+        "--timeout", type=positive_timeout, default=argparse.SUPPRESS, help="Installer timeout in seconds"
+    )
     child.set_defaults(
         run=run_bound_local_command,
         _local_command_binding=LocalCommandBinding("setup_gui", setup_gui, keyword_attrs=(("timeout", "timeout"),)),

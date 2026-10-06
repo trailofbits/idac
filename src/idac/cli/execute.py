@@ -21,6 +21,8 @@ def reject_unsupported_forwarded_context(parser: argparse.ArgumentParser, args: 
 def prepare_args(args: argparse.Namespace) -> None:
     parser = args._selected_parser
     reject_unsupported_forwarded_context(parser, args)
+    if not args._uses_context and args._accepts_timeout:
+        args.timeout = vars(args).get("timeout", vars(args).get("_default_timeout"))
     if args._uses_context:
         require_timeout_if_needed(args)
         resolved = resolve_context(args)
