@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.helpers import (
     normalize_pseudocode_call_arguments,
     preview_round_trip,
     run_nexus,
     run_nexus_json,
     run_nexus_text,
+    run_preview_json,
+    shutdown_nexus_worker_without_save,
 )
 
 
@@ -50,6 +54,84 @@ def test_name_set_persists_and_updates_function_metadata_and_decompile(
     assert "add_numbers(" in after_persist["prototype"]
     assert "add_numbers(2, 3);" in decompiled
     assert "v4 = add_numbers(2, 3);" in decompiled
+
+
+@pytest.mark.parametrize("original_kind", ["automatic", "hidden", "dummy", "empty"])
+def test_name_preview_preserves_original_name_metadata(
+    original_kind: str,
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    address = "0x1000004b4" if original_kind == "empty" else "0x1000004b0"
+    initial_names = {
+        "automatic": "ida_name.set_name(ea, 'automatic_add', ida_name.SN_AUTO | ida_name.SN_PUBLIC | ida_name.SN_WEAK)",
+        "hidden": "ida_name.set_name(ea, 'hidden_add', ida_name.SN_NON_AUTO | ida_name.SN_NOLIST)",
+        "dummy": "ida_name.set_name(ea, '') and ida_name.set_dummy_name(ea, ea)",
+        "empty": "ida_name.set_name(ea, '')",
+    }
+    metadata_code = f"""
+import ida_bytes
+import ida_name
+ea = {address}
+flags = ida_bytes.get_flags(ea)
+result = {{
+    'name': ida_name.get_name(ea),
+    'automatic': ida_bytes.has_auto_name(flags),
+    'user': ida_bytes.has_user_name(flags),
+    'dummy': ida_bytes.has_dummy_name(flags),
+    'public': ida_name.is_public_name(ea),
+    'weak': ida_name.is_weak_name(ea),
+    'listed': ida_name.is_in_nlist(ea),
+}}
+"""
+    initial = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "py",
+        "exec",
+        "--code",
+        f"import ida_name\nea = {address}\nassert {initial_names[original_kind]}\n" + metadata_code,
+    )
+    before = initial["result"]
+    if original_kind == "automatic":
+        assert before["automatic"] is True
+        assert before["public"] is True
+        assert before["weak"] is True
+    elif original_kind == "hidden":
+        assert before["user"] is True
+        assert before["listed"] is False
+    elif original_kind == "dummy":
+        assert before["dummy"] is True
+    else:
+        assert before["name"] == ""
+
+    proc, preview = run_preview_json(
+        idac_cmd, idac_env, database, tmp_path / "name-preview.json", "misc", "rename", address, "preview_add"
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    assert preview["before"] == {"address": address, "name": before["name"]}
+    assert preview["after"] == {"address": address, "name": "preview_add"}
+    assert preview["undo"] == {"status": "ok", "mode": "rollback", "persisted": False}
+
+    after = run_nexus_json(idac_cmd, idac_env, database, "py", "exec", "--code", metadata_code)
+    assert after["result"] == before
+
+    collision = run_nexus(idac_cmd, idac_env, database, "misc", "rename", address, "main")
+    assert collision.returncode == 1
+    assert "failed to set name" in collision.stderr
+    after_failure = run_nexus_json(idac_cmd, idac_env, database, "py", "exec", "--code", metadata_code)
+    assert after_failure["result"] == before
+
+    # Saving a subsequent mutation must not make preview-only metadata durable.
+    run_nexus_json(idac_cmd, idac_env, database, "comment", "set", address, "checkpoint name metadata")
+    shutdown_nexus_worker_without_save(database, idac_env)
+    reopened = run_nexus_json(idac_cmd, idac_env, database, "py", "exec", "--code", metadata_code)
+    assert reopened["result"] == before
 
 
 def test_local_rename_preview_then_persist_updates_local_list_and_decompile(

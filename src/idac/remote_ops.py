@@ -2653,6 +2653,7 @@ def _comments_restore_comment(
 class _names_NameSetRequest:
     identifier: str
     new_name: str
+    restore_flags: int | None = None
 
 
 @dataclass(frozen=True)
@@ -2676,7 +2677,16 @@ def _names_parse_name_set(params: Mapping[str, Any]) -> _names_NameSetRequest:
 
 def _names_prepare_name_set(context: OperationContext, request: _names_NameSetRequest) -> _names_NameSetRequest:
     runtime = context.runtime
-    return _names_NameSetRequest(identifier=hex(runtime.resolve_address(request.identifier)), new_name=request.new_name)
+    ida_name = runtime.mod("ida_name")
+    ida_bytes = runtime.mod("ida_bytes")
+    ea = runtime.resolve_address(request.identifier)
+    restore_flags = ida_name.SN_CHECK
+    restore_flags |= ida_name.SN_AUTO if ida_bytes.has_auto_name(ida_bytes.get_flags(ea)) else ida_name.SN_NON_AUTO
+    restore_flags |= ida_name.SN_PUBLIC if ida_name.is_public_name(ea) else ida_name.SN_NON_PUBLIC
+    restore_flags |= ida_name.SN_WEAK if ida_name.is_weak_name(ea) else ida_name.SN_NON_WEAK
+    if not ida_name.is_in_nlist(ea):
+        restore_flags |= ida_name.SN_NOLIST
+    return _names_NameSetRequest(identifier=hex(ea), new_name=request.new_name, restore_flags=restore_flags)
 
 
 def _names_name_state(context: OperationContext, request: _names_NameSetRequest) -> _names_NameState:
@@ -2689,6 +2699,8 @@ def _names_name_state(context: OperationContext, request: _names_NameSetRequest)
 def _names_set_name(context: OperationContext, request: _names_NameSetRequest) -> _names_NameMutationResult:
     runtime = context.runtime
     ida_name = runtime.mod("ida_name")
+    if request.restore_flags is None:
+        request = _names_prepare_name_set(context, request)
     ea = runtime.resolve_address(request.identifier)
     before = _names_NameState(address=hex(ea), name=ida_name.get_name(ea) or "")
     if before.name == request.new_name:
@@ -2713,8 +2725,12 @@ def _names_restore_name(
     runtime = context.runtime
     ida_name = runtime.mod("ida_name")
     ea = runtime.resolve_address(request.identifier)
-    if not ida_name.set_name(ea, before.name, ida_name.SN_CHECK):
+    if request.restore_flags is None:
+        raise IdaOperationError(f"name restoration metadata was not captured at {hex(ea)}")
+    if not ida_name.set_name(ea, before.name, request.restore_flags):
         raise IdaOperationError(f"failed to restore name at {hex(ea)}")
+    if request.restore_flags & ida_name.SN_NOLIST:
+        ida_name.hide_name(ea)
 
 
 # ---- Local-variable operations ----

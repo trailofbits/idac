@@ -189,6 +189,8 @@ IDA maintenance commands live under `misc`:
 
 - `misc rename` — rename a function or global symbol. Preview-capable and
   batch-safe; use an address when later batch steps must survive the rename.
+  Preview restores the original name, its automatic/public/weak flags, and its
+  visibility in IDA's name list.
 - `misc reanalyze` — re-run IDA analysis on a function or range. Batch-safe, not preview-capable; place it between type/prototype mutations and local cleanup. Add `--end` for a range instead of a single function.
 
 Workspace scaffolding lives under `workspace`:

@@ -8,51 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from tests.helpers import run_cli_json, run_nexus_json, run_preview_json
-
-
-def _shutdown_without_save(database: Path, env: dict[str, str]) -> dict[str, object]:
-    """Release the exact managed worker without another save checkpoint."""
-
-    code = r"""
-import json
-import sys
-
-from ida_nexus import DatabaseHandle, find_database_owner, wait_database_released
-
-database = sys.argv[1]
-instance = find_database_owner(database, timeout=5.0)
-if instance is None:
-    raise RuntimeError(f"no Nexus worker owns {database}")
-
-handle = DatabaseHandle.attach(instance, keepalive=0.0)
-try:
-    shutdown = handle.shutdown_database(save=False)
-finally:
-    handle.close()
-
-if not wait_database_released(instance, timeout=30.0):
-    raise TimeoutError(f"Nexus worker did not release {instance.record_id}")
-
-print(json.dumps({
-    "record_id": instance.record_id,
-    "shutting_down": shutdown["shutting_down"],
-    "save": shutdown["save"],
-}))
-"""
-    proc = subprocess.run(
-        [sys.executable, "-c", code, str(database)],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=45,
-    )
-    assert proc.returncode == 0, proc.stderr or proc.stdout
-    result = json.loads(proc.stdout)
-    assert result["shutting_down"] is True
-    assert result["save"] is False
-    return result
+from tests.helpers import run_cli_json, run_nexus_json, run_preview_json, shutdown_nexus_worker_without_save
 
 
 def test_headless_autosave_survives_worker_shutdown_and_fresh_reopen(
@@ -65,7 +21,7 @@ def test_headless_autosave_survives_worker_shutdown_and_fresh_reopen(
     mutation = run_nexus_json(idac_cmd, idac_env, database, "misc", "rename", "add", "lifecycle_saved")
 
     assert mutation["changed"] is True
-    retired = _shutdown_without_save(database, idac_env)
+    retired = shutdown_nexus_worker_without_save(database, idac_env)
 
     readback = run_nexus_json(idac_cmd, idac_env, database, "function", "metadata", "lifecycle_saved")
     targets = run_cli_json(idac_cmd, idac_env, "targets", "list", "--timeout", "10")
@@ -104,7 +60,7 @@ def test_headless_preview_is_absent_after_worker_shutdown_and_fresh_reopen(
     assert preview["undo"] == {"status": "ok", "mode": "rollback", "persisted": False}
     live_readback = run_nexus_json(idac_cmd, idac_env, database, "function", "metadata", "add")
     assert live_readback["name"] == "add"
-    retired = _shutdown_without_save(database, idac_env)
+    retired = shutdown_nexus_worker_without_save(database, idac_env)
 
     readback = run_nexus_json(idac_cmd, idac_env, database, "function", "metadata", "add")
     targets = run_cli_json(idac_cmd, idac_env, "targets", "list", "--timeout", "10")
@@ -237,7 +193,7 @@ def test_binary_created_database_autosave_survives_fresh_reopen(
     assert mutation["changed"] is True
     database = Path(f"{binary}.i64")
     assert database.is_file()
-    retired = _shutdown_without_save(binary, idac_env)
+    retired = shutdown_nexus_worker_without_save(binary, idac_env)
 
     readback = run_nexus_json(
         idac_cmd,
@@ -297,7 +253,7 @@ def test_timed_out_python_mutation_is_saved_and_lease_is_released(
 
     assert timed_out.returncode == 1
     assert "timed out" in timed_out.stderr.lower()
-    retired = _shutdown_without_save(database, idac_env)
+    retired = shutdown_nexus_worker_without_save(database, idac_env)
 
     readback = run_nexus_json(
         idac_cmd,
