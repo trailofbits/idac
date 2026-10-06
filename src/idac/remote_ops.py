@@ -4498,6 +4498,10 @@ class _type_declare_TypeDeclareResult(TypedDict, total=False):
 _type_declare_NamedTypeSnapshot = dict[str, str | None]
 
 
+class _type_declare_TypeCollisionError(IdaOperationError):
+    """A parser changed an existing local definition without replacement permission."""
+
+
 @dataclass(frozen=True)
 class _type_declare_DeclarationChunk:
     text: str
@@ -4906,12 +4910,40 @@ def _type_declare_type_declare_diagnostics(
 
 def _type_declare_parse_type_declarations(runtime: IdaRuntime, decl: str, *, replace: bool, clang: bool) -> int:
     ida_typeinf = runtime.mod("ida_typeinf")
+    before = _type_declare_stored_type_snapshot(runtime) if not replace else {}
     if not clang:
         flags = ida_typeinf.PT_REPLACE if replace else 0
-        return ida_typeinf.idc_parse_types(decl, flags)
-    # HTI_DCL lets Clang replace definitions in place. Deleting them first
-    # removes their ordinals and breaks existing type and prototype references.
-    return _type_declare_parse_type_declarations_with_clang(runtime, decl)
+        errors = ida_typeinf.idc_parse_types(decl, flags)
+    else:
+        # HTI_DCL lets Clang replace definitions in place. Deleting them first
+        # removes their ordinals and breaks existing type and prototype references.
+        errors = _type_declare_parse_type_declarations_with_clang(runtime, decl)
+    if not replace:
+        after = _type_declare_stored_type_snapshot(runtime)
+        changed = sorted(name for name, definition in before.items() if after.get(name) != definition)
+        if changed:
+            # Both parsers can overwrite existing definitions regardless of
+            # PT_REPLACE. The enclosing mutation or bisect undo point restores
+            # the whole import, including new types and dependent references.
+            raise _type_declare_TypeCollisionError(
+                f"type declarations change existing local types: {', '.join(changed)}; use --replace to replace them"
+            )
+    return errors
+
+
+def _type_declare_stored_type_snapshot(runtime: IdaRuntime) -> dict[str, tuple[Any, ...]]:
+    ida_typeinf = runtime.mod("ida_typeinf")
+    current = ida_typeinf.get_idati()
+    snapshot: dict[str, tuple[Any, ...]] = {}
+    for name in current.type_names:
+        # Read the stored definition bytes, field names, comments, and ordinal.
+        # tinfo.serialize() can return only a live ordinal reference, and a
+        # printed declaration can omit packing and other type attributes.
+        definition = ida_typeinf.get_named_type(current, name, ida_typeinf.NTF_TYPE)
+        if definition is None:
+            raise IdaOperationError(f"failed to snapshot existing local type: {name}")
+        snapshot[name] = tuple(definition)
+    return snapshot
 
 
 def _type_declare_parse_type_declarations_with_clang(runtime: IdaRuntime, decl: str) -> int:
@@ -5222,6 +5254,8 @@ def _type_declare_apply_type_declarations_with_optional_bisect(
         return (errors, before, after, None)
     try:
         trial_errors = _type_declare_trial_type_parse_errors(runtime, decl, replace=replace, clang=clang, label="full")
+    except _type_declare_TypeCollisionError:
+        raise
     except IdaOperationError as exc:
         before = _type_declare_named_types_snapshot(runtime)
         return (1, before, dict(before), _type_declare_bisect_unavailable_result(chunks, exc))

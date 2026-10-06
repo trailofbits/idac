@@ -429,6 +429,10 @@ def test_type_declare_clang_reports_unavailable_parser() -> None:
         HTI_DCL = 0x400
         HTI_SEMICOLON = 0x200000
 
+        @staticmethod
+        def get_idati():
+            return SimpleNamespace(type_names=())
+
     class FakeIdaSrclang:
         @staticmethod
         def parse_decls_with_parser_ext(_parser_name: str, _til: object, _decl: str, _flags: int) -> int:

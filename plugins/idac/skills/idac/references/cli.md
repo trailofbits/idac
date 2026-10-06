@@ -206,6 +206,9 @@ Workspace scaffolding lives under `workspace`:
 - terminal output still enforces the inline size limit
 - large inline results print a truncated prefix first, then error
 - `type declare --clang` uses IDA's clang parser for more complex C/C++ declarations
+- `type declare` requires `--replace` when a header changes an existing local type;
+  identical definitions and forward declarations of existing types are allowed.
+  A refused replacement restores every change from that import.
 - `type declare --bisect` isolates the first declaration IDA rejects when a multi-declaration import fails; it reports the failing line range, whether that declaration imports on its own, and any by-value members whose types are still opaque. It needs IDA undo support and is rejected by `type check`.
 - `type declare --alias OLD=NEW` rewrites identifiers before import; use it to flatten namespace-qualified names
 - `type check` validates the whole header in a temporary type library, resolving

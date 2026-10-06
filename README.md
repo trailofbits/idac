@@ -341,7 +341,10 @@ and the return location. These custom-convention edits require the same paramete
 count and parameter/return type sizes; supply explicit locations without the flag
 when changing those. `type check` validates
 dependent declarations together in a temporary type library, without importing
-or replacing database types.
+or replacing database types. Changing an existing local type requires
+`type declare --replace`; identical declarations and references to existing types
+can be imported without it. A refused replacement restores the entire import,
+including any new types declared in the same header.
 `misc rename` is batch-safe, so related renames, prototype edits, comments, and
 readbacks can share one Nexus session.
 
