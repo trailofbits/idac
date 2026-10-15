@@ -136,13 +136,32 @@ def _run_hcli_status(
         (item for item in plugins or () if isinstance(item, dict) and item.get("name") == "ida-nexus"),
         None,
     )
+    if (
+        isinstance(entry, dict)
+        and entry.get("installed") is False
+        and process.returncode in {0, 1}
+        and not (process.stderr or "").strip()
+    ):
+        return _check(
+            "warn",
+            "gui",
+            "plugin",
+            "Optional ida-nexus GUI component is not installed; headless databases remain available. "
+            "Run `idac setup gui` to attach to live IDA sessions.",
+            expected=str(expected),
+            installed=None,
+            returncode=process.returncode,
+        )
     installed = entry.get("version") if isinstance(entry, dict) and entry.get("installed") is True else None
     if process.returncode != 0 or installed is None:
+        summary = "ida-hcli could not verify the ida-nexus GUI component"
+        if reason := _first_line(process.stderr):
+            summary = f"{summary}: {reason}"
         return _check(
             "error",
             "gui",
             "plugin",
-            "ida-nexus is not installed through ida-hcli",
+            summary,
             expected=str(expected),
             installed=installed,
             returncode=process.returncode,

@@ -256,33 +256,29 @@ def test_doctor_warns_when_no_database_is_running() -> None:
     assert "no running" in discovery["summary"].lower()
 
 
-def test_doctor_reports_missing_or_malformed_hcli_status() -> None:
-    cases = [
+@pytest.mark.parametrize(
+    ("completed", "expected_status"),
+    [
+        (subprocess.CompletedProcess([], 1, '{"plugins":[{"name":"ida-nexus","installed":false}]}', ""), "warn"),
+        (subprocess.CompletedProcess([], 1, "", "hcli status failed"), "error"),
         (
             subprocess.CompletedProcess(
-                [],
-                1,
-                '{"plugins":[{"name":"ida-nexus","installed":false}]}',
-                "not installed",
+                [], 0, '{"plugins":[{"name":"ida-nexus","installed":true,"version":"0.0.1"}]}', ""
             ),
-            "not installed",
+            "error",
         ),
-        (
-            subprocess.CompletedProcess([], 1, "", "configured hcli default IDA installation does not exist"),
-            "configured hcli default ida installation does not exist",
-        ),
-    ]
+    ],
+)
+def test_doctor_distinguishes_optional_gui_absence_from_failures(completed, expected_status: str) -> None:
+    result = doctor.run_doctor(
+        runner=lambda _command, **_kwargs: completed,
+        discover_databases_fn=lambda _timeout: [],
+    )
 
-    for completed, diagnostic in cases:
-        result = doctor.run_doctor(
-            version_getter=_versions,
-            runner=lambda _command, _completed=completed, **_kwargs: _completed,
-            discover_databases_fn=lambda _timeout: [],
-        )
-
-        plugin = next(item for item in result["checks"] if item["component"] == "gui")
-        assert plugin["status"] == "error"
-        assert diagnostic in plugin["summary"].lower()
+    plugin = next(item for item in result["checks"] if item["component"] == "gui")
+    assert plugin["status"] == expected_status
+    assert result["status"] == expected_status
+    assert result["healthy"] is (expected_status == "warn")
 
 
 def test_doctor_rejects_old_remote_python_and_ida() -> None:

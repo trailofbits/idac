@@ -127,6 +127,8 @@ When GUI installation or repair is part of the task, use `idac setup gui`.
 It uses HCLI to install the GUI release matching the installed Nexus
 client and passes the declared ida-domain requirement to the installer. Restart
 IDA or load the installed Nexus component as required by IDA, then rerun discovery.
+Missing optional GUI integration is a `doctor` warning for headless work; an
+incompatible installed component or failed status check remains an error.
 `doctor` reports local package versions, checks HCLI's configured IDA version
 without starting IDA, and checks the independently installed GUI
 component and READY instances against the declared runtime requirements. Nexus
