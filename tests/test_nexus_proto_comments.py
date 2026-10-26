@@ -324,16 +324,18 @@ def test_proto_set_reports_parser_failure_for_bad_syntax(
     assert "parser limitations" in proc.stderr
 
 
-def test_proto_set_reports_parser_failure_for_void_usercall_return_argloc(
+def test_proto_set_void_usercall_return_argloc_follows_ida_parser(
     idac_cmd: list[str],
     idac_env: dict[str, str],
+    ida_version: tuple[int, int],
     copy_database,
     tiny_database: Path,
 ) -> None:
+    database = copy_database(tiny_database)
     proc = run_nexus(
         idac_cmd,
         idac_env,
-        copy_database(tiny_database),
+        database,
         "function",
         "prototype",
         "set",
@@ -347,10 +349,17 @@ def test_proto_set_reports_parser_failure_for_void_usercall_return_argloc(
         ),
     )
 
-    assert proc.returncode == 1
-    assert "failed to apply prototype" in proc.stderr
-    assert "parser limitations" in proc.stderr
-    assert "unknown type(s):" not in proc.stderr
+    if ida_version >= (9, 5):
+        assert proc.returncode == 0, proc.stderr
+        shown = run_nexus_json(idac_cmd, idac_env, database, "function", "prototype", "show", "add")
+        assert isinstance(shown, dict)
+        assert "void __usercall add(" in shown["prototype"]
+        assert "void *__return_ptr out@<X8>" in shown["prototype"]
+    else:
+        assert proc.returncode == 1
+        assert "failed to apply prototype" in proc.stderr
+        assert "parser limitations" in proc.stderr
+        assert "unknown type(s):" not in proc.stderr
 
 
 def test_proto_set_can_optionally_propagate_to_callers(

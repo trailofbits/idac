@@ -134,6 +134,14 @@ def idac_cmd() -> list[str]:
     return [sys.executable, "-m", "idac"]
 
 
+@pytest.fixture(scope="session")
+def ida_version() -> tuple[int, int]:
+    from hcli.lib.ida import find_current_ida_version
+
+    major, minor, *_ = find_current_ida_version().split(".")
+    return (int(major), int(minor))
+
+
 def _shutdown_nexus_workers(env: dict[str, str]) -> None:
     """Stop fixture-owned headless instances through ida-nexus's public API."""
 

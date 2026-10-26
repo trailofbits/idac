@@ -61,18 +61,31 @@ def test_nexus_type_check_resolves_header_dependencies_without_importing(
 
 @pytest.mark.parametrize("forward_decl", ["", "struct test_cli_record; "])
 def test_nexus_type_check_resolves_existing_types_and_preserves_them_on_failure(
-    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, forward_decl: str
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    ida_version: tuple[int, int],
+    copy_database,
+    tiny_database: Path,
+    forward_decl: str,
 ) -> None:
     database = copy_database(tiny_database)
     _declare_types(idac_cmd, idac_env, database)
     before = run_nexus_json(idac_cmd, idac_env, database, ["type", "show", "test_cli_record"])
-    checked = run_nexus_json(
+    check_proc = run_nexus(
         idac_cmd,
         idac_env,
         database,
         ["type", "check", "--decl", forward_decl + "struct check_wrapper { test_cli_record record; };"],
+        use_json=True,
     )
-    assert checked["success"] is True
+    checked = json.loads(check_proc.stdout)
+    if forward_decl and ida_version >= (9, 5):
+        assert check_proc.returncode == 1
+        assert checked["success"] is False
+        assert checked["errors"] == 1
+    else:
+        assert check_proc.returncode == 0, check_proc.stderr
+        assert checked["success"] is True
     proc = run_nexus(
         idac_cmd,
         idac_env,

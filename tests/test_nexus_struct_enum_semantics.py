@@ -80,7 +80,7 @@ def test_struct_field_mutations_preview_then_persist_round_trip(
     assert before["name"] == "test_cli_mutable"
     assert before["kind"] == "struct"
     assert before["members"] == []
-    assert "struct test_cli_mutable" in before["layout"]
+    assert before["layout"].startswith(("struct test_cli_mutable", "struct __cppobj test_cli_mutable"))
 
     _assert_preview_result(set_result, before)
     assert set_result["preview"]["before"] == before
@@ -100,7 +100,9 @@ def test_struct_field_mutations_preview_then_persist_round_trip(
     assert _member_names(delete_result["persisted"]) == set()
     assert isinstance(delete_result["after_persist"], dict)
     assert delete_result["after_persist"]["members"] == []
-    assert "struct test_cli_mutable" in delete_result["after_persist"]["layout"]
+    assert delete_result["after_persist"]["layout"].startswith(
+        ("struct test_cli_mutable", "struct __cppobj test_cli_mutable")
+    )
 
 
 def test_enum_member_mutations_preview_then_persist_round_trip(
