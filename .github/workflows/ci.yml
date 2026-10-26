@@ -59,6 +59,8 @@ jobs:
         include:
           - ida-version: "9.4"
             installer-id: release/9.4/ida-pro/ida-pro_94_x64linux.run
+          - ida-version: "9.5"
+            installer-id: release/ida-pro/9.5/ida-pro_95_x64linux.run
     permissions:
       contents: read
     steps:
@@ -104,6 +106,10 @@ jobs:
           echo "IDADIR=$IDADIR" >>"$GITHUB_ENV"
           uv run --locked hcli ida install --yes --download-id "$IDA_INSTALLER_ID" \
             --license-id "$IDA_LICENSE_ID" --install-dir "$IDADIR"
+
+      - name: Record IDA 9.5 EULA acceptance
+        if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true' && matrix.ida-version == '9.5'
+        run: uv run --locked python -c 'import idapro; import ida_registry; ida_registry.reg_write_int("EULA 95", 1)'
 
       - name: Test through ida-nexus
         if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true'
