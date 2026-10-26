@@ -59,7 +59,12 @@ def merge_parent_context(inner_args: argparse.Namespace, outer_args: argparse.Na
     )
 
 
-def reject_output_context_aliases(args: argparse.Namespace, protected_paths: tuple[str, ...]) -> None:
+def reject_output_context_aliases(
+    args: argparse.Namespace,
+    protected_paths: tuple[str, ...],
+    *,
+    artifact_paths: tuple[Path, ...] = (),
+) -> None:
     """Keep command artifacts from replacing a selected input or IDA database."""
 
     protected: list[tuple[str, Path | None]] = [
@@ -79,6 +84,8 @@ def reject_output_context_aliases(args: argparse.Namespace, protected_paths: tup
             protected,
             option_label=f"--{output_key.replace('_', '-')}",
         )
+    for artifact_path in artifact_paths:
+        reject_output_aliases(artifact_path, protected, option_label="--out-dir artifact")
 
 
 def require_timeout_if_needed(args: argparse.Namespace) -> None:

@@ -88,7 +88,7 @@ def execute_parsed(args: argparse.Namespace):
                 raise CliUserError(str(exc)) from exc
             args._nexus_session = session
             session_context.push(_NexusSession.__exit__.__get__(session))
-        output_requested = getattr(args, "out", None) is not None or getattr(args, "out_file", None) is not None
+        output_requested = any(getattr(args, key, None) is not None for key in ("out", "out_file", "out_dir"))
         if args._uses_context and output_requested and args.command != "batch":
             protect_output_context(args)
         return handler(args)

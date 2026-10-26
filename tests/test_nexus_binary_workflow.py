@@ -4,6 +4,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from tests.helpers import normalize_pseudocode_call_arguments, run_cli, run_cli_json
 
 
@@ -140,3 +142,61 @@ def test_database_selected_output_preserves_original_binary(
     assert "must not overwrite the selected input or database" in proc.stderr
     assert binary.read_bytes() == binary_before
     assert database.read_bytes() == database_before
+
+
+@pytest.mark.parametrize(
+    "artifact", ["manifest.json", "main_0x100000460.c", "main_0x100000460.asm", "main_0x100000460.ctree"]
+)
+def test_decompilemany_artifacts_preserve_selected_database(
+    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, tmp_path: Path, artifact: str
+) -> None:
+    database = copy_database(tiny_database)
+    database_before = database.read_bytes()
+    out_dir = tmp_path / "decomp"
+    out_dir.mkdir()
+    (out_dir / artifact).symlink_to(database)
+
+    proc = run_cli(
+        idac_cmd,
+        idac_env,
+        "decompilemany",
+        "main",
+        "--out-dir",
+        str(out_dir),
+        "--disasm",
+        "--ctree",
+        "-c",
+        str(database),
+    )
+
+    assert proc.returncode == 1, proc.stderr or proc.stdout
+    assert "must not overwrite the selected input or database" in proc.stderr
+    assert database.read_bytes() == database_before
+    assert list(out_dir.iterdir()) == [out_dir / artifact]
+
+
+def test_decompilemany_manifest_preserves_function_input(
+    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, tmp_path: Path
+) -> None:
+    database = copy_database(tiny_database)
+    out_dir = tmp_path / "decomp"
+    out_dir.mkdir()
+    functions = out_dir / "manifest.json"
+    functions.write_text("main\n", encoding="utf-8")
+
+    proc = run_cli(
+        idac_cmd,
+        idac_env,
+        "decompilemany",
+        "--functions-file",
+        str(functions),
+        "--out-dir",
+        str(out_dir),
+        "-c",
+        str(database),
+    )
+
+    assert proc.returncode == 1, proc.stderr or proc.stdout
+    assert "must not overwrite" in proc.stderr
+    assert functions.read_text(encoding="utf-8") == "main\n"
+    assert list(out_dir.iterdir()) == [functions]

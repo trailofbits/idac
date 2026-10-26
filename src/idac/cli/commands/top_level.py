@@ -11,6 +11,7 @@ from ...nexus import NexusSessionError
 from ...output import write_output_result
 from ..argparse_utils import add_standard_command
 from ..commands.common import OperationBinding, bind_operation, run_bound_operation, send_op
+from ..context import reject_output_context_aliases
 from ..errors import CliUserError
 from ..result import CommandResult
 
@@ -195,6 +196,19 @@ def run_decompilemany(args: argparse.Namespace) -> CommandResult:
     out_dir = None
     if request.out_dir is not None:
         out_dir = request.out_dir
+        artifact_paths = [out_dir / "manifest.json"]
+        for item in targets:
+            stem = _stem_for_function(str(item["name"]), str(item["address"]), str(item["identifier"])).stem
+            artifact_paths.append(out_dir / f"{stem}.c")
+            if request.include_disasm:
+                artifact_paths.append(out_dir / f"{stem}.asm")
+            if request.include_ctree:
+                artifact_paths.append(out_dir / f"{stem}.ctree")
+        reject_output_context_aliases(
+            args,
+            args._protected_context_paths,
+            artifact_paths=tuple(artifact_paths),
+        )
         out_dir.mkdir(parents=True, exist_ok=True)
     for item in targets:
         identifier = str(item["identifier"])
