@@ -49,9 +49,9 @@ jobs:
 
   test:
     name: Test (IDA ${{ matrix.ida-version }})
-    # Steps run for manual dispatches and for non-docs merge-queue changes. The
-    # skips remain per-step so this required check still reports for pull requests
-    # and docs-only merges.
+    # Repository writers can already use Actions secrets. Fork PRs remain
+    # untrusted and run these tests only after entering the merge queue.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -65,19 +65,17 @@ jobs:
       contents: read
     steps:
       - name: Check out repository
-        if: github.event_name != 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Detect code changes
-        if: github.event_name != 'pull_request'
         id: changes
         env:
           BASE_SHA: ${{ github.event.merge_group.base_sha }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+          if [[ "$EVENT_NAME" != "merge_group" ]]; then
             echo "code=true" >>"$GITHUB_OUTPUT"
             exit 0
           fi
@@ -90,13 +88,13 @@ jobs:
           fi
 
       - name: Install uv
-        if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true'
+        if: steps.changes.outputs.code == 'true'
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.12"
 
       - name: Install IDA Pro
-        if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true'
+        if: steps.changes.outputs.code == 'true'
         env:
           IDA_INSTALLER_ID: ${{ matrix.installer-id }}
           IDA_LICENSE_ID: ${{ secrets.IDA_LICENSE_ID }}
@@ -108,11 +106,11 @@ jobs:
             --license-id "$IDA_LICENSE_ID" --install-dir "$IDADIR"
 
       - name: Record IDA 9.5 EULA acceptance
-        if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true' && matrix.ida-version == '9.5'
+        if: steps.changes.outputs.code == 'true' && matrix.ida-version == '9.5'
         run: uv run --locked python -c 'import idapro; import ida_registry; ida_registry.reg_write_int("EULA 95", 1)'
 
       - name: Test through ida-nexus
-        if: github.event_name != 'pull_request' && steps.changes.outputs.code == 'true'
+        if: steps.changes.outputs.code == 'true'
         run: |
           uv run --locked ida-nexus worker --probe
           make test-integration
