@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.helpers import (
     normalize_pseudocode_call_arguments,
     run_cli,
@@ -19,6 +21,68 @@ def _local_type_map(payload: object) -> dict[str, str]:
 def _local_names(payload: object) -> set[str]:
     assert isinstance(payload, dict)
     return {item["name"] for item in payload["locals"] if isinstance(item, dict)}
+
+
+@pytest.mark.parametrize("lint", [False, True])
+@pytest.mark.parametrize("preview", [False, True])
+def test_batch_child_output_preserves_sibling_input(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+    lint: bool,
+    preview: bool,
+) -> None:
+    database = copy_database(tiny_database)
+    batch_dir = tmp_path / "batch"
+    batch_dir.mkdir()
+    script = batch_dir / "script.py"
+    source = "result = 'preserved script'\n"
+    script.write_text(source, encoding="utf-8")
+    batch = batch_dir / "pass.idac"
+    output_command = "preview --out script.py function list" if preview else "function list --out script.py"
+    batch.write_text(f"{output_command}\npy exec --script script.py\n", encoding="utf-8")
+    journal = tmp_path / "journal.json"
+    args = ["batch", str(batch), "--out", str(journal), "-c", str(database)]
+    if lint:
+        args.append("--lint")
+
+    proc = run_cli(idac_cmd, idac_env, args)
+
+    assert proc.returncode == 1, proc.stderr or proc.stdout
+    assert "must not overwrite" in proc.stderr
+    assert script.read_text(encoding="utf-8") == source
+    payload = json.loads(journal.read_text(encoding="utf-8"))
+    assert payload["results"][0]["status"] == "failed"
+    assert payload["results"][1]["status"] == "ok"
+    if not lint:
+        assert payload["results"][1]["result"]["result"] == "preserved script"
+
+
+def test_batch_bulk_artifacts_preserve_sibling_input(
+    idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path, tmp_path: Path
+) -> None:
+    database = copy_database(tiny_database)
+    script = tmp_path / "script.py"
+    source = "result = 'preserved script'\n"
+    script.write_text(source, encoding="utf-8")
+    out_dir = tmp_path / "decomp"
+    out_dir.mkdir()
+    (out_dir / "manifest.json").symlink_to(script)
+    batch = tmp_path / "pass.idac"
+    batch.write_text("decompilemany main --out-dir decomp\npy exec --script script.py\n", encoding="utf-8")
+    journal = tmp_path / "journal.json"
+
+    proc = run_cli(idac_cmd, idac_env, "batch", str(batch), "--out", str(journal), "-c", str(database))
+
+    assert proc.returncode == 1, proc.stderr or proc.stdout
+    assert "must not overwrite" in proc.stderr
+    assert script.read_text(encoding="utf-8") == source
+    payload = json.loads(journal.read_text(encoding="utf-8"))
+    assert payload["results"][0]["status"] == "failed"
+    assert payload["results"][1]["result"]["result"] == "preserved script"
+    assert list(out_dir.iterdir()) == [out_dir / "manifest.json"]
 
 
 def test_batch_reuses_batch_dir_and_updates_prototypes_and_locals(

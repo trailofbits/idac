@@ -217,10 +217,13 @@ def _prepare_batch_command(line: PreparedBatchLine, parent_args: argparse.Namesp
     batch_path = Path(parent_args.batch_file)
     resolve_relative_paths(parsed, base_dir=batch_path.parent.resolve(strict=False))
     context_value = parsed_map.get("context")
-    protected_outputs = [
-        ("batch file", batch_path),
-        ("Nexus context", Path(context_value) if context_value is not None else None),
+    parsed._protected_batch_paths = (
+        *parent_args._protected_batch_paths,
         ("batch wrapper output", parent_args.out),
+    )
+    protected_outputs = [
+        *parsed._protected_batch_paths,
+        ("Nexus context", Path(context_value) if context_value is not None else None),
     ]
     for output_key in ("out", "out_file"):
         child_output = parsed_map.get(output_key)
@@ -527,12 +530,15 @@ def run(args: argparse.Namespace, *, root_parser: argparse.ArgumentParser) -> Co
     batch_dir = batch_path.parent.resolve(strict=False)
     command_lines = _prepare_batch_lines(root_parser, batch_path)
     context_value = vars(args).get("context")
+    args._protected_batch_paths = (
+        ("batch file", batch_path),
+        *_batch_input_paths(command_lines, batch_dir=batch_dir),
+    )
     reject_output_aliases(
         args.out,
         [
-            ("batch file", batch_path),
+            *args._protected_batch_paths,
             ("Nexus context", Path(context_value) if context_value is not None else None),
-            *_batch_input_paths(command_lines, batch_dir=batch_dir),
         ],
         option_label="batch --out",
     )

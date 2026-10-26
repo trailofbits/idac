@@ -54,6 +54,9 @@ def merge_parent_context(inner_args: argparse.Namespace, outer_args: argparse.Na
     protected_paths = getattr(outer_args, "_protected_context_paths", None)
     if protected_paths is not None:
         inner_args._protected_context_paths = protected_paths
+    batch_paths = getattr(outer_args, "_protected_batch_paths", None)
+    if batch_paths is not None:
+        inner_args._protected_batch_paths = batch_paths
     inner_args._wrapper_has_output = bool(
         getattr(outer_args, "out", None) or getattr(outer_args, "_wrapper_has_output", False)
     )
@@ -70,6 +73,7 @@ def reject_output_context_aliases(
     protected: list[tuple[str, Path | None]] = [
         ("selected input or database", Path(value)) for value in protected_paths
     ]
+    protected.extend(getattr(args, "_protected_batch_paths", ()))
     protected.extend(
         (f"--{key.replace('_', '-')} input", value)
         for key, value in vars(args).items()
