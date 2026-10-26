@@ -172,8 +172,12 @@ desktop session.
 
 ## Continuous integration
 
-Pull requests run lint and the no-IDA unit suite. Merge-queue runs additionally install
-each IDA version in the CI matrix and execute the complete Nexus integration suite.
+All pull requests run lint and the no-IDA unit suite. Same-repository pull requests
+also install each IDA version in the CI matrix and execute the complete Nexus
+integration suite. Fork pull requests defer these secret-backed integration jobs
+until they enter the merge queue. Integration jobs also run on manual workflow
+dispatches; merge-queue entries skip installation and integration tests when all
+changed files match the workflow's code-change exclusions.
 The matrix starts at IDA 9.4, the minimum required by Nexus. Add newer versions and
 their installer IDs as they become available. Refresh the GUI component
 with `idac setup gui` when updating Nexus, and validate changes to the resolved stack
