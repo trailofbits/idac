@@ -4123,7 +4123,7 @@ def _named_types_type_deps(
     runtime = context.runtime
     tif = runtime.get_named_type(request.name)
     kind = runtime.classify_tinfo(tif)
-    decl = _named_types_print_type_deps(runtime, tif, request.name)
+    decl = _named_types_print_type_deps(runtime, {request.name: tif})
     return _named_types_NamedTypeDepsResult(
         name=request.name,
         kind=kind,
@@ -4132,11 +4132,14 @@ def _named_types_type_deps(
     )
 
 
-def _named_types_print_type_deps(runtime: IdaRuntime, tif, name: str) -> str:
+def _named_types_print_type_deps(runtime: IdaRuntime, named_types: Mapping[str, Any]) -> str:
     ida_typeinf = runtime.mod("ida_typeinf")
-    ordinal = int(tif.get_ordinal())
-    if ordinal <= 0:
-        raise IdaOperationError(f"named type has no local ordinal: {name}")
+    ordinals: set[int] = set()
+    for name, tif in named_types.items():
+        ordinal = int(tif.get_ordinal())
+        if ordinal <= 0:
+            raise IdaOperationError(f"named type has no local ordinal: {name}")
+        ordinals.add(ordinal)
 
     class Sink(ida_typeinf.text_sink_t):
         def __init__(self) -> None:
@@ -4149,10 +4152,11 @@ def _named_types_print_type_deps(runtime: IdaRuntime, tif, name: str) -> str:
 
     sink = Sink()
     flags = ida_typeinf.PDF_INCL_DEPS | ida_typeinf.PDF_DEF_FWD
-    exported = int(ida_typeinf.print_decls(sink, tif.get_til(), [ordinal], flags))
+    til = next(iter(named_types.values())).get_til()
+    exported = int(ida_typeinf.print_decls(sink, til, sorted(ordinals), flags))
     decl = sink.text.strip()
     if exported == 0 or not decl:
-        raise IdaOperationError(f"failed to export dependencies for named type: {name}")
+        raise IdaOperationError(f"failed to export dependencies for named types: {', '.join(named_types)}")
     return decl
 
 
@@ -4888,13 +4892,15 @@ def _type_declare_test_type_declarations(runtime: IdaRuntime, decl: str, *, clan
             [chunk for chunk in chunks if not _type_declare_FORWARD_DECL_RE.match(chunk.text)]
         )
         referenced = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*", decl))
-        dependencies = []
+        dependencies = {}
         for name in sorted(referenced - declared):
             tif = ida_typeinf.tinfo_t()
             if tif.get_named_type(current, name):
-                dependencies.append(_named_types_print_type_deps(runtime, tif, name))
+                dependencies[name] = tif
         if dependencies:
-            support_decl = "\n".join(dependencies)
+            # Export the union once so shared transitive dependencies are not
+            # redeclared when multiple referenced types depend on them.
+            support_decl = _named_types_print_type_deps(runtime, dependencies)
             errors = ida_typeinf.parse_decls(
                 temporary, support_decl, None, _type_declare_parse_flags(ida_typeinf, support_decl)
             )

@@ -104,6 +104,34 @@ def test_nexus_type_check_resolves_existing_types_and_preserves_them_on_failure(
     assert run_nexus_json(idac_cmd, idac_env, database, ["type", "list", "check_wrapper"]) == []
 
 
+@pytest.mark.parametrize("clang", [False, True])
+@pytest.mark.parametrize("other_type", ["test_cli_mode", "test_cli_sibling"])
+def test_nexus_type_check_deduplicates_shared_dependencies(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    clang: bool,
+    other_type: str,
+) -> None:
+    database = copy_database(tiny_database)
+    _declare_types(idac_cmd, idac_env, database)
+    run_nexus_json(
+        idac_cmd, idac_env, database, ["type", "declare", "--decl", "struct test_cli_sibling { test_cli_mode mode; };"]
+    )
+    before = run_nexus_json(idac_cmd, idac_env, database, ["type", "list", "test_cli"])
+    args = ["type", "check", "--decl", f"struct check_wrapper {{ test_cli_record record; {other_type} other; }};"]
+    if clang:
+        args.append("--clang")
+
+    checked = run_nexus_json(idac_cmd, idac_env, database, args)
+
+    assert checked["success"] is True
+    assert checked["errors"] == 0
+    assert run_nexus_json(idac_cmd, idac_env, database, ["type", "list", "test_cli"]) == before
+    assert run_nexus_json(idac_cmd, idac_env, database, ["type", "list", "check_wrapper"]) == []
+
+
 def test_nexus_type_show_includes_members(
     idac_cmd: list[str], idac_env: dict[str, str], copy_database, tiny_database: Path
 ) -> None:
