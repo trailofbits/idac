@@ -1,0 +1,6 @@
+[
+  {"index": 5, "rename": "header_size"},
+  {"index": 6, "rename": "record_type"},
+  {"index": 7, "rename": "entry_count"},
+  {"index": 12, "rename": "parse_status"}
+]

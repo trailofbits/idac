@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from idac.ops.families.classes import _raw_vtable_dump, _vtable_members
+from idac.remote_ops import IdaRuntime
+from tests.remote_ops_harness import dispatch_with_runtime
+
+
+def _run_class_vtable(runtime, *, include_runtime: bool = False):
+    return dispatch_with_runtime(runtime, "class_vtable", {"name": "Foo", "runtime": include_runtime})
 
 
 class FakeIdaIda:
@@ -75,6 +80,10 @@ class FakeMember:
     type: FakeMemberType
     cmt: str = ""
 
+    @staticmethod
+    def is_baseclass() -> bool:
+        return False
+
 
 class FakeVtableTif:
     def __init__(self, members: list[FakeMember]) -> None:
@@ -85,14 +94,17 @@ class FakeVtableTif:
         return True
 
 
-class FakeRuntime:
+class FakeRuntime(IdaRuntime):
     def __init__(
         self,
         bits: int,
         *,
         values: dict[int, int] | None = None,
         names: dict[int, str] | None = None,
+        vtable_members: list[FakeMember] | None = None,
+        runtime_identifier: str | None = None,
     ) -> None:
+        super().__init__()
         code_targets = {ea for ea, name in (names or {}).items() if name.startswith("sub_")}
         self._mods = {
             "ida_ida": FakeIdaIda(bits),
@@ -101,40 +113,12 @@ class FakeRuntime:
             "ida_name": FakeIdaName(names or {}),
             "ida_typeinf": FakeIdaTypeinf(),
         }
+        self._class_tif = object()
+        self._vtable_tif = FakeVtableTif(vtable_members or [])
+        self._runtime_identifier = runtime_identifier
 
     def mod(self, name: str) -> Any:
         return self._mods[name]
-
-    @staticmethod
-    def member_has(member, attr: str) -> bool:
-        return bool(getattr(member, attr, lambda: False)())
-
-    def udt_members(self, tif):
-        udt = self.mod("ida_typeinf").udt_type_data_t()
-        return udt if tif.get_udt_details(udt) else ()
-
-    def pointer_size(self) -> int:
-        ida_ida = self.mod("ida_ida")
-        if ida_ida.inf_is_64bit():
-            return 8
-        if ida_ida.inf_is_32bit_exactly():
-            return 4
-        return 2
-
-    def pointer_bits(self) -> int:
-        return self.pointer_size() * 8
-
-    def read_pointer(self, ea: int) -> int:
-        ida_bytes = self.mod("ida_bytes")
-        width = self.pointer_size()
-        if width == 8:
-            return int(ida_bytes.get_qword(ea))
-        if width == 4:
-            return int(ida_bytes.get_wide_dword(ea))
-        return int(ida_bytes.get_wide_word(ea))
-
-    def vtable_slot(self, offset_bits: int) -> int:
-        return int(offset_bits) // self.pointer_bits()
 
     def resolve_address(self, identifier: str) -> int:
         return int(identifier, 0)
@@ -143,28 +127,38 @@ class FakeRuntime:
         return name if name else None
 
     def tinfo_decl(self, tif, *, name=None, multi=True) -> str:
-        return tif.dstr()
+        del name, multi
+        return tif.dstr() if hasattr(tif, "dstr") else "struct Foo_vtbl;"
 
     def get_named_type(self, name: str):
-        raise AssertionError(f"unexpected type lookup: {name}")
+        assert name == "Foo_vtbl"
+        return self._vtable_tif
 
     def find_named_type(self, name: str):
-        return None
+        return self._class_tif if name == "Foo" else None
+
+    def is_class_tinfo(self, tif) -> bool:
+        return tif is self._class_tif
+
+    def class_vtable_type_name(self, _tif) -> str:
+        return "Foo_vtbl"
+
+    def class_runtime_vtable_identifier(self, _tif, *, name: str | None = None) -> str | None:
+        return self._runtime_identifier
 
 
 def test_vtable_members_use_pointer_width_for_slot_numbers() -> None:
-    runtime = FakeRuntime(32)
-    tif = FakeVtableTif(
-        [
+    runtime = FakeRuntime(
+        32,
+        vtable_members=[
             FakeMember(offset=0, name="scalar_del", type=FakeMemberType("void (*)()")),
             FakeMember(offset=32, name="vector_del", type=FakeMemberType("void (*)()")),
-        ]
+        ],
     )
 
-    members = _vtable_members(runtime, tif)
+    payload = _run_class_vtable(runtime)
 
-    assert runtime.pointer_bits() == 32
-    assert [member["slot"] for member in members] == [0, 1]
+    assert [member["slot"] for member in payload["members"]] == [0, 1]
 
 
 def test_raw_vtable_dump_reads_32bit_entries_with_4byte_stride() -> None:
@@ -183,9 +177,10 @@ def test_raw_vtable_dump_reads_32bit_entries_with_4byte_stride() -> None:
             0x3000: "sub_3000",
             0x4000: "sub_4000",
         },
+        runtime_identifier="0x1000",
     )
 
-    payload = _raw_vtable_dump(runtime, "0x1000", slot_limit=4)
+    payload = _run_class_vtable(runtime, include_runtime=True)["runtime_vtable"]
 
     assert payload["abi"] == "itanium"
     assert payload["slot_address"] == "0x1008"
@@ -213,9 +208,10 @@ def test_raw_vtable_dump_stops_before_adjacent_rtti_symbol() -> None:
             0x4000: "sub_4000",
             0x5000: "__ZTI3Bar",
         },
+        runtime_identifier="0x1000",
     )
 
-    payload = _raw_vtable_dump(runtime, "0x1000", slot_limit=4)
+    payload = _run_class_vtable(runtime, include_runtime=True)["runtime_vtable"]
 
     assert payload["abi"] == "itanium"
     assert payload["slot_count"] == 2

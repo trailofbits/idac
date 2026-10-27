@@ -6,7 +6,7 @@ Current committed fixture artifacts are Mach-O ARM64 binaries and `.i64` databas
 
 ### `tiny`
 
-Small C fixture used for lightweight CLI, transport, and backend checks.
+Small C fixture used for lightweight CLI and Nexus integration checks.
 
 - source: `src/tiny.c`
 - build helper: `scripts/build_tiny.sh`

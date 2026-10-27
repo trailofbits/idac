@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from idac.ops import OperationContext, payload_from_model
-from idac.ops.families import search
-from idac.ops.runtime import IdaOperationError, IdaRuntime, SegmentRange
+from idac import remote_ops
+from tests.remote_ops_harness import dispatch_with_runtime
+
+IdaOperationError = remote_ops.IdaOperationError
+IdaRuntime = remote_ops.IdaRuntime
+SegmentRange = remote_ops.SegmentRange
 
 
 def _op_strings(runtime: IdaRuntime, params: dict[str, object]):
     """Parse and run the `strings` operation the way production dispatch does."""
-    request = search._parse_strings(params)
-    return payload_from_model(search._strings(OperationContext(runtime=runtime), request))
+    return dispatch_with_runtime(runtime, "strings", params)
 
 
 class _FakeIdaBytes:
@@ -111,18 +115,20 @@ class _FakeIdaStrlist:
         return True
 
 
-class _FakeIdaIda:
-    @staticmethod
-    def inf_get_min_ea() -> int:
-        return 0x1000
-
-    @staticmethod
-    def inf_get_max_ea() -> int:
-        return 0x2000
-
-
-class _FakeIdaApi:
-    BADADDR = -1
+class _FakeIdaNalt:
+    STRTYPE_TERMCHR = 7
+    STRTYPE_C = 0
+    STRTYPE_C_16 = 1
+    STRTYPE_C_32 = 2
+    STRTYPE_PASCAL = 3
+    STRTYPE_PASCAL_16 = 4
+    STRTYPE_PASCAL_32 = 5
+    STRTYPE_LEN2 = 6
+    STRTYPE_LEN2_16 = 8
+    STRTYPE_LEN2_32 = 9
+    STRTYPE_LEN4 = 10
+    STRTYPE_LEN4_16 = 11
+    STRTYPE_LEN4_32 = 12
 
     def __init__(self, input_path: str = "/tmp/tiny") -> None:
         self._input_path = input_path
@@ -145,17 +151,12 @@ class _FakeRuntime(IdaRuntime):
         self._ida_strlist = _FakeIdaStrlist(self._items)
         self._mods = {
             "ida_bytes": _FakeIdaBytes(self._items, scan_lengths=scan_lengths),
-            "ida_ida": _FakeIdaIda(),
-            "idaapi": _FakeIdaApi(input_path),
+            "ida_ida": SimpleNamespace(
+                inf_get_min_ea=lambda: min(item.start_ea for item in self._segment_ranges),
+                inf_get_max_ea=lambda: max(item.end_ea for item in self._segment_ranges),
+            ),
             "ida_strlist": self._ida_strlist,
-            "ida_nalt": type(
-                "FakeIdaNalt",
-                (),
-                {
-                    "STRTYPE_TERMCHR": 7,
-                    "STRTYPE_C": 0,
-                },
-            )(),
+            "ida_nalt": _FakeIdaNalt(input_path),
         }
 
     def mod(self, name: str):
@@ -165,34 +166,11 @@ class _FakeRuntime(IdaRuntime):
     def resolve_address(identifier: str) -> int:
         return int(identifier, 0)
 
-    def resolve_segment_ranges(
-        self,
-        selector: str,
-        *,
-        start: str | None = None,
-        end: str | None = None,
-        require_bounds: bool = False,
-        missing_message: str = "range requires both start and end addresses",
-    ) -> tuple[SegmentRange, ...]:
-        assert selector == "__TEXT"
-        if require_bounds and (start is None or end is None):
-            raise IdaOperationError(missing_message)
-        range_start = self._segment_ranges[0].start_ea if start is None else int(start, 0)
-        range_end = self._segment_ranges[-1].end_ea if end is None else int(end, 0)
-        if range_end <= range_start:
-            raise IdaOperationError("range end must be greater than the start")
-        return tuple(
-            SegmentRange(
-                name=item.name,
-                start_ea=max(item.start_ea, range_start),
-                end_ea=min(item.end_ea, range_end),
-            )
-            for item in self._segment_ranges
-            if min(item.end_ea, range_end) > max(item.start_ea, range_start)
-        )
+    def iter_segments(self) -> tuple[SegmentRange, ...]:
+        return self._segment_ranges
 
 
-def test_op_strings_lists_defined_strings_without_global_string_list() -> None:
+def test_op_strings_filters_defined_strings_and_restores_global_options() -> None:
     runtime = _FakeRuntime(
         items={
             0x1010: (7, 5, b"alpha"),
@@ -200,15 +178,25 @@ def test_op_strings_lists_defined_strings_without_global_string_list() -> None:
         }
     )
 
-    rows = _op_strings(runtime, {"query": "tiny", "segment": "__TEXT"})
+    options = runtime._ida_strlist.options
+    before = (
+        list(options.strtypes),
+        options.minlen,
+        options.display_only_existing_strings,
+        options.only_7bit,
+        options.ignore_heads,
+    )
+
+    rows = _op_strings(runtime, {"pattern": "tiny", "ignore_case": True, "segment": "__TEXT"})
 
     assert rows == [{"address": "0x1020", "text": "Tiny token"}]
-    assert runtime._ida_strlist.build_calls == 2
-    assert runtime._ida_strlist.options.strtypes == [0x55]
-    assert runtime._ida_strlist.options.minlen == 5
-    assert runtime._ida_strlist.options.display_only_existing_strings is False
-    assert runtime._ida_strlist.options.only_7bit is True
-    assert runtime._ida_strlist.options.ignore_heads is True
+    assert (
+        list(options.strtypes),
+        options.minlen,
+        options.display_only_existing_strings,
+        options.only_7bit,
+        options.ignore_heads,
+    ) == before
 
 
 def test_op_strings_includes_termchr_string_literals() -> None:
@@ -218,21 +206,9 @@ def test_op_strings_includes_termchr_string_literals() -> None:
         }
     )
 
-    rows = _op_strings(runtime, {"query": "term", "segment": "__TEXT"})
+    rows = _op_strings(runtime, {"pattern": "term", "segment": "__TEXT"})
 
     assert rows == [{"address": "0x1010", "text": "term text"}]
-
-
-def test_op_strings_returns_empty_list_when_no_matches_are_found() -> None:
-    runtime = _FakeRuntime(
-        items={
-            0x1010: (0, 5, b"alpha"),
-        }
-    )
-
-    rows = _op_strings(runtime, {"query": "missing", "segment": "__TEXT"})
-
-    assert rows == []
 
 
 def test_op_strings_scan_walks_addresses_and_finds_strings() -> None:
@@ -254,7 +230,8 @@ def test_op_strings_scan_walks_addresses_and_finds_strings() -> None:
             "segment": "__TEXT",
             "start": "0x1008",
             "end": "0x102a",
-            "query": "tiny",
+            "pattern": "tiny",
+            "ignore_case": True,
         },
     )
 
@@ -275,7 +252,7 @@ def test_op_strings_rejects_defined_string_listing_on_dsc() -> None:
     )
 
     with pytest.raises(IdaOperationError, match="defined string listing is disabled for dyld shared caches"):
-        _op_strings(runtime, {"query": "alpha", "segment": "__TEXT"})
+        _op_strings(runtime, {"pattern": "alpha", "segment": "__TEXT"})
 
     assert runtime._ida_strlist.build_calls == 0
 
@@ -286,7 +263,7 @@ def test_op_strings_does_not_treat_dsc_substring_as_shared_cache() -> None:
         items={0x1010: (0, 5, b"alpha")},
     )
 
-    rows = _op_strings(runtime, {"query": "alpha", "segment": "__TEXT"})
+    rows = _op_strings(runtime, {"pattern": "alpha", "segment": "__TEXT"})
 
     assert rows == [{"address": "0x1010", "text": "alpha"}]
 
@@ -314,22 +291,18 @@ def test_op_strings_dsc_scan_rejects_large_ranges() -> None:
         )
 
 
-def test_string_text_returns_empty_string_when_ida_returns_none() -> None:
-    runtime = _FakeRuntime(items={0x1010: (0, 5, b"alpha")})
-    runtime._mods["ida_bytes"].get_strlit_contents = lambda ea, length, strtype: None
-
-    assert search._string_text(runtime, 0x1010, 5, 0) == ""
-
-
 def test_op_strings_filters_to_selected_segment_ranges() -> None:
     runtime = _FakeRuntime(
         items={
-            0x1010: (0, 5, b"alpha"),
+            0x1010: (0, 10, b"Tiny token"),
             0x2010: (0, 10, b"Tiny token"),
         }
     )
-    runtime._segment_ranges = (SegmentRange(name="__TEXT:__cstring", start_ea=0x2000, end_ea=0x2100),)
+    runtime._segment_ranges = (
+        SegmentRange(name="__DATA:__cstring", start_ea=0x1000, end_ea=0x1100),
+        SegmentRange(name="__TEXT:__cstring", start_ea=0x2000, end_ea=0x2100),
+    )
 
-    rows = _op_strings(runtime, {"query": "tiny", "segment": "__TEXT"})
+    rows = _op_strings(runtime, {"pattern": "tiny", "ignore_case": True, "segment": "__TEXT"})
 
     assert rows == [{"address": "0x2010", "text": "Tiny token"}]

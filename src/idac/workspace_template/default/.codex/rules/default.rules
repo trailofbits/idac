@@ -1,11 +1,11 @@
 prefix_rule(
-    pattern = ["idac"],
+    pattern = ["idac", "database", "open"],
     decision = "allow",
-    justification = "Auto-approve idac CLI and all subcommands",
+    justification = "Launch the persistent IDA host outside the per-command sandbox",
 )
 
 prefix_rule(
-    pattern = ["uv", "run", "idac"],
+    pattern = ["uv", "run", "idac", "database", "open"],
     decision = "allow",
-    justification = "Auto-approve uv run idac",
+    justification = "Launch the persistent IDA host outside the per-command sandbox",
 )

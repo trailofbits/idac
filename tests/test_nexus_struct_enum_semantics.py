@@ -1,0 +1,396 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from tests.helpers import preview_round_trip, run_nexus, run_nexus_json
+
+MUTABLE_STRUCT_DECL = "typedef struct test_cli_mutable {} test_cli_mutable;"
+ENUM_DECL = "typedef enum test_cli_enum { CLI_ENUM_A = 0 } test_cli_enum;"
+
+
+def _member_names(payload: object) -> set[str]:
+    assert isinstance(payload, dict)
+    return {member["name"] for member in payload.get("members", []) if isinstance(member, dict) and member.get("name")}
+
+
+def _assert_preview_result(result: dict[str, object], expected_before: object) -> None:
+    preview = result["preview"]
+    assert isinstance(preview, dict)
+    assert result["after_preview"] == expected_before
+
+
+def test_struct_field_mutations_preview_then_persist_round_trip(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    declared = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "declare",
+        "--decl",
+        MUTABLE_STRUCT_DECL,
+    )
+    before = run_nexus_json(idac_cmd, idac_env, database, "type", "struct", "show", "test_cli_mutable")
+
+    set_result = preview_round_trip(
+        idac_cmd,
+        idac_env,
+        database,
+        tmp_path,
+        read_args=["type", "struct", "show", "test_cli_mutable"],
+        persist_args=[
+            "type",
+            "struct",
+            "field",
+            "set",
+            "test_cli_mutable",
+            "count",
+            "--offset",
+            "0",
+            "--decl",
+            "int count;",
+        ],
+    )
+    rename_result = preview_round_trip(
+        idac_cmd,
+        idac_env,
+        database,
+        tmp_path,
+        read_args=["type", "struct", "show", "test_cli_mutable"],
+        persist_args=["type", "struct", "field", "rename", "test_cli_mutable", "count", "total"],
+    )
+    delete_result = preview_round_trip(
+        idac_cmd,
+        idac_env,
+        database,
+        tmp_path,
+        read_args=["type", "struct", "show", "test_cli_mutable"],
+        persist_args=["type", "struct", "field", "delete", "test_cli_mutable", "total"],
+    )
+
+    assert isinstance(declared, dict)
+    assert declared["success"] is True
+    assert isinstance(before, dict)
+    assert before["name"] == "test_cli_mutable"
+    assert before["kind"] == "struct"
+    assert before["members"] == []
+    assert before["layout"].startswith(("struct test_cli_mutable", "struct __cppobj test_cli_mutable"))
+
+    _assert_preview_result(set_result, before)
+    assert set_result["preview"]["before"] == before
+    assert _member_names(set_result["preview"]["after"]) == {"count"}
+    assert _member_names(set_result["persisted"]) == {"count"}
+    assert _member_names(set_result["after_persist"]) == {"count"}
+
+    _assert_preview_result(rename_result, set_result["after_persist"])
+    assert _member_names(rename_result["preview"]["after"]) == {"total"}
+    assert _member_names(rename_result["after_preview"]) == {"count"}
+    assert _member_names(rename_result["persisted"]) == {"total"}
+    assert _member_names(rename_result["after_persist"]) == {"total"}
+
+    _assert_preview_result(delete_result, rename_result["after_persist"])
+    assert _member_names(delete_result["preview"]["after"]) == set()
+    assert _member_names(delete_result["after_preview"]) == {"total"}
+    assert _member_names(delete_result["persisted"]) == set()
+    assert isinstance(delete_result["after_persist"], dict)
+    assert delete_result["after_persist"]["members"] == []
+    assert delete_result["after_persist"]["layout"].startswith(
+        ("struct test_cli_mutable", "struct __cppobj test_cli_mutable")
+    )
+
+
+def test_enum_member_mutations_preview_then_persist_round_trip(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    declared = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "declare",
+        "--decl",
+        ENUM_DECL,
+    )
+    before = run_nexus_json(idac_cmd, idac_env, database, "type", "enum", "show", "test_cli_enum")
+
+    set_result = preview_round_trip(
+        idac_cmd,
+        idac_env,
+        database,
+        tmp_path,
+        read_args=["type", "enum", "show", "test_cli_enum"],
+        persist_args=[
+            "type",
+            "enum",
+            "member",
+            "set",
+            "test_cli_enum",
+            "CLI_ENUM_B",
+            "--value",
+            "1",
+            "--mask",
+            "0",
+        ],
+    )
+    rename_result = preview_round_trip(
+        idac_cmd,
+        idac_env,
+        database,
+        tmp_path,
+        read_args=["type", "enum", "show", "test_cli_enum"],
+        persist_args=[
+            "type",
+            "enum",
+            "member",
+            "rename",
+            "test_cli_enum",
+            "CLI_ENUM_B",
+            "CLI_ENUM_ALT",
+        ],
+    )
+    delete_result = preview_round_trip(
+        idac_cmd,
+        idac_env,
+        database,
+        tmp_path,
+        read_args=["type", "enum", "show", "test_cli_enum"],
+        persist_args=["type", "enum", "member", "delete", "test_cli_enum", "CLI_ENUM_ALT"],
+    )
+
+    assert isinstance(declared, dict)
+    assert declared["success"] is True
+    assert _member_names(before) == {"CLI_ENUM_A"}
+
+    _assert_preview_result(set_result, before)
+    assert _member_names(set_result["preview"]["after"]) == {"CLI_ENUM_A", "CLI_ENUM_B"}
+    assert _member_names(set_result["persisted"]) == {"CLI_ENUM_A", "CLI_ENUM_B"}
+    assert _member_names(set_result["after_persist"]) == {"CLI_ENUM_A", "CLI_ENUM_B"}
+
+    _assert_preview_result(rename_result, set_result["after_persist"])
+    assert _member_names(rename_result["preview"]["after"]) == {"CLI_ENUM_A", "CLI_ENUM_ALT"}
+    assert _member_names(rename_result["after_preview"]) == {"CLI_ENUM_A", "CLI_ENUM_B"}
+    assert _member_names(rename_result["persisted"]) == {"CLI_ENUM_A", "CLI_ENUM_ALT"}
+    assert _member_names(rename_result["after_persist"]) == {"CLI_ENUM_A", "CLI_ENUM_ALT"}
+
+    _assert_preview_result(delete_result, rename_result["after_persist"])
+    assert _member_names(delete_result["preview"]["after"]) == {"CLI_ENUM_A"}
+    assert _member_names(delete_result["after_preview"]) == {"CLI_ENUM_A", "CLI_ENUM_ALT"}
+    assert _member_names(delete_result["persisted"]) == {"CLI_ENUM_A"}
+    assert _member_names(delete_result["after_persist"]) == {"CLI_ENUM_A"}
+
+
+def test_union_field_set_updates_by_name_and_preserves_other_members(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+    tmp_path: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    declared = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "declare",
+        "--decl",
+        "union test_cli_union { int first; float second; };",
+    )
+    assert declared["success"] is True
+
+    for field_name, declaration, expected_sizes in (
+        ("second", "double second;", {"first": 4, "second": 8}),
+        ("third", "short third;", {"first": 4, "second": 8, "third": 2}),
+    ):
+        result = preview_round_trip(
+            idac_cmd,
+            idac_env,
+            database,
+            tmp_path,
+            read_args=["type", "struct", "show", "test_cli_union"],
+            persist_args=[
+                "type",
+                "struct",
+                "field",
+                "set",
+                "test_cli_union",
+                field_name,
+                "--offset",
+                "0",
+                "--decl",
+                declaration,
+            ],
+        )
+        _assert_preview_result(result, result["before"])
+        for payload in (result["preview"]["after"], result["persisted"], result["after_persist"]):
+            assert payload["kind"] == "union"
+            members = {member["name"]: member for member in payload["members"]}
+            assert {name: member["size"] for name, member in members.items()} == expected_sizes
+            assert all(member["offset"] == 0 for member in members.values())
+
+
+def test_struct_field_set_replaces_member_at_requested_offset(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "declare",
+        "--decl",
+        "struct test_cli_offset { int first; int second; };",
+    )
+    run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "struct",
+        "field",
+        "set",
+        "test_cli_offset",
+        "renamed",
+        "--offset",
+        "4",
+        "--decl",
+        "float renamed;",
+    )
+    payload = run_nexus_json(idac_cmd, idac_env, database, "type", "struct", "show", "test_cli_offset")
+    members = {member["name"]: member for member in payload["members"]}
+    assert set(members) == {"first", "renamed"}
+    assert members["first"]["offset"] == 0
+    assert members["first"]["size"] == 4
+    assert members["renamed"]["offset"] == 4
+    assert members["renamed"]["size"] == 4
+    assert "float" in members["renamed"]["type"]
+
+
+def test_enum_member_set_uses_sdk_default_mask_when_unspecified(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    declared = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "declare",
+        "--decl",
+        ENUM_DECL,
+    )
+    payload = run_nexus_json(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "enum",
+        "member",
+        "set",
+        "test_cli_enum",
+        "CLI_ENUM_B",
+        "--value",
+        "1",
+    )
+    members = {member.get("name") for member in payload.get("members") or [] if isinstance(member, dict)}
+    assert isinstance(declared, dict)
+    assert declared["success"] is True
+    assert {"CLI_ENUM_A", "CLI_ENUM_B"} <= members
+
+
+def test_struct_field_delete_reports_missing_member(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    run_nexus_json(idac_cmd, idac_env, database, "type", "declare", "--decl", MUTABLE_STRUCT_DECL)
+
+    proc = run_nexus(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "struct",
+        "field",
+        "delete",
+        "test_cli_mutable",
+        "missing_field",
+    )
+
+    assert proc.returncode == 1
+    assert "struct field not found: test_cli_mutable.missing_field" in proc.stderr
+
+
+def test_struct_field_set_reports_unknown_type(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    run_nexus_json(idac_cmd, idac_env, database, "type", "declare", "--decl", MUTABLE_STRUCT_DECL)
+
+    proc = run_nexus(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "struct",
+        "field",
+        "set",
+        "test_cli_mutable",
+        "count",
+        "--offset",
+        "0",
+        "--decl",
+        "MissingType count;",
+        use_json=True,
+    )
+
+    assert proc.returncode == 1
+    assert "failed to parse member type: MissingType count;" in proc.stderr
+
+
+def test_enum_member_delete_reports_missing_member(
+    idac_cmd: list[str],
+    idac_env: dict[str, str],
+    copy_database,
+    tiny_database: Path,
+) -> None:
+    database = copy_database(tiny_database)
+    run_nexus_json(idac_cmd, idac_env, database, "type", "declare", "--decl", ENUM_DECL)
+
+    proc = run_nexus(
+        idac_cmd,
+        idac_env,
+        database,
+        "type",
+        "enum",
+        "member",
+        "delete",
+        "test_cli_enum",
+        "CLI_ENUM_MISSING",
+    )
+
+    assert proc.returncode == 1
+    assert "failed to delete enum member" in proc.stderr

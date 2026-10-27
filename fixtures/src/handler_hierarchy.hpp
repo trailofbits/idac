@@ -19,8 +19,8 @@ struct Handler_Stream;
 struct LegacyGroup__Handler_Pack;
 
 struct /*VFT*/ Worker_vtbl {
-  void (__fastcall *dtor)(Worker *__hidden this);
-  int (__fastcall *decode)(Worker *__hidden this);
+  void (__fastcall *dtor)(Worker *__hidden self);
+  int (__fastcall *decode)(Worker *__hidden self);
 };
 
 struct __cppobj Worker {
@@ -28,17 +28,17 @@ struct __cppobj Worker {
 };
 
 struct /*VFT*/ Handler_vtbl {
-  void (__fastcall *dtor)(Handler *__hidden this);
-  bool (__fastcall *acceptBuffer)(Handler *__hidden this, const unsigned char *bytes, u64 length, const char *category, u32 options);
-  int (__fastcall *computeCount)(Handler *__hidden this, int session, int dict, int *status, u32 *count);
+  void (__fastcall *dtor)(Handler *__hidden self);
+  bool (__fastcall *acceptBuffer)(Handler *__hidden self, const unsigned char *bytes, u64 length, const char *category, u32 options);
+  int (__fastcall *computeCount)(Handler *__hidden self, int session, int dict, int *status, u32 *count);
   int (__fastcall *refreshState)(
-      Handler *__hidden this, int session, HandlerState *state, int primary, int secondary, int tertiary, int *status);
-  bool (__fastcall *compareFlags)(Handler *__hidden this, u32 lhs, u32 rhs);
-  Worker *(__fastcall *createWorker1)(Handler *__hidden this, const WorkerInitData *init_data);
-  Worker *(__fastcall *createWorker2)(Handler *__hidden this, int plus, u64 a3, u64 a4);
-  bool (__fastcall *hasCustomCountProc)(const Handler *__hidden this);
-  bool (__fastcall *hasCustomStateProc)(const Handler *__hidden this);
-  bool (__fastcall *hasCustomFlagProc)(const Handler *__hidden this);
+      Handler *__hidden self, int session, HandlerState *state, int primary, int secondary, int tertiary, int *status);
+  bool (__fastcall *compareFlags)(Handler *__hidden self, u32 lhs, u32 rhs);
+  Worker *(__fastcall *createWorker1)(Handler *__hidden self, const WorkerInitData *init_data);
+  Worker *(__fastcall *createWorker2)(Handler *__hidden self, int plus, u64 a3, u64 a4);
+  bool (__fastcall *hasCustomCountProc)(const Handler *__hidden self);
+  bool (__fastcall *hasCustomStateProc)(const Handler *__hidden self);
+  bool (__fastcall *hasCustomFlagProc)(const Handler *__hidden self);
 };
 
 struct __cppobj Handler {

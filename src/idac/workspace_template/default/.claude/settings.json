@@ -6,10 +6,5 @@
       "Bash(uv run idac)",
       "Bash(uv run idac:*)"
     ]
-  },
-  "sandbox": {
-    "network": {
-      "allowAllUnixSockets": true
-    }
   }
 }

@@ -1,0 +1,9 @@
+# Generic local rename commit pass
+#
+# Run only after rename-preview.idac has completed against the same target and you have
+# inspected its full before/after local lists. Then run:
+#   idac batch rename-pass.idac --lint --out /tmp/rename-pass.lint.json
+#   idac batch rename-pass.idac --fail-fast --out /tmp/rename-pass.json
+# Stop on the first miss, refresh locals, and recalibrate before retrying.
+
+function locals apply 0x100000000 --json-file "locals-plan.json"

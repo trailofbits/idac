@@ -9,5 +9,4 @@ default_permissions = "workspace"
 
 [permissions.workspace.network]
 enabled = true
-dangerously_allow_all_unix_sockets = true
 allow_local_binding = true
