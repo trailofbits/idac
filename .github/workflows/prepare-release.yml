@@ -34,7 +34,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: false
 
@@ -60,7 +60,7 @@ jobs:
           echo "PREVIOUS_TAG=$(printf '%s\n' "$release_tags" | sort -V | tail -1)" >> "$GITHUB_ENV"
 
       - name: Write changelog entry
-        uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1.12
+        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # v1.13
         with:
           openai-api-key: ${{ secrets.OPENAI_CODEX_API_KEY }}
           permission-profile: ":workspace"
