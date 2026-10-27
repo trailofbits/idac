@@ -111,22 +111,22 @@ There is also a smaller `tiny` fixture used for lighter database/backend checks.
 
 ## IDA User Dir Isolation
 
-When running fixture-generation commands or any test flow that opens IDA or `idat`, do not rely on the live `~/.idapro` directory.
+Choose the IDA user directory according to what the workflow verifies.
 
-Reason:
+### Fixture generation and headless verification
 
-- globally installed IDA plugins can import local packages or otherwise change batch behavior while the checkout is mid-change
-- fixture regeneration should not depend on whatever plugins happen to be installed globally
-- tests and fixture refreshes should not mutate the user's real IDA profile
+Use an isolated `IDAUSR` for fixture generation and headless verification that
+opens IDA or `idat`. Preserve license/config files but omit globally installed
+plugins. This keeps fixture outputs reproducible and prevents installed plugins
+from interfering with the checkout under verification or modifying the user's
+real IDA profile.
 
-Use an isolated `IDAUSR` that keeps the license/config files but omits `plugins/`.
-
-### Temporary isolated `IDAUSR`
-
-Run from the repo root:
+Create one isolated directory per workflow in an appropriate temporary location
+and reuse it across commands, including discovery, attachment, and shutdown.
+A fresh directory is not required for each command. For example:
 
 ```bash
-tmpdir=$(mktemp -d /tmp/idac-test-idapro.XXXXXX)
+tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/idac-idapro.XXXXXX")
 cp ~/.idapro/ida.reg "$tmpdir"/
 cp ~/.idapro/ida-config.json "$tmpdir"/ 2>/dev/null || true
 cp ~/.idapro/idapro_*.hexlic "$tmpdir"/ 2>/dev/null || true
@@ -134,7 +134,28 @@ mkdir -p "$tmpdir/plugins"
 export IDAUSR="$tmpdir"
 ```
 
-This preserves the license/config that `idat` needs, while ensuring no globally installed plugins are loaded.
+Close workers before removing the isolated directory.
+
+### Live GUI and Nexus plugin verification
+
+When verifying the installed Nexus GUI plugin, use the IDA user directory that
+contains the plugin being verified. This is normally `~/.idapro`, unless the GUI
+was launched with another `IDAUSR`.
+
+Attach to the running GUI through its exact READY Nexus record. Use the same
+Nexus state directory for CLI discovery and attachment. Setting `IDAUSR` in the
+CLI environment does not change the running GUI's profile.
+
+Read-only checks may use an existing GUI database. For mutation checks, use a
+disposable database opened in the GUI.
+
+Do not install, remove, or modify plugins in the real IDA user directory unless
+the user explicitly requests installation or repair.
+
+### Scope of verification
+
+Headless verification does not establish that the GUI plugin works. Report which
+mode was exercised. Normal tests that do not open IDA need no isolated `IDAUSR`.
 
 ## Fixture Regeneration Workflow
 
@@ -156,7 +177,9 @@ If `idat` logs show plugin import errors, rerun with an isolated `IDAUSR` before
 
 ## Test Guidance
 
-Normal repo tests can run without `IDAUSR`, but keep the isolated directory exported when you are doing fixture refreshes or any workflow that may spawn `idat`.
+Follow IDA User Dir Isolation above: use an isolated `IDAUSR` for fixture refreshes
+and headless verification, and the GUI's existing profile for live GUI plugin
+verification. Tests that do not open IDA need no isolated `IDAUSR`.
 
 Test durable behavior, not implementation shape. Prefer public CLI/API results, persisted
 state, wire contracts, and required lifecycle or safety invariants. Do not assert private
