@@ -49,9 +49,12 @@ jobs:
 
   test:
     name: Test (IDA ${{ matrix.ida-version }})
-    # Repository writers can already use Actions secrets. Fork PRs remain
-    # untrusted and run these tests only after entering the merge queue.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Fork and Dependabot PRs run without Actions secrets. Run their IDA
+    # tests only after entering the merge queue.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
