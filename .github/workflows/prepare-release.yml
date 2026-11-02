@@ -17,7 +17,9 @@ concurrency:
 jobs:
   prepare:
     name: Create release branch
-    runs-on: ubuntu-latest
+    # codex-action's drop-sudo setup fails on the Ubuntu 26.04 runner image.
+    # See https://github.com/openai/codex-action/issues/188.
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       pull-requests: write
